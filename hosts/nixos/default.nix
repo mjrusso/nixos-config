@@ -58,7 +58,7 @@ let user = "%USER%";
     fish.enable = true;
   };
 
-  services = { 
+  services = {
     xserver = {
       enable = true;
 
