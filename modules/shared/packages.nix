@@ -8,24 +8,17 @@ with pkgs; [
   bash-completion
   bat
   btop
+  curl
   coreutils
+  docker
+  docker-compose
   killall
+  kitty
   neofetch
   openssh
   sqlite
   wget
   zip
-
-  # Encryption and security tools
-  age
-  age-plugin-yubikey
-  gnupg
-  libfido2
-  pinentry
-
-  # Cloud-related tools and SDKs
-  docker
-  docker-compose
 
   # Media-related packages
   emacs-all-the-icons-fonts
@@ -38,11 +31,6 @@ with pkgs; [
   noto-fonts-emoji
   meslo-lgs-nf
 
-  # Node.js development tools
-  nodePackages.npm # globally install npm
-  nodePackages.prettier
-  nodejs
-
   # Text and terminal utilities
   htop
   hunspell
@@ -54,9 +42,4 @@ with pkgs; [
   tmux
   unrar
   unzip
-  zsh-powerlevel10k
-
-  # Python packages
-  python39
-  python39Packages.virtualenv # globally install virtualenv
 ]
