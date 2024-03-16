@@ -162,7 +162,23 @@ let name = "%NAME%";
 
   git = {
     enable = true;
-    ignores = [ "*.swp" ];
+    ignores = [
+      "*.swp"
+       "__private/"
+       ".DS_Store"
+       ".svn"
+       ".projectile"
+       ".dir-locals.el"
+       ".envrc"
+       "*~"
+       "*.swp"
+       "*~.nib"
+       "*.pbxuser"
+       "*.perspective"
+       "*.perspectivev3"
+       "*.mode1v3"
+       "*.tm_build_errors"
+    ];
     userName = name;
     userEmail = email;
     lfs = {
