@@ -211,9 +211,18 @@ let name = "%NAME%";
     };
     extraConfig = {
       init.defaultBranch = "main";
-      core = { 
-	    editor = "vim";
+      core = {
+        editor = "emacs";
         autocrlf = "input";
+      };
+      push = {
+        default = "current";
+      };
+      color = {
+        ui = "auto";
+        diff = "auto";
+        status = "auto";
+        branch = "auto";
       };
       pull.rebase = true;
       rebase.autoStash = true;
