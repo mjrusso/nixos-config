@@ -5,6 +5,14 @@ let name = "%NAME%";
     email = "%EMAIL%"; in
 {
   # Shared shell configuration
+
+  # https://github.com/nix-community/nix-direnv
+  direnv = {
+    enable = true;
+    enableFishIntegration = true;
+    nix-direnv.enable = true;
+  };
+
   fish = {
     enable = true;
 
