@@ -55,7 +55,7 @@ let user = "%USER%";
     dconf.enable = true;
 
     # My shell
-    zsh.enable = true;
+    fish.enable = true;
   };
 
   services = { 
@@ -262,7 +262,7 @@ let user = "%USER%";
         "wheel" # Enable ‘sudo’ for the user.
         "docker"
       ];
-      shell = pkgs.zsh;
+      shell = pkgs.fish;
       openssh.authorizedKeys.keys = keys;
     };
 
