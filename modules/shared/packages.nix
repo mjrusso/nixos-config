@@ -12,6 +12,7 @@ with pkgs; [
   coreutils
   docker
   docker-compose
+  fish
   killall
   kitty
   neofetch
