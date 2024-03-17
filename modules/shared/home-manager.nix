@@ -9,7 +9,6 @@ let name = "Michael Russo";
   # https://github.com/nix-community/nix-direnv
   direnv = {
     enable = true;
-    enableFishIntegration = true;
     nix-direnv.enable = true;
   };
 
