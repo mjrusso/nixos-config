@@ -17,6 +17,22 @@
         "type": "github"
       }
     },
+    "d12frosted-emacs-plus": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1710262877,
+        "narHash": "sha256-RLbkHfnnXIJjaYLhfHleSztfPmcms5k0gy3slrYp20Y=",
+        "owner": "d12frosted",
+        "repo": "homebrew-emacs-plus",
+        "rev": "d565d8ada1c2e00c3182b57ea6bc6497ebb7bdef",
+        "type": "github"
+      },
+      "original": {
+        "owner": "d12frosted",
+        "repo": "homebrew-emacs-plus",
+        "type": "github"
+      }
+    },
     "darwin": {
       "inputs": {
         "nixpkgs": [
@@ -244,6 +260,7 @@
     },
     "root": {
       "inputs": {
+        "d12frosted-emacs-plus": "d12frosted-emacs-plus",
         "darwin": "darwin",
         "disko": "disko",
         "home-manager": "home-manager",

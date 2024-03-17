@@ -5,10 +5,10 @@ _:
   # Emacs
   {
     name = "emacs-plus@30";
-    args = {
-      "with-native-comp" = true;
-      "with-no-frame-refocus" = true;
-    };
+    # args = {
+    #   "with-native-comp" = true;
+    #   "with-no-frame-refocus" = true;
+    # };
   }
 
   # Development Tools
