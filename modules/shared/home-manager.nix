@@ -104,7 +104,7 @@ let name = "Michael Russo";
              direnv reload
          end
       end
-    ''
+    '';
 
   };
 
@@ -147,7 +147,7 @@ let name = "Michael Russo";
       g   = "grep --break --heading --line-number";
       up  = "!git pull --rebase --prune $@ && git submodule update --init --recursive";
       save  = "!git add -A && git commit -m 'SAVEPOINT'";
-      wip   = "!git add -u && git commit -m "WIP"";
+      wip   = "!git add -u && git commit -m 'WIP'";
       undo  = "reset HEAD~1 --mixed";
       amend = "commit -a --amend";
       shortsha = "rev-parse --short HEAD";
