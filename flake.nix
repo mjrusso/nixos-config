@@ -23,13 +23,17 @@
       url = "github:homebrew/homebrew-cask";
       flake = false;
     };
+    d12frosted-emacs-plus = {
+      url = "github:d12frosted/homebrew-emacs-plus";
+      flake = false;
+    };
     disko = {
       url = "github:nix-community/disko";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, darwin, nix-homebrew, homebrew-bundle, homebrew-core, homebrew-cask, home-manager, nixpkgs, disko } @inputs:
+  outputs = { self, darwin, nix-homebrew, homebrew-bundle, homebrew-core, homebrew-cask, home-manager, nixpkgs, d12frosted-emacs-plus, disko } @inputs:
     let
       user = "mjrusso";
       linuxSystems = [ "x86_64-linux" "aarch64-linux" ];
@@ -91,6 +95,7 @@
                   "homebrew/homebrew-core" = homebrew-core;
                   "homebrew/homebrew-cask" = homebrew-cask;
                   "homebrew/homebrew-bundle" = homebrew-bundle;
+                  "d12frosted/emacs-plus" = d12frosted-emacs-plus;
                 };
                 mutableTaps = false;
                 autoMigrate = true;
