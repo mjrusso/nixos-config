@@ -27,7 +27,7 @@ in
     # $ mas search <app name>
     #
     masApps = {
-      "wireguard" = 1451685025;
+      # "wireguard" = 1451685025;
     };
   };
 

@@ -2,18 +2,15 @@ _:
 
 [
   # Development Tools
-  "homebrew/cask/docker"
-  "visual-studio-code"
 
   # Communication Tools
   "discord"
-  "notion"
   "slack"
-  "telegram"
   "zoom"
 
   # Utility Tools
   "syncthing"
+  "scoot"
 
   # Entertainment Tools
   "vlc"
@@ -22,5 +19,7 @@ _:
   "raycast"
 
   # Browsers
+  "firefox"
+  "arc"
   "google-chrome"
 ]
