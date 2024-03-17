@@ -39,6 +39,9 @@ let user = "mjrusso"; in
     # emacs-unstable
   ] ++ (import ../../modules/shared/packages.nix { inherit pkgs; });
 
+  # Set fish as the default shell
+  programs.fish.enable = true;
+
   # Enable fonts dir
   fonts.fontDir.enable = true;
 
