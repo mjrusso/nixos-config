@@ -1,8 +1,8 @@
 { config, pkgs, lib, ... }:
 
-let name = "%NAME%";
-    user = "%USER%";
-    email = "%EMAIL%"; in
+let name = "Michael Russo";
+    user = "mjrusso";
+    email = "mjr@mjrusso.com"; in
 {
   # Shared shell configuration
 
