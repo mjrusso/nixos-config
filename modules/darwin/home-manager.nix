@@ -17,6 +17,9 @@ in
 
   homebrew = {
     enable = true;
+    taps = [
+      "d12frosted/emacs-plus"
+    ];
     casks = pkgs.callPackage ./casks.nix {};
 
     # These app IDs are from using the mas CLI app
