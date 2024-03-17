@@ -15,25 +15,6 @@ in
     shell = pkgs.fish;
   };
 
-  homebrew = {
-    enable = true;
-    taps = [
-      "d12frosted/emacs-plus"
-    ];
-    casks = pkgs.callPackage ./casks.nix {};
-
-    # These app IDs are from using the mas CLI app
-    # mas = mac app store
-    # https://github.com/mas-cli/mas
-    #
-    # $ nix shell nixpkgs#mas
-    # $ mas search <app name>
-    #
-    masApps = {
-      # "wireguard" = 1451685025;
-    };
-  };
-
   # Enable home-manager
   home-manager = {
     useGlobalPkgs = true;
@@ -54,6 +35,5 @@ in
       manual.manpages.enable = false;
     };
   };
-
 
 }
