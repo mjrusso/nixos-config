@@ -2,6 +2,7 @@ _:
 
 [
   # Development Tools
+  "iterm2"
 
   # Communication Tools
   "discord"
