@@ -1,6 +1,7 @@
 # NixOS System Configurations
 
-Initially built from the following template: https://github.com/dustinlyons/nixos-config
+Initially built from the following template:
+https://github.com/dustinlyons/nixos-config
 
 Note that the above template uses
 [nix-homebrew](https://github.com/zhaofengli/nix-homebrew) to manage the
@@ -14,13 +15,40 @@ I'll manage Homebrew separately for now.
 
 Also see: https://github.com/mitchellh/nixos-config
 
+## Manual Setup
+
+### Fish
+
 Fish needs to be manually set as the login shell:
 
 ``` bash
-echo /run/current-system/sw/bin/fish | sudo tee -a /etc/shells
-chsh -s /run/current-system/sw/bin/fish
+echo ~/.nix-profile/bin/fish | sudo tee -a /etc/shells
+chsh -s ~/.nix-profile/bin/fish
 ```
 
-(See https://github.com/LnL7/nix-darwin/issues/811 and
-https://github.com/LnL7/nix-darwin/issues/122#issuecomment-1782971499 for more
-details and discussion.)
+See:
+
+- https://github.com/LnL7/nix-darwin/issues/811
+- https://github.com/LnL7/nix-darwin/issues/122#issuecomment-1782971499
+- https://github.com/nix-community/home-manager/issues/1226
+
+
+### Homebrew
+
+I use Homebrew for a few dependencies on Mac. (Homebrew must be manually
+installed, as per the [official installation instructions](https://brew.sh/).
+
+### Emacs
+
+On Mac, I use
+[homebrew-emacs-plus](https://github.com/d12frosted/homebrew-emacs-plus).
+
+As per the note above, Homebrew is not managed via nix-darwin, and dependencies
+must be installed manually:
+
+
+``` bash
+brew tap d12frosted/emacs-plus
+brew install emacs-plus@30 --with-native-comp
+brew install cmake libtool # needed for vterm
+```
