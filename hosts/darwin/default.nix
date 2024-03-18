@@ -60,13 +60,11 @@ let user = "mjrusso"; in
         InitialKeyRepeat = 15;
 
         "com.apple.mouse.tapBehavior" = 1;
-        "com.apple.sound.beep.volume" = 0.0;
-        "com.apple.sound.beep.feedback" = 0;
       };
 
       dock = {
-        autohide = false;
-        show-recents = false;
+        autohide = true;
+        show-recents = true;
         launchanim = true;
         orientation = "bottom";
         tilesize = 48;
@@ -78,7 +76,6 @@ let user = "mjrusso"; in
 
       trackpad = {
         Clicking = true;
-        TrackpadThreeFingerDrag = true;
       };
     };
 
