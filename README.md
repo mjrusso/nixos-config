@@ -13,3 +13,14 @@ some issues and am not using any of nix-darwin's Homebrew-related features.
 I'll manage Homebrew separately for now.
 
 Also see: https://github.com/mitchellh/nixos-config
+
+Fish needs to be manually set as the login shell:
+
+``` bash
+echo /run/current-system/sw/bin/fish | sudo tee -a /etc/shells
+chsh -s /run/current-system/sw/bin/fish
+```
+
+(See https://github.com/LnL7/nix-darwin/issues/811 and
+https://github.com/LnL7/nix-darwin/issues/122#issuecomment-1782971499 for more
+details and discussion.)
