@@ -15,8 +15,6 @@ let name = "Michael Russo";
   fish = {
     enable = true;
 
-    # Fix for broken $PATH when using Fish shell. With thanks to:
-    # https://github.com/LnL7/nix-darwin/issues/122#issuecomment-1659465635
     loginShellInit =
       let
         # This naive quoting is good enough in this case. There shouldn't be any
@@ -26,7 +24,16 @@ let name = "Michael Russo";
 
         makeBinPathList = map (path: path + "/bin");
       in ''
-      fish_add_path --move --prepend --path ${lib.concatMapStringsSep " " dquote (makeBinPathList osConfig.environment.profiles)}
+
+      # Ensure that Homebrew is in the PATH on Macs running Apple Silicon. This
+      # is a no-op if the directory doesn't exist, so it's safe to use on Intel-
+      # based Macs (or non-Macs).
+      fish_add_path --path /opt/homebrew/bin
+
+      # Fix for broken $PATH when using Fish shell. With thanks to:
+      # https://github.com/LnL7/nix-darwin/issues/122#issuecomment-1659465635
+
+      fish_add_path --move --prepend  --path ${lib.concatMapStringsSep " " dquote (makeBinPathList osConfig.environment.profiles)}
       set fish_user_paths $fish_user_paths
     '';
 
