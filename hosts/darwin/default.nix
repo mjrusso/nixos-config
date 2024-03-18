@@ -60,6 +60,7 @@ let user = "mjrusso"; in
         InitialKeyRepeat = 15;
 
         "com.apple.mouse.tapBehavior" = 1;
+        "com.apple.swipescrolldirection" = false;
       };
 
       dock = {
