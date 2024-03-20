@@ -67,20 +67,11 @@ either; I'll just manage Homebrew separately for the time being.
 
 #### Emacs
 
-On Mac, I currently use
-[homebrew-emacs-plus](https://github.com/d12frosted/homebrew-emacs-plus). **(The
-plan is to migrate to Nix-installed Emacs.)**
+Emacs is installed via Nix, but [my
+configuration](https://github.com/mjrusso/.emacs.d ~/.emacs.d) is not part of
+this repository (and not managed by home-manager).
 
-As per the note above, Homebrew is not managed via nix-darwin, and dependencies
-must be installed manually:
-
-``` bash
-brew tap d12frosted/emacs-plus
-brew install emacs-plus@30 --with-native-comp
-brew install cmake libtool # needed for vterm
-```
-
-My Emacs configuration is also not part of this repository:
+To grab my config:
 
 ``` bash
 git clone https://github.com/mjrusso/.emacs.d ~/.emacs.d

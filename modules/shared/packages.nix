@@ -44,6 +44,9 @@ with pkgs; [
   unrar
   unzip
 
+  # Custom Emacs build
+  my-emacs-with-packages
+
   # `e`: shortcut to open Emacs in the current (most recent) frame.
   (pkgs.writeShellScriptBin "e" ''
     # Quick shortcut to Emacs (opens in the current (most recently used) terminal
