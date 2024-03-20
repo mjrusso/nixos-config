@@ -77,6 +77,21 @@ To grab my config:
 git clone https://github.com/mjrusso/.emacs.d ~/.emacs.d
 ```
 
+After installing Emacs, create an alias like so:
+
+``` fish
+osascript -e "tell application \"Finder\" to make alias file to posix file \"$(readlink $HOME/.nix-profile/Applications/Emacs.app)\" at POSIX file \"/Applications\" with properties {name:\"Emacs.app\"}"
+```
+
+(The `readlink` is necessary because because Mac aliases don't work on
+symlinks, [as explained
+here](https://github.com/NixOS/nix/issues/956#issuecomment-1367457122).)
+
+There's certainly a better way to do this (automating via home-manager
+activation, among other options); see
+https://github.com/nix-community/home-manager/issues/1341 for more notes and
+discussion.
+
 Notes:
 
 - consider automating symlinking for .emacs.d (perhaps merge my [existing emacs repo](https://github.com/mjrusso/.emacs.d) into this one?)
@@ -84,7 +99,6 @@ Notes:
  - https://github.com/kenranunderscore/dotfiles/blob/310fb5694934010dbee577f5659a45a3144d3626/home-manager-modules/emacs/default.nix#L11-L17
  - https://discourse.nixos.org/t/how-to-manage-dotfiles-with-home-manager/30576
  - alternatively can I set it up this way? https://www.reddit.com/r/NixOS/comments/vj95cd/home_manager_and_separate_dotfiles_repo/
-
 
 ## Usage
 
