@@ -16,7 +16,6 @@ with pkgs; [
   killall
   kitty
   neofetch
-  openssh
   sqlite
   wget
   zip
