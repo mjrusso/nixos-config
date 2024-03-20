@@ -7,7 +7,6 @@ let
 in
 {
 
-  # It me
   users.users.${user} = {
     name = "${user}";
     home = "/Users/${user}";
@@ -22,6 +21,14 @@ in
       home = {
         enableNixpkgsReleaseCheck = false;
         packages = pkgs.callPackage ./packages.nix {};
+        sessionPath = [
+          # Ensure that Homebrew is in the PATH on Macs running Apple Silicon.
+          # (Technically we should only add this if we're on an Apple Silicon-based Mac.)
+          "/opt/homebrew/bin"
+        ];
+        sessionVariables = {
+          EDITOR = "${pkgs.my-emacs-with-packages}/bin/emacsclient";
+        };
         file = lib.mkMerge [
           sharedFiles
           additionalFiles

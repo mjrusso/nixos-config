@@ -25,11 +25,6 @@ let name = "Michael Russo";
         makeBinPathList = map (path: path + "/bin");
       in ''
 
-      # Ensure that Homebrew is in the PATH on Macs running Apple Silicon. This
-      # is a no-op if the directory doesn't exist, so it's safe to use on Intel-
-      # based Macs (or non-Macs).
-      fish_add_path --path /opt/homebrew/bin
-
       # Fix for broken $PATH when using Fish shell. With thanks to:
       # https://github.com/LnL7/nix-darwin/issues/122#issuecomment-1659465635
 
@@ -43,8 +38,6 @@ let name = "Michael Russo";
       if test -f ~/.localrc.fish
           source ~/.localrc.fish
       end
-
-      set -x EDITOR (which emacsclient)
 
       # https://fishshell.com/docs/current/cmds/fish_git_prompt.html
       # https://mariuszs.github.io/blog/2013/informative_git_prompt.html
