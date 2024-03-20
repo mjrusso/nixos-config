@@ -71,9 +71,8 @@ self: super: rec {
 
   my-emacs-with-packages =
     ((super.emacsPackagesFor my-emacs).emacsWithPackages (epkgs: [
-      # necessary to install through nix to get libenchant integration working
-      epkgs.jinx
-      # not needed on linux but needed on mac
       epkgs.vterm
+      epkgs.treesit-grammars.with-all-grammars
+      epkgs.jinx # necessary to install through nix to get libenchant integration working
     ]));
 }
