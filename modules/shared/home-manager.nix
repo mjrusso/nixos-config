@@ -132,6 +132,7 @@ let name = "Michael Russo";
        ".projectile"
        ".dir-locals.el"
        ".envrc"
+       ".direnv/"
        "*~"
        "*.swp"
        "*~.nib"
