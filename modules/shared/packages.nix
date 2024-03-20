@@ -3,8 +3,6 @@
 with pkgs; [
   # General packages for development and system management
   alacritty
-  aspell
-  aspellDicts.en
   bash-completion
   bat
   btop
@@ -19,6 +17,10 @@ with pkgs; [
   sqlite
   wget
   zip
+
+  # Dictionary
+  # https://emacs.stackexchange.com/a/80721
+  (aspellWithDicts (dicts: with dicts; [en en-computers en-science]))
 
   # Media-related packages
   emacs-all-the-icons-fonts
