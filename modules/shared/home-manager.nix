@@ -134,13 +134,11 @@ let name = "Michael Russo";
        ".envrc"
        ".direnv/"
        "*~"
-       "*.swp"
        "*~.nib"
        "*.pbxuser"
        "*.perspective"
        "*.perspectivev3"
        "*.mode1v3"
-       "*.tm_build_errors"
     ];
     userName = name;
     userEmail = email;
