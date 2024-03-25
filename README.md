@@ -1,4 +1,4 @@
-# NixOS System Configurations
+# mjrusso's NixOS System Configurations
 
 ## Setup and Installation
 
