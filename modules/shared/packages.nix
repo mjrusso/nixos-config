@@ -19,6 +19,9 @@ with pkgs; [
   wget
   zip
 
+  # Language servers
+  pyright
+
   # Dictionary
   # https://emacs.stackexchange.com/a/80721
   (aspellWithDicts (dicts: with dicts; [en en-computers en-science]))
