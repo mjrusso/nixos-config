@@ -1,10 +1,5 @@
 # NixOS System Configurations
 
-> [!IMPORTANT]
->
-> This is a WIP. The goal is to replace my
-> [dotfiles](https://github.com/mjrusso/dotfiles).
-
 ## Setup and Installation
 
 > [!NOTE]
