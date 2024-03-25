@@ -69,7 +69,7 @@ let user = "mjrusso"; in
         show-recents = true;
         launchanim = true;
         orientation = "bottom";
-        tilesize = 48;
+        tilesize = 64;
       };
 
       finder = {
