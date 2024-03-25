@@ -54,7 +54,7 @@ which must be manually installed.
 #### Homebrew
 
 I use Homebrew for a few dependencies on Mac. (Homebrew must be manually
-installed, as per the [official installation instructions](https://brew.sh/).
+installed, as per the [official installation instructions](https://brew.sh/).)
 
 Note that [the template that this config is built off
 of](https://github.com/dustinlyons/nixos-config) uses
@@ -68,8 +68,8 @@ either; I'll just manage Homebrew separately for the time being.
 #### Emacs
 
 Emacs is installed via Nix, but [my
-configuration](https://github.com/mjrusso/.emacs.d ~/.emacs.d) is not part of
-this repository (and not managed by home-manager).
+configuration](https://github.com/mjrusso/.emacs.d) is not part of this
+repository (and not managed by _home-manager_).
 
 To grab my config:
 
@@ -87,14 +87,14 @@ osascript -e "tell application \"Finder\" to make alias file to posix file \"$(r
 symlinks, [as explained
 here](https://github.com/NixOS/nix/issues/956#issuecomment-1367457122).)
 
-There's certainly a better way to do this (automating via home-manager
+There's certainly a better way to do this (automating via _home-manager_
 activation, among other options); see
 https://github.com/nix-community/home-manager/issues/1341 for more notes and
 discussion.
 
 Notes:
 
-- consider automating symlinking for .emacs.d (perhaps merge my [existing emacs repo](https://github.com/mjrusso/.emacs.d) into this one?)
+- consider automating symlinking for _.emacs.d_ (perhaps merge my [existing emacs repo](https://github.com/mjrusso/.emacs.d) into this one?)
  - https://www.reddit.com/r/NixOS/comments/197wnuy/help_making_a_direct_symlink_from_config_repo_to/
  - https://github.com/kenranunderscore/dotfiles/blob/310fb5694934010dbee577f5659a45a3144d3626/home-manager-modules/emacs/default.nix#L11-L17
  - https://discourse.nixos.org/t/how-to-manage-dotfiles-with-home-manager/30576
