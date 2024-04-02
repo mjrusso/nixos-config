@@ -72,21 +72,6 @@ To grab my config:
 git clone https://github.com/mjrusso/.emacs.d ~/.emacs.d
 ```
 
-After installing Emacs, create an alias like so:
-
-``` fish
-osascript -e "tell application \"Finder\" to make alias file to posix file \"$(readlink $HOME/.nix-profile/Applications/Emacs.app)\" at POSIX file \"/Applications\" with properties {name:\"Emacs.app\"}"
-```
-
-(The `readlink` is necessary because because Mac aliases don't work on
-symlinks, [as explained
-here](https://github.com/NixOS/nix/issues/956#issuecomment-1367457122).)
-
-There's certainly a better way to do this (automating via _home-manager_
-activation, among other options); see
-https://github.com/nix-community/home-manager/issues/1341 for more notes and
-discussion.
-
 Notes:
 
 - consider automating symlinking for _.emacs.d_ (perhaps merge my [existing emacs repo](https://github.com/mjrusso/.emacs.d) into this one?)
