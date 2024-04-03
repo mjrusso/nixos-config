@@ -1,6 +1,7 @@
 # Overlays
 
-Files in this directory run automatically as part of each build. Some common ways I've used overlays in the past:
-* Applying patches
-* Downloading different versions of files (locking to a version or trying a fork)
-* Workarounds and stuff I need to run temporarily
+## Emacs
+
+- Overlay adapted from configuration by [noctuid](https://github.com/noctuid).
+  See original [here](https://github.com/noctuid/dotfiles/blob/1a013bf10cf06ab122caba211e614bad48f43d2b/nix/overlays/emacs.nix).
+
