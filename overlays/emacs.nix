@@ -17,6 +17,9 @@ self: super: rec {
     withTreeSitter = true;
   };
 
+  # https://darrinhenein.com/blog/emacs-icon/
+  custom-mac-emacs-icon = ./emacs-icon-1.0-dh.icns;
+
   my-emacs =
     if super.stdenv.isDarwin
     then
@@ -41,6 +44,10 @@ self: super: rec {
               sha256 = "3QLq91AQ6E921/W9nfDjdOUWR8YVsqBAT/W9c1woqAw=";
             })
           ];
+        postFixup = old.postFixup + ''
+          rm $out/Applications/Emacs.app/Contents/Resources/Emacs.icns
+          cp ${custom-mac-emacs-icon} $out/Applications/Emacs.app/Contents/Resources/Emacs.icns
+        '';
       })
     else
       (my-emacs-base.override {
