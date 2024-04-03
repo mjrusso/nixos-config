@@ -32,13 +32,15 @@ let name = "Michael Russo";
       set fish_user_paths $fish_user_paths
     '';
 
-    interactiveShellInit = ''
+    shellInitLast = ''
       # Store private environment variables (which aren't committed to this
       # repository) in ~/.localrc.fish.
       if test -f ~/.localrc.fish
           source ~/.localrc.fish
       end
+    '';
 
+    interactiveShellInit = ''
       # https://fishshell.com/docs/current/cmds/fish_git_prompt.html
       # https://mariuszs.github.io/blog/2013/informative_git_prompt.html
       function fish_prompt
