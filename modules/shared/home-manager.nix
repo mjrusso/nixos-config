@@ -112,13 +112,6 @@ let name = "Michael Russo";
              vterm_printf "51;Evterm-clear-scrollback";
              tput clear;
          end
-
-         # Force direnv to load the .envrc file (if one exists). This automatically
-         # happens when changing directories from within vterm, but not when opening
-         # a new vterm instance. (Unclear why this is the case.)
-         if test -f ".envrc"
-             direnv reload
-         end
       end
     '';
 
