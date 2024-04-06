@@ -41,62 +41,6 @@ let name = "Michael Russo";
     '';
 
     interactiveShellInit = ''
-      # https://fishshell.com/docs/current/cmds/fish_git_prompt.html
-      # https://mariuszs.github.io/blog/2013/informative_git_prompt.html
-      function fish_prompt
-          # Disable fancy formatting when using Tramp:
-          # https://www.gnu.org/software/tramp/#index-FAQ
-          if test $TERM = "dumb"
-              echo "\$ "
-              return
-          end
-
-          set -g __fish_git_prompt_show_informative_status 1
-          set -g __fish_git_prompt_hide_untrackedfiles 1
-
-          set -g __fish_git_prompt_color_branch magenta
-          set -g __fish_git_prompt_showupstream "informative"
-          set -g __fish_git_prompt_char_upstream_ahead "↑"
-          set -g __fish_git_prompt_char_upstream_behind "↓"
-          set -g __fish_git_prompt_char_upstream_prefix ""
-
-          set -g __fish_git_prompt_char_stagedstate "●"
-          set -g __fish_git_prompt_char_dirtystate "✚"
-          set -g __fish_git_prompt_char_untrackedfiles "…"
-          set -g __fish_git_prompt_char_conflictedstate "✖"
-          set -g __fish_git_prompt_char_cleanstate "✔"
-
-          set -g __fish_git_prompt_color_dirtystate blue
-          set -g __fish_git_prompt_color_stagedstate yellow
-          set -g __fish_git_prompt_color_invalidstate red
-          set -g __fish_git_prompt_color_untrackedfiles $fish_color_normal
-          set -g __fish_git_prompt_color_cleanstate green
-
-          # The exit status of the most recently-run command.
-          # See: https://superuser.com/a/893187
-          set -l _display_status $status
-
-          set_color blue
-          echo -n @(prompt_hostname) ""
-
-          set_color normal
-          echo -n (prompt_pwd)
-          echo -n (fish_git_prompt)
-
-          if test $_display_status -eq 0
-              set_color green
-              echo -n ' $'
-          else
-              set_color red
-              echo -n " "
-              echo -n [$_display_status]
-              echo -n " >"
-          end
-
-          set_color normal
-          echo -n " "
-      end
-
       # Shell-side configuration for vterm.
       # https://github.com/akermu/emacs-libvterm#shell-side-configuration
       # https://github.com/akermu/emacs-libvterm#shell-side-configuration-files
@@ -115,6 +59,63 @@ let name = "Michael Russo";
       end
     '';
 
+    functions = {
+      # https://fishshell.com/docs/current/cmds/fish_git_prompt.html
+      # https://mariuszs.github.io/blog/2013/informative_git_prompt.html
+      fish_prompt = ''
+        # Disable fancy formatting when using Tramp:
+        # https://www.gnu.org/software/tramp/#index-FAQ
+        if test $TERM = "dumb"
+            echo "\$ "
+            return
+        end
+
+        set -g __fish_git_prompt_show_informative_status 1
+        set -g __fish_git_prompt_hide_untrackedfiles 1
+
+        set -g __fish_git_prompt_color_branch magenta
+        set -g __fish_git_prompt_showupstream "informative"
+        set -g __fish_git_prompt_char_upstream_ahead "↑"
+        set -g __fish_git_prompt_char_upstream_behind "↓"
+        set -g __fish_git_prompt_char_upstream_prefix ""
+
+        set -g __fish_git_prompt_char_stagedstate "●"
+        set -g __fish_git_prompt_char_dirtystate "✚"
+        set -g __fish_git_prompt_char_untrackedfiles "…"
+        set -g __fish_git_prompt_char_conflictedstate "✖"
+        set -g __fish_git_prompt_char_cleanstate "✔"
+
+        set -g __fish_git_prompt_color_dirtystate blue
+        set -g __fish_git_prompt_color_stagedstate yellow
+        set -g __fish_git_prompt_color_invalidstate red
+        set -g __fish_git_prompt_color_untrackedfiles $fish_color_normal
+        set -g __fish_git_prompt_color_cleanstate green
+
+        # The exit status of the most recently-run command.
+        # See: https://superuser.com/a/893187
+        set -l _display_status $status
+
+        set_color blue
+        echo -n @(prompt_hostname) ""
+
+        set_color normal
+        echo -n (prompt_pwd)
+        echo -n (fish_git_prompt)
+
+        if test $_display_status -eq 0
+            set_color green
+            echo -n ' $'
+        else
+            set_color red
+            echo -n " "
+            echo -n [$_display_status]
+            echo -n " >"
+        end
+
+        set_color normal
+        echo -n " "
+      '';
+    };
   };
 
   git = {
