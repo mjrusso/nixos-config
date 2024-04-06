@@ -96,8 +96,13 @@ let name = "Michael Russo";
         set -g __fish_git_prompt_color_untrackedfiles $fish_color_normal
         set -g __fish_git_prompt_color_cleanstate green
 
-        set_color blue
-        echo -n @(prompt_hostname) ""
+        if test -n "$SSH_CLIENT"
+            set_color purple
+            echo -n @(prompt_hostname)# ""
+        else
+            set_color blue
+            echo -n @(prompt_hostname) ""
+        end
 
         set_color normal
         echo -n (prompt_pwd)
