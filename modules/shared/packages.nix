@@ -14,7 +14,7 @@ with pkgs; [
   killall
   kitty
   neofetch
-  nixfmt
+  nixfmt-classic
   sqlite
   wget
   zip
