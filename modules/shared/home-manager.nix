@@ -63,6 +63,11 @@ let name = "Michael Russo";
       # https://fishshell.com/docs/current/cmds/fish_git_prompt.html
       # https://mariuszs.github.io/blog/2013/informative_git_prompt.html
       fish_prompt = ''
+        # The exit status of the most-recently-run command. This must be the
+        # first line, because because any function or command called from within
+        # this prompt function will reset the value. <https://superuser.com/a/893187>
+        set -l _display_status $status
+
         # Disable fancy formatting when using Tramp:
         # https://www.gnu.org/software/tramp/#index-FAQ
         if test $TERM = "dumb"
@@ -90,10 +95,6 @@ let name = "Michael Russo";
         set -g __fish_git_prompt_color_invalidstate red
         set -g __fish_git_prompt_color_untrackedfiles $fish_color_normal
         set -g __fish_git_prompt_color_cleanstate green
-
-        # The exit status of the most recently-run command.
-        # See: https://superuser.com/a/893187
-        set -l _display_status $status
 
         set_color blue
         echo -n @(prompt_hostname) ""
