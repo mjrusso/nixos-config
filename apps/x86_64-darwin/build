@@ -11,7 +11,7 @@ FLAKE_SYSTEM="darwinConfigurations.${SYSTEM_TYPE}.system"
 export NIXPKGS_ALLOW_UNFREE=1
 
 echo "${YELLOW}Starting build...${NC}"
-nix --extra-experimental-features 'nix-command flakes' build .#$FLAKE_SYSTEM $@
+nix --extra-experimental-features 'nix-command flakes' --show-trace build .#$FLAKE_SYSTEM $@
 
 echo "${YELLOW}Cleaning up...${NC}"
 unlink ./result
