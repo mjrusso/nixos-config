@@ -16,4 +16,4 @@ nix --extra-experimental-features 'nix-command flakes' --show-trace build .#$FLA
 echo "${YELLOW}Cleaning up...${NC}"
 unlink ./result
 
-echo "${GREEN}Switch to new generation complete!${NC}"
+echo "${GREEN}Build complete!${NC}"
