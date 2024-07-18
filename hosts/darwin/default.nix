@@ -43,9 +43,6 @@ let user = "mjrusso"; in
   # Set fish as the default shell
   programs.fish.enable = true;
 
-  # Enable fonts dir
-  fonts.fontDir.enable = true;
-
   system = {
     stateVersion = 4;
 
