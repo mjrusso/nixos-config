@@ -15,7 +15,7 @@ let user = "mjrusso"; in
 
   # Setup user, packages, programs
   nix = {
-    package = pkgs.nixUnstable;
+    package = pkgs.nixVersions.git;
     settings.trusted-users = [ "@admin" "${user}" ];
 
     gc = {
