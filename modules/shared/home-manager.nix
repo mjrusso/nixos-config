@@ -141,6 +141,7 @@ let name = "Michael Russo";
        "*.perspective"
        "*.perspectivev3"
        "*.mode1v3"
+       ".aider*"
     ];
     userName = name;
     userEmail = email;
