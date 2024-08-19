@@ -22,6 +22,9 @@ with pkgs; [
   # Language servers
   pyright
 
+  # Development tools
+  aider-chat
+
   # Dictionary
   # https://emacs.stackexchange.com/a/80721
   (aspellWithDicts (dicts: with dicts; [en en-computers en-science]))
