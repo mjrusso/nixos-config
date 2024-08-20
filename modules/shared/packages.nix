@@ -22,6 +22,14 @@ with pkgs; [
   # Language servers
   pyright
 
+  # Programming languages
+  elixir_1_17
+  nodejs_22
+  python3
+  rustc
+  cargo
+  ruby_3_3
+
   # Development tools
   aider-chat
 
