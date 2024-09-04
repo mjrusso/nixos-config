@@ -12,7 +12,7 @@ with pkgs; [
   docker-compose
   fish
   killall
-  kitty
+  # kitty  # Disabled until https://github.com/NixOS/nixpkgs/issues/337987 is resolved
   neofetch
   nixfmt-classic
   sqlite
