@@ -135,6 +135,7 @@ let name = "Michael Russo";
        ".dir-locals.el"
        ".envrc"
        ".direnv/"
+       ".nrepl-port"
        "*~"
        "*~.nib"
        "*.pbxuser"
