@@ -31,7 +31,7 @@ with pkgs; [
   ruby_3_3
 
   # Development tools
-  aider-chat
+  # aider-chat # https://github.com/Aider-AI/aider (Note: currently installing via brew)
 
   # Dictionary
   # https://emacs.stackexchange.com/a/80721
