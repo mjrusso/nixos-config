@@ -31,6 +31,7 @@ with pkgs; [
   ruby_3_3
 
   # Development tools
+  just
   # aider-chat # https://github.com/Aider-AI/aider (Note: currently installing via brew)
 
   # Dictionary
