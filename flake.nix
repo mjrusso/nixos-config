@@ -19,6 +19,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    mac-app-util = {
+      url = "github:hraban/mac-app-util";
+    };
+
     # https://nixos.wiki/wiki/Emacs
     # https://nixos.wiki/wiki/Overlays#In_a_Nix_flake
     emacs-overlay = {
@@ -27,7 +31,7 @@
     };
   };
 
-  outputs = { self, darwin, home-manager, nixpkgs, disko, emacs-overlay } @inputs:
+  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-overlay } @inputs:
     let
       user = "mjrusso";
       linuxSystems = [ "x86_64-linux" "aarch64-linux" ];
@@ -79,6 +83,7 @@
           inherit system;
           specialArgs = inputs;
           modules = [
+            mac-app-util.darwinModules.default
             home-manager.darwinModules.home-manager
             ./hosts/darwin
           ];
