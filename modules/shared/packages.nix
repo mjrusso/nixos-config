@@ -33,7 +33,7 @@ with pkgs; [
 
   # Development tools
   just
-  # aider-chat # https://github.com/Aider-AI/aider (Note: currently installing via brew)
+  # aider-chat # https://github.com/Aider-AI/aider (Note: currently installing via pipx: `pipx install aider-chat`)
 
   # Dictionary
   # https://emacs.stackexchange.com/a/80721

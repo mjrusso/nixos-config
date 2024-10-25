@@ -30,7 +30,7 @@ in {
       home = {
         enableNixpkgsReleaseCheck = false;
         packages = pkgs.callPackage ./packages.nix { };
-        sessionPath = [ ];
+        sessionPath = [ "$HOME/.local/bin" ];
         sessionVariables = {
           EDITOR = "${pkgs.my-emacs-with-packages}/bin/emacsclient";
         };
