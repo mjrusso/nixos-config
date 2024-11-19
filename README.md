@@ -43,7 +43,7 @@ See:
 
 #### Fonts
 
-I use [Berkely Mono](https://berkeleygraphics.com/typefaces/berkeley-mono/),
+I use [Berkeley Mono](https://berkeleygraphics.com/typefaces/berkeley-mono/),
 which must be manually installed.
 
 #### Homebrew
