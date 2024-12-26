@@ -250,35 +250,43 @@ let name = "Michael Russo";
   alacritty = {
     enable = true;
     settings = {
-      cursor = {
-        style = "Block";
+
+      shell = {
+        program = "/run/current-system/sw/bin/fish";
       };
 
       window = {
         opacity = 1.0;
+        option_as_alt = "Both";
         padding = {
-          x = 24;
-          y = 24;
+          x = 5;
+          y = 5;
         };
       };
 
       font = {
+        # Run the following to improve font rendering on MacOS:
+        #
+        #   defaults write org.alacritty AppleFontSmoothing -int 0
+        #
         normal = {
-          family = "MesloLGS NF";
-          style = "Regular";
+          family = "Berkeley Mono";
         };
         size = lib.mkMerge [
           (lib.mkIf pkgs.stdenv.hostPlatform.isLinux 10)
           (lib.mkIf pkgs.stdenv.hostPlatform.isDarwin 14)
         ];
+        offset = {
+          x = 2;
+          y = 2;
+        };
       };
 
-      dynamic_padding = true;
-      decorations = "full";
-      title = "Terminal";
-      class = {
-        instance = "Alacritty";
-        general = "Alacritty";
+      cursor = {
+        style = {
+          shape = "Block";
+          blinking = "on";
+        };
       };
 
       colors = {
