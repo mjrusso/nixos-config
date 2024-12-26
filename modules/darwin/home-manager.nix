@@ -37,6 +37,7 @@ in {
         file = lib.mkMerge [ sharedFiles additionalFiles ];
         stateVersion = "23.11";
       };
+      fonts.fontconfig.enable = true;
       programs = { } // import ../shared/home-manager.nix {
         inherit config osConfig pkgs lib;
       };

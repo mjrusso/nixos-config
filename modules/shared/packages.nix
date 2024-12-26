@@ -45,6 +45,7 @@ with pkgs; [
   ffmpeg
   fd
   font-awesome
+  nerdfonts
   hack-font
   noto-fonts
   noto-fonts-emoji
