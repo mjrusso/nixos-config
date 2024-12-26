@@ -45,7 +45,9 @@ with pkgs; [
   ffmpeg
   fd
   font-awesome
-  nerdfonts
+  nerd-fonts._0xproto
+  nerd-fonts.fira-code
+  nerd-fonts.droid-sans-mono
   hack-font
   noto-fonts
   noto-fonts-emoji
