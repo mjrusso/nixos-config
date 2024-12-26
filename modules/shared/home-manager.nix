@@ -113,6 +113,32 @@ let name = "Michael Russo";
         emacsclient --no-wait --create-frame -a "" $argv
       '';
 
+      # Launch tmux, first checking if there are any existing sessions. If
+      # there are existing sessions, opens an interactive session selection
+      # tree; otherwise, starts a new tmux session.
+      t = ''
+        if test (tmux list-sessions | count) -gt 0
+          tmux attach\; choose-tree -Zw;
+        else
+          tmux
+        end
+      '';
+
+      # tat: tmux attach
+      #
+      # With thanks to: https://juliu.is/a-simple-tmux/
+      tat = ''
+        set name (basename (pwd) | sed -e 's/\.//g')
+
+        if tmux ls 2>&1 | grep "$name" >/dev/null
+          tmux attach -t "$name"
+        else if test -f .envrc
+          direnv exec / tmux new-session -s "$name"
+        else
+          tmux new-session -s "$name"
+        end
+      '';
+
       # https://fishshell.com/docs/current/cmds/fish_git_prompt.html
       # https://mariuszs.github.io/blog/2013/informative_git_prompt.html
       fish_prompt = ''
@@ -317,6 +343,90 @@ let name = "Michael Russo";
           white = "0xd8dee9";
         };
       };
+
+      keyboard = {
+        bindings = [
+
+          # Modifier Codes:
+          #
+          #  Shift      1
+          #  Alt (Meta) 2
+          #  Ctrl       4
+          #
+
+          { key = "Key0"; mods = "Control"; chars = "\\u001b[27;5;48~"; }
+          { key = "Key0"; mods = "Control|Shift"; chars = "\\u001b[27;6;41~"; }
+          { key = "Key0"; mods = "Alt|Shift"; chars = "\\u001b[27;4;41~"; }
+
+          { key = "Key1"; mods = "Control"; chars = "\\u001b[27;5;49~"; }
+          { key = "Key1"; mods = "Control|Shift"; chars = "\\u001b[27;6;33~"; }
+          { key = "Key1"; mods = "Alt|Shift"; chars = "\\u001b[27;4;33~"; }
+
+          { key = "Key2"; mods = "Control"; chars = "\\u001b[27;5;50~"; }
+          { key = "Key2"; mods = "Control|Shift"; chars = "\\u001b[27;6;64~"; }
+          { key = "Key2"; mods = "Alt|Shift"; chars = "\\u001b[27;4;64~"; }
+
+          { key = "Key3"; mods = "Control"; chars = "\\u001b[27;5;51~"; }
+          { key = "Key3"; mods = "Control|Shift"; chars = "\\u001b[27;6;35~"; }
+          { key = "Key3"; mods = "Alt|Shift"; chars = "\\u001b[27;4;35~"; }
+
+          { key = "Key4"; mods = "Control"; chars = "\\u001b[27;5;52~"; }
+          { key = "Key4"; mods = "Control|Shift"; chars = "\\u001b[27;6;36~"; }
+          { key = "Key4"; mods = "Alt|Shift"; chars = "\\u001b[27;4;36~"; }
+
+          { key = "Key5"; mods = "Control"; chars = "\\u001b[27;5;53~"; }
+          { key = "Key5"; mods = "Control|Shift"; chars = "\\u001b[27;6;37~"; }
+          { key = "Key5"; mods = "Alt|Shift"; chars = "\\u001b[27;4;37~"; }
+
+          { key = "Key6"; mods = "Control"; chars = "\\u001b[27;5;54~"; }
+          { key = "Key6"; mods = "Control|Shift"; chars = "\\u001b[27;6;94~"; }
+          { key = "Key6"; mods = "Alt|Shift"; chars = "\\u001b[27;4;94~"; }
+
+          { key = "Key7"; mods = "Control"; chars = "\\u001b[27;5;55~"; }
+          { key = "Key7"; mods = "Control|Shift"; chars = "\\u001b[27;6;38~"; }
+          { key = "Key7"; mods = "Alt|Shift"; chars = "\\u001b[27;4;38~"; }
+
+          { key = "Key8"; mods = "Control"; chars = "\\u001b[27;5;56~"; }
+          { key = "Key8"; mods = "Control|Shift"; chars = "\\u001b[27;6;42~"; }
+          { key = "Key8"; mods = "Alt|Shift"; chars = "\\u001b[27;4;42~"; }
+
+          { key = "Key9"; mods = "Control"; chars = "\\u001b[27;5;57~"; }
+          { key = "Key9"; mods = "Control|Shift"; chars = "\\u001b[27;6;40~"; }
+          { key = "Key9"; mods = "Alt|Shift"; chars = "\\u001b[27;4;40~"; }
+
+          { key = "Return"; mods = "Control"; chars = "\\u001b[27;5;13~"; }
+          { key = "Return"; mods = "Control|Shift"; chars = "\\u001b[27;6;13~"; }
+          { key = "Return"; mods = "Alt|Shift"; chars = "\\u001b[27;4;13~"; }
+
+          { key = "'"; mods = "Control"; chars = "\\u001b[27;5;39~"; }
+          { key = "'"; mods = "Control|Shift"; chars = "\\u001b[27;6;34~"; }
+          { key = "'"; mods = "Alt|Shift"; chars = "\\u001b[27;4;34~"; }
+
+          { key = "Equals"; mods = "Control"; chars = "\\u001b[27;5;61~"; }
+          { key = "Equals"; mods = "Control|Shift"; chars = "\\u001b[27;6;43~"; }
+          { key = "Equals"; mods = "Alt|Shift"; chars = "\\u001b[27;4;43~"; }
+
+          { key = "Comma"; mods = "Control"; chars = "\\u001b[27;5;44~"; }
+          { key = "Comma"; mods = "Control|Shift"; chars = "\\u001b[27;5;60~"; }
+          { key = "Comma"; mods = "Alt|Shift"; chars = "\\u001b[27;4;60~"; }
+
+          { key = "Minus"; mods = "Control"; chars = "\\u001b[27;5;45~"; }
+          { key = "Minus"; mods = "Control|Shift"; chars = "\\u001b[27;6;95~"; }
+          { key = "Minus"; mods = "Alt|Shift"; chars = "\\u001b[27;4;95~"; }
+
+          { key = "Period"; mods = "Control"; chars = "\\u001b[27;5;46~"; }
+          { key = "Period"; mods = "Control|Shift"; chars = "\\u001b[27;6;62~"; }
+          { key = "Period"; mods = "Alt|Shift"; chars = "\\u001b[27;4;62~"; }
+
+          { key = "Slash"; mods = "Control"; chars = "\\u001b[27;5;47~"; }
+          { key = "Slash"; mods = "Control|Shift"; chars = "\\u001b[27;5;63~"; }
+          { key = "Slash"; mods = "Alt|Shift"; chars = "\\u001b[27;4;63~"; }
+
+          { key = "Semicolon"; mods = "Control"; chars = "\\u001b[27;5;59~"; }
+          { key = "Semicolon"; mods = "Control|Shift"; chars = "\\u001b[27;6;58~"; }
+          { key = "Semicolon"; mods = "Alt|Shift"; chars = "\\u001b[27;4;58~"; }
+        ];
+      };
     };
   };
 
@@ -326,12 +436,21 @@ let name = "Michael Russo";
       sensible
       yank
       prefix-highlight
-      {
-        plugin = power-theme;
-        extraConfig = ''
-           set -g @tmux_power_theme 'gold'
-        '';
-      }
+	  	# {
+  		# 	plugin = dracula;
+  		# 	extraConfig = ''
+  		# 		set -g @dracula-show-battery false
+  		# 		set -g @dracula-show-powerline true
+  		# 		set -g @dracula-refresh-rate 10
+      #     set -g @dracula-plugins "time"
+  		# 	'';
+  		# }
+      # {
+      #   plugin = power-theme;
+      #   extraConfig = ''
+      #      set -g @tmux_power_theme 'default'
+      #   '';
+      # }
       {
         plugin = resurrect; # Used by tmux-continuum
 
@@ -346,60 +465,150 @@ let name = "Michael Russo";
       {
         plugin = continuum;
         extraConfig = ''
-          set -g @continuum-restore 'on'
+          # set -g @continuum-restore 'on'
           set -g @continuum-save-interval '5' # minutes
         '';
       }
     ];
+
     terminal = "screen-256color";
-    prefix = "C-x";
     escapeTime = 10;
     historyLimit = 50000;
+
+    prefix = "C-,";
+
     extraConfig = ''
-      # Remove Vim mode delays
-      set -g focus-events on
 
-      # Enable full mouse support
+      # Workaround until https://github.com/nix-community/home-manager/issues/5952 is fixed.
+      # TODO probably no longer necessary once updating to this: https://github.com/nix-community/home-manager/commit/f83dc9f25a5915c70b013102e30f3ee2a72ba633
+      set -gu default-command
+      set -g default-shell "$SHELL"
+
+      # M-[ and M-] disable/enable the prefix, to allow for tmux inception.
+      #
+      # Currently commented out to free M-[ and M-] for emacs.
+      #
+      # bind -n M-[ set -g prefix None \; set -g status-bg color22 \;
+      # bind -n M-] set -g prefix C-, \; set -g status-bg default \;
+
+      # Count from 1 not 0.
+      set -g base-index 1
+      setw -g pane-base-index 1
+
+      # Windows and panes.
+      bind c new-window      -c "#{pane_current_path}" \; select-layout -E
+      bind | split-window -h -c "#{pane_current_path}" \; select-layout -E
+      bind - split-window -v -c "#{pane_current_path}" \; select-layout -E
+      bind _ split-window -h -c "#{pane_current_path}" \; select-layout -E
+      bind \; last-pane -Z
+      bind k kill-pane
+      bind K kill-window
+      set -g display-panes-time 2500
+
+      bind M-x command-prompt
+
+      # History. Need to send keys C-k and C-l so Emacs receives them.
+      set -g history-limit 100000
+      bind -n C-k clear-history\; send-keys C-k
+      bind -n C-l send-keys C-l
+
+      # Copy mode bindings.
+      bind -T copy-mode M-w send-keys -X copy-pipe
+      bind -T copy-mode C-w send-keys -X copy-pipe-and-cancel
+
+      # Like the regular `s`, but sorts by name (rather than session index).
+      bind s choose-tree -Z -s -O name
+      # Like the regular `w`, but sorts by name (rather than session index).
+      bind w choose-tree -Z -w -O name
+      # Like the regular `s`, but sorts by recency.
+      bind S choose-tree -Z -s -O time
+      # Like the regular `w`, but sorts by recency.
+      bind W choose-tree -Z -w -O time
+
+      set -as extended-keys on
+      set -as extended-keys-format csi-u
+
+      set -g default-terminal "alacritty"
+
+      set -as terminal-features ',alacritty*:256'
+      set -as terminal-features ',alacritty*:RGB'
+      set -as terminal-features ',alacritty*:ccolour'
+      set -as terminal-features ',alacritty*:clipboard'
+      set -as terminal-features ',alacritty*:cstyle'
+      set -as terminal-features ',alacritty*:extkeys'
+      set -as terminal-features ',alacritty*:focus'
+      set -as terminal-features ',alacritty*:hyperlinks'
+      set -as terminal-features ',alacritty*:margins'
+      set -as terminal-features ',alacritty*:mouse'
+      set -as terminal-features ',alacritty*:overline'
+      set -as terminal-features ',alacritty*:rectfill'
+      set -as terminal-features ',alacritty*:sixel'
+      set -as terminal-features ',alacritty*:strikethrough'
+      set -as terminal-features ',alacritty*:title'
+      set -as terminal-features ',alacritty*:usstyle'
+
+      set -as terminal-overrides ',alacritty:RGB' # true-color support
+      set -as terminal-overrides ',*:Smulx=\E[4::%p1%dm'  # undercurl support
+      set -as terminal-overrides ',*:Setulc=\E[58::2::%p1%{65536}%/%d::%p1%{256}%/%{255}%&%d::%p1%{255}%&%d%;m' # colored underscores
+
+      # The defaults are:
+      #
+      #   automatic-rename-format:      #{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}
+      #   window-status-format:         #I:#W#{?window_flags,#{window_flags}, }
+      #   window-status-current-format: #I:#W#{?window_flags,#{window_flags}, }
+      #
+      set-option -wg automatic-rename on
+      # set-option -wg automatic-rename-format "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}#{?#{==:#{pane_title},#{host}},,[#{pane_title}]}"
+      # set-option -wg window-status-format "#{p25:#{#I:#W#{?window_flags,#{window_flags}, }}}"
+      # set-option -wg window-status-current-format "#{p25:#{#I:#W#{?window_flags,#{window_flags}, }}}"
+
+      set-option -g renumber-windows on
+
+      # Should be on instead of external for tmux inception to work. Default is
+      # external.
+      set -s set-clipboard external
+
       set -g mouse on
+      set -g focus-events on
+      set -sg escape-time 0
 
-      # -----------------------------------------------------------------------------
-      # Key bindings
-      # -----------------------------------------------------------------------------
+      set -g status-keys emacs
+      set -g status-position bottom
+      set -g status-bg default
+      set -g status-left-length 50
+      set -g status-left "#{?client_prefix,#[fg=red]  ●  #[default],  ○  } #{p8:[#{session_name}]} "
+      set -g status-right-length 100
 
-      # Unbind default keys
-      unbind C-b
-      unbind '"'
-      unbind %
+      set -g set-titles on
+      set -g set-titles-string "#{pane_title}"
 
-      # Split panes, vertical or horizontal
-      bind-key x split-window -v
-      bind-key v split-window -h
+      # Active/inactive pane colours
+      set -g window-style 'fg=default,bg=colour236'
+      set -g window-active-style 'fg=default,bg=black'
+      set -g pane-border-indicators off
+      set -g pane-border-status top
+      set -g pane-border-lines single
+      set -g pane-border-format "#{pane_index} #{pane_current_command}"
 
-      # Move around panes with vim-like bindings (h,j,k,l)
-      bind-key -n M-k select-pane -U
-      bind-key -n M-h select-pane -L
-      bind-key -n M-j select-pane -D
-      bind-key -n M-l select-pane -R
+      # TODO: Broken by tmux 3.5. Need to manually set up CSI u / KKP bindings (they
+      # are no longer passed through, instead they are swallowed).
+      bind -n C-0 send-keys -l "\u001B[27;5;48~"
+      bind -n C-1 send-keys -l "\u001B[27;5;49~"
+      bind -n C-2 send-keys -l "\u001B[27;5;50~"
+      bind -n C-3 send-keys -l "\u001B[27;5;51~"
+      bind -n C-4 send-keys -l "\u001B[27;5;52~"
+      bind -n C-5 send-keys -l "\u001B[27;5;53~"
+      bind -n C-6 send-keys -l "\u001B[27;5;54~"
+      bind -n C-7 send-keys -l "\u001B[27;5;55~"
+      bind -n C-8 send-keys -l "\u001B[27;5;56~"
+      bind -n C-9 send-keys -l "\u001B[27;5;57~"
+      bind -n C-\; send-keys -l "\u001B[27;5;59~"
+      bind -n C-\' send-keys -l "\u001B[27;5;39~"
+      bind -n C-\- send-keys -l "\u001B[27;5;45~"
+      bind -n C-\= send-keys -l "\u001B[27;5;61~"
+      bind -n C-\. send-keys -l "\u001B[27;5;46~"
+      bind -n M-S-Enter send-keys -l "\u001B[27;4;13~"
 
-      # Smart pane switching with awareness of Vim splits.
-      # This is copy paste from https://github.com/christoomey/vim-tmux-navigator
-      is_vim="ps -o state= -o comm= -t '#{pane_tty}' \
-        | grep -iqE '^[^TXZ ]+ +(\\S+\\/)?g?(view|n?vim?x?)(diff)?$'"
-      bind-key -n 'C-h' if-shell "$is_vim" 'send-keys C-h'  'select-pane -L'
-      bind-key -n 'C-j' if-shell "$is_vim" 'send-keys C-j'  'select-pane -D'
-      bind-key -n 'C-k' if-shell "$is_vim" 'send-keys C-k'  'select-pane -U'
-      bind-key -n 'C-l' if-shell "$is_vim" 'send-keys C-l'  'select-pane -R'
-      tmux_version='$(tmux -V | sed -En "s/^tmux ([0-9]+(.[0-9]+)?).*/\1/p")'
-      if-shell -b '[ "$(echo "$tmux_version < 3.0" | bc)" = 1 ]' \
-        "bind-key -n 'C-\\' if-shell \"$is_vim\" 'send-keys C-\\'  'select-pane -l'"
-      if-shell -b '[ "$(echo "$tmux_version >= 3.0" | bc)" = 1 ]' \
-        "bind-key -n 'C-\\' if-shell \"$is_vim\" 'send-keys C-\\\\'  'select-pane -l'"
-
-      bind-key -T copy-mode-vi 'C-h' select-pane -L
-      bind-key -T copy-mode-vi 'C-j' select-pane -D
-      bind-key -T copy-mode-vi 'C-k' select-pane -U
-      bind-key -T copy-mode-vi 'C-l' select-pane -R
-      bind-key -T copy-mode-vi 'C-\' select-pane -l
       '';
     };
 }
