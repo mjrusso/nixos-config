@@ -12,6 +12,9 @@
     ###############
     # Git Settings:
 
+    ## Enable/disable adding .aider* to .gitignore (default: True)
+    gitignore: false
+
     ## Enable/disable auto commit of LLM changes (default: True)
     auto-commits: false
 
