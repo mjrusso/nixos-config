@@ -67,6 +67,7 @@ let name = "Michael Russo";
       # https://github.com/akermu/emacs-libvterm#shell-side-configuration
       # https://github.com/akermu/emacs-libvterm#shell-side-configuration-files
       if [ "$INSIDE_EMACS" = 'vterm' ]
+         set -gx PAGER "less -R"
          if test -n "$EMACS_VTERM_PATH"
              if test -f "$EMACS_VTERM_PATH/etc/emacs-vterm.fish"
                 source "$EMACS_VTERM_PATH/etc/emacs-vterm.fish"
