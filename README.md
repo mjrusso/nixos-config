@@ -4,7 +4,7 @@
 
 > [!NOTE]
 >
-> Mac only for now. I haven't tested this config on NixOS yet.
+> Mac and Linux (non-NixOS) only for now. I haven't tested on NixOS yet.
 
 ### Mac
 
@@ -24,41 +24,49 @@ command to build and apply changes:
 nix run .#build-switch
 ```
 
-### Additional Setup
-
-#### Fish
-
-Fish needs to be manually set as the login shell:
+Set Fish as the login shell:
 
 ``` bash
 echo ~/.nix-profile/bin/fish | sudo tee -a /etc/shells
 chsh -s ~/.nix-profile/bin/fish
 ```
 
-See:
+For more details on why Fish needs to be manually set as the login shell, see:
 
 - https://github.com/LnL7/nix-darwin/issues/811
 - https://github.com/LnL7/nix-darwin/issues/122#issuecomment-1782971499
 - https://github.com/nix-community/home-manager/issues/1226
 
+Next, install Homebrew. (Homebrew must be manually installed, as per the
+[official installation instructions](https://brew.sh/).) To reduce the number
+of moving parts, I'm not using
+[nix-homebrew](https://github.com/zhaofengli/nix-homebrew), or
+[nix-darwin](https://github.com/LnL7/nix-darwin/)'s Homebrew-related features.
+
+### Linux (non-NixOS)
+
+Install Nix, and then perform a [standalone installation of
+home-manager](https://nix-community.github.io/home-manager/index.xhtml#sec-install-standalone):
+
+``` bash
+nix-channel --add https://github.com/nix-community/home-manager/archive/master.tar.gz home-manager
+nix-channel --update
+nix-shell '<home-manager>' -A install
+```
+
+Then clone this repository, `cd` into the directory, and run the following
+command to build and apply changes:
+
+``` bash
+nix run .#build-switch
+```
+
+### Additional Setup
+
 #### Fonts
 
 I use [Berkeley Mono](https://berkeleygraphics.com/typefaces/berkeley-mono/),
 which must be manually installed.
-
-#### Homebrew
-
-I use Homebrew for a few dependencies on Mac. (Homebrew must be manually
-installed, as per the [official installation instructions](https://brew.sh/).)
-
-Note that [the template that this config is built off
-of](https://github.com/dustinlyons/nixos-config) uses
-[nix-homebrew](https://github.com/zhaofengli/nix-homebrew) to manage the
-Homebrew installation. I've removed that from here (at least for now) as I
-don't think it's worth the extra complexity (especially since Nix is
-dramatically reducing my reliance on Homebrew). I'm not using
-[nix-darwin](https://github.com/LnL7/nix-darwin/)'s Homebrew-related features
-either; I'll just manage Homebrew separately for the time being.
 
 #### Emacs
 
@@ -85,7 +93,13 @@ Notes:
 _(These commands must be executed from the directory that this repo has been
 cloned to.)_
 
-To build and apply changes:
+To build (without applying changes):
+
+``` bash
+nix run .#build
+```
+
+To build **and** apply changes:
 
 ``` bash
 nix run .#build-switch

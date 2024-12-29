@@ -1,5 +1,5 @@
 {
-  description = "Starter Configuration for MacOS and NixOS";
+  description = "mjrusso's system configurations for MacOS, NixOS, and (non-NixOS) Linux systems";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -56,25 +56,22 @@
       };
       mkLinuxApps = system: {
         "apply" = mkApp "apply" system;
+        "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
-        "copy-keys" = mkApp "copy-keys" system;
-        "create-keys" = mkApp "create-keys" system;
-        "check-keys" = mkApp "check-keys" system;
         "install" = mkApp "install" system;
       };
       mkDarwinApps = system: {
         "apply" = mkApp "apply" system;
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
-        "copy-keys" = mkApp "copy-keys" system;
-        "create-keys" = mkApp "create-keys" system;
-        "check-keys" = mkApp "check-keys" system;
         "rollback" = mkApp "rollback" system;
       };
     in
     {
       devShells = forAllSystems devShell;
       apps = nixpkgs.lib.genAttrs linuxSystems mkLinuxApps // nixpkgs.lib.genAttrs darwinSystems mkDarwinApps;
+
+      # Darwin (MacOS) config.
 
       darwinConfigurations = nixpkgs.lib.genAttrs darwinSystems (system: let
         user = "mjrusso";
@@ -90,6 +87,8 @@
         }
       );
 
+      # NixOS config.
+
       nixosConfigurations = nixpkgs.lib.genAttrs linuxSystems (system: nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = inputs;
@@ -104,6 +103,21 @@
           }
           ./hosts/nixos
         ];
-     });
+      });
+
+      # Linux (non-NixOS) configs.
+
+      homeConfigurations = nixpkgs.lib.genAttrs linuxSystems (system: let
+        user = "mjrusso";
+      in
+        home-manager.lib.homeManagerConfiguration {
+          pkgs = nixpkgs.legacyPackages.${system};
+          extraSpecialArgs = inputs;
+          modules = [
+            ./hosts/linux
+          ];
+        }
+      );
+
   };
 }

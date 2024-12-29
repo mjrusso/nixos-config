@@ -26,14 +26,14 @@ is_nix_os() {
     return 1
 }
 
-echo "${YELLOW}Starting...${NC}"
+echo "${YELLOW}Starting build...${NC}"
 
 if is_nix_os; then
     echo "Running on a NixOS-based system"
-    /run/current-system/sw/bin/nixos-rebuild switch --flake .#$FLAKE_TARGET $@
+    /run/current-system/sw/bin/nixos-rebuild build --flake .#$FLAKE_TARGET $@
 else
     echo "Running on a Linux system (non-NixOS)"
-    home-manager switch --flake .#$FLAKE_TARGET $@
+    home-manager build --flake .#$FLAKE_TARGET $@
 fi
 
-echo "${GREEN}Switch to new generation complete!${NC}"
+echo "${GREEN}Build complete!${NC}"
