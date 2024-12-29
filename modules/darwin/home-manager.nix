@@ -39,7 +39,7 @@ in {
           # means that in the case of binaries that ship with MacOS that are
           # also installed via Homebrew, the binaries that ship with MacOS will
           # take precedence (which may not be expected).
-          "/opt/homebrew"
+          "/opt/homebrew/bin"
         ];
         sessionVariables = {
           EDITOR = "${pkgs.my-emacs-with-packages}/bin/emacsclient";
