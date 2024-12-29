@@ -105,7 +105,7 @@
         ];
       });
 
-      # Linux (non-NixOS) configs.
+      # Linux (non-NixOS) config.
 
       homeConfigurations = nixpkgs.lib.genAttrs linuxSystems (system: let
         user = "mjrusso";
