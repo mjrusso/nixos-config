@@ -21,7 +21,7 @@ with pkgs; [
   pyright
 
   # Programming languages
-  elixir_1_17
+  elixir
   nodejs_22
   python3
   pipx
