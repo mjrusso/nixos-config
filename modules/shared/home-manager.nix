@@ -30,30 +30,6 @@ let name = "Michael Russo";
   fish = {
     enable = true;
 
-    # Includes a fix for broken $PATH when using Fish shell. With thanks to:
-    # https://github.com/LnL7/nix-darwin/issues/122#issuecomment-1659465635
-    loginShellInit =
-      let
-        dquote = str: "\"" + str + "\"";
-
-        makeBinPathList = map (path: path + "/bin");
-      in ''
-
-
-      fish_add_path --move --prepend --path ${lib.concatMapStringsSep " " dquote (makeBinPathList (
-        osConfig.environment.profiles ++
-
-        # Ensure that Homebrew is in the PATH on Macs. (Technically we should
-        # only be adding this specific directory if we're on an Apple
-        # Silicon-based Mac.) Note that we set this here, instead of using
-        # `home.sessionPath`, because we want Homebrew-installed software to
-        # take precedence over software that ships with MacOS.
-        lib.optionals pkgs.stdenv.isDarwin ["/opt/homebrew"]
-      ))}
-
-      set fish_user_paths $fish_user_paths
-    '';
-
     shellInitLast = ''
       # Store private environment variables (which aren't committed to this
       # repository) in ~/.localrc.fish.

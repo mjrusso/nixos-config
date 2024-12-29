@@ -30,7 +30,17 @@ in {
       home = {
         enableNixpkgsReleaseCheck = false;
         packages = pkgs.callPackage ./packages.nix { };
-        sessionPath = [ "$HOME/.local/bin" ];
+        sessionPath = [
+          "$HOME/.local/bin"
+
+          # Ensure that Homebrew is in the PATH. (Technically we should only be
+          # adding this specific directory if we're on an Apple Silicon-based
+          # Mac.) Note that this puts `/opt/homebrew` at the end of PATH; this
+          # means that in the case of binaries that ship with MacOS that are
+          # also installed via Homebrew, the binaries that ship with MacOS will
+          # take precedence (which may not be expected).
+          "/opt/homebrew"
+        ];
         sessionVariables = {
           EDITOR = "${pkgs.my-emacs-with-packages}/bin/emacsclient";
         };
