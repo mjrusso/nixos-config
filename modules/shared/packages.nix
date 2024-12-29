@@ -8,8 +8,6 @@ with pkgs; [
   btop
   curl
   coreutils
-  docker
-  docker-compose
   fish
   killall
   # kitty  # Disabled until https://github.com/NixOS/nixpkgs/issues/337987 is resolved
