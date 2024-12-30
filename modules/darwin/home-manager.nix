@@ -43,7 +43,6 @@ in {
         ];
         sessionVariables = {
           EDITOR = "${pkgs.my-emacs-with-packages}/bin/emacsclient";
-          LIMA_SHELL = ".nix-profile/bin/fish";
           LIMA_WORKDIR = "/home/${user}.linux";
         };
         file = lib.mkMerge [ sharedFiles additionalFiles ];

@@ -61,6 +61,13 @@ command to build and apply changes:
 nix run .#build-switch
 ```
 
+And set Fish as the login shell:
+
+``` bash
+echo ~/.nix-profile/bin/fish | sudo tee -a /etc/shells
+sudo /sbin/usermod -s ~/.nix-profile/bin/fish $USER
+```
+
 ### Additional Setup
 
 #### Fonts
