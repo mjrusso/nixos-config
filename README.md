@@ -31,12 +31,6 @@ echo ~/.nix-profile/bin/fish | sudo tee -a /etc/shells
 chsh -s ~/.nix-profile/bin/fish
 ```
 
-For more details on why Fish needs to be manually set as the login shell, see:
-
-- https://github.com/LnL7/nix-darwin/issues/811
-- https://github.com/LnL7/nix-darwin/issues/122#issuecomment-1782971499
-- https://github.com/nix-community/home-manager/issues/1226
-
 Next, install Homebrew. (Homebrew must be manually installed, as per the
 [official installation instructions](https://brew.sh/).) To reduce the number
 of moving parts, I'm not using
