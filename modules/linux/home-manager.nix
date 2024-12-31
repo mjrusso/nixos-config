@@ -13,7 +13,7 @@ in {
     sessionPath = [ "$HOME/.local/bin" ];
     sessionVariables = {
       EDITOR = "${pkgs.my-emacs-with-packages}/bin/emacsclient";
-      TERMINFO_DIRS = "${pkgs.ghostty.terminfo.outPath}/share/terminfo";
+      TERMINFO_DIRS = "$HOME/.nix-profile/share/terminfo";
     };
     file = lib.mkMerge [ sharedFiles additionalFiles ];
     stateVersion = "23.11";
