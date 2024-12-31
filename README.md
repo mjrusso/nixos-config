@@ -68,6 +68,9 @@ echo ~/.nix-profile/bin/fish | sudo tee -a /etc/shells
 sudo /sbin/usermod -s ~/.nix-profile/bin/fish $USER
 ```
 
+Finally, reboot the system. (Rebooting is required for terminal definitions to
+be properly installed; see `$TERMINFO_DIRS`.)
+
 ### Additional Setup
 
 #### Fonts
