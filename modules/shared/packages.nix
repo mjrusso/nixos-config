@@ -2,7 +2,6 @@
 
 with pkgs; [
   # General packages for development and system management
-  alacritty
   bash-completion
   bat
   btop
@@ -10,7 +9,6 @@ with pkgs; [
   coreutils
   fish
   killall
-  # kitty  # Disabled until https://github.com/NixOS/nixpkgs/issues/337987 is resolved
   neofetch
   nixfmt-classic
   sqlite
