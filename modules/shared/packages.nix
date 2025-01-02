@@ -60,6 +60,7 @@ with pkgs; [
   ripgrep
   tree
   tmux
+  zellij
   unrar
   unzip
 
