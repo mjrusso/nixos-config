@@ -14,6 +14,8 @@ let
       font-size = 16
       cursor-style = block
       mouse-hide-while-typing = true
+      window-width = 110
+      window-height = 50
       window-padding-balance = true
       window-colorspace = "display-p3"
       macos-non-native-fullscreen = "visible-menu"
