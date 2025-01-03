@@ -7,4 +7,5 @@ shared-packages ++ [
   colima
   docker
   docker-compose
+  kitty
 ]
