@@ -91,6 +91,10 @@ let
 
   "${xdg_configHome}/zellij/config.kdl" = {
     text = ''
+
+      // Re: issues with Emacs, see: https://github.com/zellij-org/zellij/issues/3789
+      support_kitty_keyboard_protocol true
+
       plugins {
           compact-bar location="zellij:compact-bar"
           configuration location="zellij:configuration"
