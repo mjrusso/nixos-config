@@ -2,12 +2,13 @@
 
 let
   user = "mjrusso";
-  sharedFiles = import ../shared/files.nix { inherit config pkgs; };
-  additionalFiles = import ./files.nix { inherit user config pkgs; };
+  homeDir = "/home/${user}.linux";
+  sharedFiles = import ../shared/files.nix { inherit user config pkgs homeDir; };
+  additionalFiles = import ./files.nix { inherit user config pkgs homeDir; };
 in {
   home = {
     username = user;
-    homeDirectory = "/home/${user}.linux";
+    homeDirectory = homeDir;
     enableNixpkgsReleaseCheck = false;
     packages = pkgs.callPackage ./packages.nix { };
     sessionPath = [ "$HOME/.local/bin" ];

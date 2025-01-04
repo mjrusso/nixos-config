@@ -2,13 +2,14 @@
 
 let
   user = "mjrusso";
-  sharedFiles = import ../shared/files.nix { inherit user config pkgs; };
-  additionalFiles = import ./files.nix { inherit user config pkgs; };
+  homeDir = "/Users/${user}";
+  sharedFiles = import ../shared/files.nix { inherit user config pkgs homeDir; };
+  additionalFiles = import ./files.nix { inherit user config pkgs homeDir; };
 in {
 
   users.users.${user} = {
     name = "${user}";
-    home = "/Users/${user}";
+    home = homeDir;
     isHidden = false;
     shell = pkgs.fish;
   };
