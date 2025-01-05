@@ -83,30 +83,21 @@
       emacsclient --no-wait --create-frame -a "" $argv
     '';
 
-    # Launch tmux, first checking if there are any existing sessions. If
-    # there are existing sessions, opens an interactive session selection
-    # tree; otherwise, starts a new tmux session.
-    t = ''
-      if test (tmux list-sessions | count) -gt 0
-        tmux attach\; choose-tree -Zw;
-      else
-        tmux
-      end
-    '';
+    z = "zellij $argv";
 
-    # tat: tmux attach
+    # zat: zellij attach
     #
-    # With thanks to: https://juliu.is/a-simple-tmux/
-    tat = ''
-      set name (basename (pwd) | sed -e 's/\.//g')
+    # Adapted from this tmux version: https://juliu.is/a-simple-tmux/
+    zat = ''
+        set name (basename (pwd))
 
-      if tmux ls 2>&1 | grep "$name" >/dev/null
-        tmux attach -t "$name"
-      else if test -f .envrc
-        direnv exec / tmux new-session -s "$name"
-      else
-        tmux new-session -s "$name"
-      end
+        if zellij list-sessions 2>&1 | grep "$name" >/dev/null
+            zellij attach "$name"
+        else if test -f .envrc
+            direnv exec / zellij --session "$name"
+        else
+            zellij --session "$name"
+        end
     '';
 
     # https://fishshell.com/docs/current/cmds/fish_git_prompt.html
