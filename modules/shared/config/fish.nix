@@ -108,6 +108,9 @@
           return
       end
 
+      # Add a newline to separate previous command output from this prompt.
+      echo
+
       set -g __fish_git_prompt_show_informative_status 1
       set -g __fish_git_prompt_hide_untrackedfiles 1
 
@@ -140,15 +143,16 @@
       set_color normal
       echo -n (prompt_pwd)
       echo -n (fish_git_prompt)
+      echo
 
       if test $_display_status -eq 0
           set_color green
-          echo -n ' $'
+          echo -n '$'
       else
           set_color red
           echo -n " "
           echo -n [$_display_status]
-          echo -n " >"
+          echo -n ">"
       end
 
       set_color normal
