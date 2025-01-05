@@ -58,6 +58,7 @@
 
   shellAliases = {
     et = "e";
+    g = "git";
     z = "zellij";
     "..." = "cd ../..";
     "...." = "cd ../../..";
