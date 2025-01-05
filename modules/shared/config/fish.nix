@@ -56,6 +56,11 @@
     end
   '';
 
+  shellAliases = {
+    "..." = "cd ../..";
+    "...." = "cd ../../..";
+  };
+
   functions = {
     # Quick shortcut to open Emacs in the terminal.
     #
