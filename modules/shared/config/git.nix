@@ -53,7 +53,6 @@
   extraConfig = {
     init.defaultBranch = "main";
     core = {
-      editor = "emacs";
       autocrlf = "input";
     };
     push = {
