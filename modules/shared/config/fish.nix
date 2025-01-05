@@ -57,6 +57,7 @@
   '';
 
   shellAliases = {
+    et = "e";
     "..." = "cd ../..";
     "...." = "cd ../../..";
   };
@@ -69,9 +70,6 @@
     # one. (At any point, the server process can be stopped by running the
     # command `M-x kill-emacs`.)
     e = "ec -nw $argv";
-
-    # Same as `e`.
-    et = "e $argv";
 
     # Quick shortcut to open Emacs in a new GUI frame. Like `e`, connects to
     # an existing Emacs server process (if running), otherwise starts a new
