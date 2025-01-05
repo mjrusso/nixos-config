@@ -135,13 +135,14 @@
       if test -n "$SSH_CLIENT"
           set_color white --bold
           set_color -b blue
-          echo -n @(prompt_hostname)# ""
+          echo -n @(prompt_hostname)#
       else
           set_color blue
-          echo -n @(prompt_hostname) ""
+          echo -n @(prompt_hostname)
       end
 
       set_color normal
+      echo -n " "
       echo -n (prompt_pwd)
       echo -n (fish_git_prompt)
       echo
@@ -151,7 +152,6 @@
           echo -n '$'
       else
           set_color red
-          echo -n " "
           echo -n [$_display_status]
           echo -n ">"
       end
