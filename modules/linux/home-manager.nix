@@ -13,7 +13,7 @@ in {
     packages = pkgs.callPackage ./packages.nix { };
     sessionPath = [ "$HOME/.local/bin" ];
     sessionVariables = {
-      EDITOR = "${pkgs.my-emacs-with-packages}/bin/emacsclient";
+      EDITOR = "ec";
       TERMINFO_DIRS = "$HOME/.nix-profile/share/terminfo";
     };
     file = lib.mkMerge [ sharedFiles additionalFiles ];

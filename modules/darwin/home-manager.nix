@@ -43,7 +43,7 @@ in {
           "/opt/homebrew/bin"
         ];
         sessionVariables = {
-          EDITOR = "${pkgs.my-emacs-with-packages}/bin/emacsclient";
+          EDITOR = "ec";
           LIMA_WORKDIR = "/home/${user}.linux";
         };
         file = lib.mkMerge [ sharedFiles additionalFiles ];

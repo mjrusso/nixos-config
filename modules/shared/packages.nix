@@ -65,6 +65,26 @@ with pkgs; [
   # Custom Emacs build
   my-emacs-with-packages
 
+  # Custom emacsclient wrapper
+  (pkgs.writeShellScriptBin "ec" ''
+    # An `emacsclient` wrapper, intended for use as $EDITOR.
+    #
+    # Automatically connects to an existing Emacs server process (if running),
+    # otherwise starts a new one.
+    #
+    # Note: exits with an error if the user is using vterm[0] from within Emacs,
+    # and attempts to run this script (from within vterm).
+    #
+    # [0]: https://github.com/akermu/emacs-libvterm
+
+    if [[ "$INSIDE_EMACS" = "vterm" ]]; then
+      echo "Refusing to launch Emacs from inside Emacs: Emacsception denied"
+      exit 1
+    fi
+
+    emacsclient -a "" "$@"
+  '')
+
   # `better-git-branch`: Display git branches ordered by last commit,
   # ahead/behind info, and descriptions. With thanks to [0]. Also see: [1].
   #

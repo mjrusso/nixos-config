@@ -55,33 +55,19 @@
   functions = {
     # Quick shortcut to open Emacs in the terminal.
     #
-    # Connects to an existing Emacs server process (if running), otherwise
-    # starts a new one. (In the latter case, use `M-x kill-emacs` to stop the
-    # server process.)
-    #
-    # Note: exits with an error if the user is using vterm[0] from within Emacs,
-    # and attempts to run this script.
-    #
-    # [0]: https://github.com/akermu/emacs-libvterm
-    e = ''
-      if test "$INSIDE_EMACS" = "vterm"
-          echo "Refusing to launch Emacs from inside Emacs: Emacsception denied"
-          return 1
-      end
-      emacsclient -nw -a "" $argv
-    '';
+    # As per the `ec` shell script (custom `emacsclient` wrapper), this will
+    # connect to an existing Emacs server process (if running), or start a new
+    # one. (At any point, the server process can be stopped by running the
+    # command `M-x kill-emacs`.)
+    e = "ec -nw $argv";
 
-    # Same as `e` (quick shortcut to open Emacs in the terminal).
-    et = ''
-      e $argv
-    '';
+    # Same as `e`.
+    et = "e $argv";
 
     # Quick shortcut to open Emacs in a new GUI frame. Like `e`, connects to
     # an existing Emacs server process (if running), otherwise starts a new
     # one.
-    eg = ''
-      emacsclient --no-wait --create-frame -a "" $argv
-    '';
+    eg = "ec --no-wait --create-frame $argv";
 
     z = "zellij $argv";
 

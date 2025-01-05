@@ -40,9 +40,6 @@
       devShell = system: let pkgs = nixpkgs.legacyPackages.${system}; in {
         default = with pkgs; mkShell {
           nativeBuildInputs = with pkgs; [ bashInteractive git ];
-          shellHook = with pkgs; ''
-            export EDITOR=emacs
-          '';
         };
       };
       mkApp = scriptName: system: {
