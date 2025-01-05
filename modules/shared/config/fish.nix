@@ -133,7 +133,8 @@
       set -g __fish_git_prompt_color_cleanstate green
 
       if test -n "$SSH_CLIENT"
-          set_color purple
+          set_color white --bold
+          set_color -b blue
           echo -n @(prompt_hostname)# ""
       else
           set_color blue
