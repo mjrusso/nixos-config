@@ -134,7 +134,11 @@
 
       if test -n "$SSH_CLIENT"
           set_color white --bold
-          set_color -b blue
+          if string match -q "lima-*" (hostname)
+              set_color -b green
+          else
+              set_color -b blue
+          end
           echo -n @(prompt_hostname)#
       else
           set_color blue
