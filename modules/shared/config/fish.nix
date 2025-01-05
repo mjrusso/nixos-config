@@ -24,6 +24,10 @@
     else
       [];
 
+  shellInit = ''
+    set -g fish_color_autosuggestion gray --dim
+  '';
+
   shellInitLast = ''
     # Store private environment variables (which aren't committed to this
     # repository) in ~/.localrc.fish.
