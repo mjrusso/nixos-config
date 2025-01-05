@@ -58,6 +58,7 @@
 
   shellAliases = {
     et = "e";
+    z = "zellij";
     "..." = "cd ../..";
     "...." = "cd ../../..";
   };
@@ -75,8 +76,6 @@
     # an existing Emacs server process (if running), otherwise starts a new
     # one.
     eg = "ec --no-wait --create-frame $argv";
-
-    z = "zellij $argv";
 
     # zat: zellij attach
     #
