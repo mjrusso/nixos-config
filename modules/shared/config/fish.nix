@@ -132,13 +132,32 @@
       set -g __fish_git_prompt_color_untrackedfiles $fish_color_normal
       set -g __fish_git_prompt_color_cleanstate green
 
-      if test -n "$SSH_CLIENT"
-          set_color white --bold
-          if string match -q "lima-*" (hostname)
-              set_color -b green
+      function set_color_unless_vterm
+          # Ignore the request to customize the color if we're using the vterm
+          # terminal emulator from inside Emacs. (Colors generally don't look
+          # great in this context, particularly background colors.)
+          if test "$INSIDE_EMACS" != "vterm"
+              set_color $argv
           else
-              set_color -b blue
+              set_color normal
           end
+      end
+
+      if test -n "$SSH_CLIENT"
+          set_color_unless_vterm white --bold
+
+          if string match -q "lima-*" (hostname)
+              set_color_unless_vterm -b green
+          else
+              set_color_unless_vterm -b blue
+          end
+
+          if test "$INSIDE_EMACS" = "vterm"
+              # Because we don't set colors in this case, add some extra text to
+              # the prompt to clearly indicate that we're on a remote host.
+              echo -n \<REMOTE\> ""
+          end
+
           echo -n @(prompt_hostname)#
       else
           set_color blue
