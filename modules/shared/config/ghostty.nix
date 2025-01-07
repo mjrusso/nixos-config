@@ -10,6 +10,7 @@
     window-height = 50
     window-padding-balance = true
     window-colorspace = "display-p3"
+    macos-titlebar-style = "tabs"
     macos-non-native-fullscreen = "visible-menu"
 
     # Shell
