@@ -133,29 +133,17 @@
       set -g __fish_git_prompt_color_cleanstate green
 
       if test -n "$SSH_CLIENT"
-          set_color green --bold
-          echo -n ssh→
-
-          if test "$INSIDE_EMACS" = "vterm"
-              # Don't customize the color of the hostname portion of the prompt
-              # if we're using the vterm terminal emulator from inside Emacs.
-              # (Colors generally don't look great in this context, particularly
-              # background colors.)
-              set_color normal --bold
+          if string match -q "lima-*" (hostname)
+              set_color green --bold
           else
-              set_color white --bold
-              if string match -q "lima-*" (hostname)
-                  set_color -b green
-              else
-                  set_color -b blue
-              end
+              set_color blue --bold
           end
-
-          echo -n @(prompt_hostname)
-      else
-          set_color blue --bold
-          echo -n @(prompt_hostname)
+          echo -n ssh→
+          set_color normal
       end
+
+      set_color blue --bold
+      echo -n @(prompt_hostname)
 
       set_color normal
       echo -n " "
