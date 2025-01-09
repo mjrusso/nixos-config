@@ -57,7 +57,6 @@
   '';
 
   shellAliases = {
-    et = "e";
     g = "git";
     z = "zellij";
     "..." = "cd ../..";
@@ -67,11 +66,26 @@
   functions = {
     # Quick shortcut to open Emacs in the terminal.
     #
+    # If called without arguments, automatically opens the project associated
+    # with the current directory. If called with arguments, these arguments are
+    # passed through unmodified.
+    #
     # As per the `ec` shell script (custom `emacsclient` wrapper), this will
     # connect to an existing Emacs server process (if running), or start a new
     # one. (At any point, the server process can be stopped by running the
     # command `M-x kill-emacs`.)
-    e = "ec -nw $argv";
+    e = ''
+      if test (count $argv) -eq 0
+        ec -nw -e "(my/maybe-open-project \"$PWD\")"
+      else
+        ec -nw $argv
+      end
+    '';
+
+    # Quick shortcut to open Emacs in the terminal. Like `e`, connects to
+    # an existing Emacs server process (if running), otherwise starts a new
+    # one. Unlike `e`, this command does not attempt to switch to a project.
+    et = "ec -nw $argv";
 
     # Quick shortcut to open Emacs in a new GUI frame. Like `e`, connects to
     # an existing Emacs server process (if running), otherwise starts a new
