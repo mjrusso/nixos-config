@@ -50,6 +50,7 @@ with pkgs; [
   meslo-lgs-nf
 
   # Text and terminal utilities
+  fzf
   htop
   hunspell
   iftop
@@ -59,6 +60,7 @@ with pkgs; [
   tree
   tmux
   zellij
+  zoxide
   unrar
   unzip
 
