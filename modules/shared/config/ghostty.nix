@@ -14,7 +14,7 @@
     macos-non-native-fullscreen = "visible-menu"
 
     # Shell
-    shell-integration = fish
+    shell-integration = none  # NOTE: shell integration is configured manually.
 
     # Behaviour
     window-save-state = always

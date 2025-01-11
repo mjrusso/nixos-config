@@ -37,6 +37,13 @@
   '';
 
   interactiveShellInit = ''
+    # Enable Ghostty shell integration. (Because we're using nix-shell, this
+    # needs to be sourced manually.)
+    # https://ghostty.org/docs/features/shell-integration
+    if test -n "$GHOSTTY_RESOURCES_DIR" && test -z "$INSIDE_EMACS"
+        source "$GHOSTTY_RESOURCES_DIR/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish"
+    end
+
     # Shell-side configuration for vterm.
     # https://github.com/akermu/emacs-libvterm#shell-side-configuration
     # https://github.com/akermu/emacs-libvterm#shell-side-configuration-files
