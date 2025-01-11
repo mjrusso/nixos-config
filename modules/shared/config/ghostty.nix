@@ -18,6 +18,7 @@
 
     # Behaviour
     window-save-state = always
+    window-inherit-working-directory = true
     confirm-close-surface = false
 
     # Keyboard
