@@ -5,8 +5,9 @@
     #######
     # Main:
 
-    ## Use claude 3.5 sonnet model for the main chat
-    sonnet: true
+    model: openrouter/deepseek/deepseek-chat
+    # model: openrouter/anthropic/claude-3.5-sonnet
+    # model: anthropic/claude-3-5-sonnet-20241022
 
     ###############
     # Git Settings:
