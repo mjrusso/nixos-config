@@ -13,8 +13,8 @@
     macos-titlebar-style = "tabs"
     macos-non-native-fullscreen = "visible-menu"
 
-    # Shell
-    shell-integration = none  # NOTE: shell integration is configured manually.
+    # Shell [NOTE: shell integration configured manually]
+    shell-integration = none
 
     # Behaviour
     window-save-state = always
