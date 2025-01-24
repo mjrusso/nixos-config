@@ -36,10 +36,11 @@ with pkgs; [
   (aspellWithDicts (dicts: with dicts; [en en-computers en-science]))
 
   # Media-related packages
+  ffmpeg
+
+  # Fonts
   emacs-all-the-icons-fonts
   dejavu_fonts
-  ffmpeg
-  fd
   font-awesome
   nerd-fonts._0xproto
   nerd-fonts.fira-code
@@ -57,6 +58,7 @@ with pkgs; [
   jetbrains-mono
   jq
   ripgrep
+  fd
   tree
   tmux
   zellij
