@@ -37,6 +37,7 @@ with pkgs; [
 
   # Media-related packages
   ffmpeg
+  portaudio
 
   # Fonts
   emacs-all-the-icons-fonts
