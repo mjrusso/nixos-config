@@ -29,6 +29,7 @@ with pkgs; [
 
   # Development tools
   just
+  git-recent # Run: `git recent` to see a list of recent git branches.
   # aider-chat # https://github.com/Aider-AI/aider (Note: currently installing via pipx: `pipx install aider-chat`)
 
   # Dictionary
