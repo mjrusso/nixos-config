@@ -10,16 +10,12 @@ let user = "mjrusso"; in
     ../../modules/shared/cachix
   ];
 
-  # Auto upgrade nix package and the daemon service.
-  services.nix-daemon.enable = true;
-
   # Setup user, packages, programs
   nix = {
     package = pkgs.nixVersions.git;
     settings.trusted-users = [ "@admin" "${user}" ];
 
     gc = {
-      user = "root";
       automatic = true;
       interval = { Weekday = 0; Hour = 2; Minute = 0; };
       options = "--delete-older-than 30d";
