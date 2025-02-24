@@ -5,7 +5,8 @@
     #######
     # Main:
 
-    model: openrouter/deepseek/deepseek-chat
+    model: sonnet
+    # model: openrouter/deepseek/deepseek-chat
     # model: openrouter/anthropic/claude-3.5-sonnet
     # model: anthropic/claude-3-5-sonnet-20241022
 
