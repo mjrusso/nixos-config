@@ -30,7 +30,15 @@ with pkgs; [
   # Development tools
   just
   git-recent # Run: `git recent` to see a list of recent git branches.
-  # aider-chat # https://github.com/Aider-AI/aider (Note: currently installing via pipx: `pipx install aider-chat`)
+
+  # AI development tools
+  #
+  # - Aider: https://github.com/Aider-AI/aider
+  #
+  #   - Note that Aider is available via Nixpkgs as `aider-chat`, however I'm
+  #     currently installing via pipx.
+  #
+  #   - To upgrade: `pipx uninstall aider-chat; pipx install aider-chat[playwright]`
 
   # Dictionary
   # https://emacs.stackexchange.com/a/80721
