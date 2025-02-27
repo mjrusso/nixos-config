@@ -12,6 +12,7 @@
      ".envrc"
      ".direnv/"
      ".nrepl-port"
+     ".syncthing.*.tmp"
      "*~"
      "*~.nib"
      "*.pbxuser"
