@@ -11,5 +11,5 @@ in {
   direnv = import ./config/direnv.nix commonArgs;
   fish = import ./config/fish.nix  commonArgs;
   git = import ./config/git.nix  commonArgs;
-  zoxide = import ./config/zoxide.nix  commonArgs;
+  zoxide = import ./config/zoxide.nix commonArgs;
 }
