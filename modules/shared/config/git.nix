@@ -13,6 +13,7 @@
      ".direnv/"
      ".nrepl-port"
      ".syncthing.*.tmp"
+     ".stignore*"
      "*~"
      "*~.nib"
      "*.pbxuser"
