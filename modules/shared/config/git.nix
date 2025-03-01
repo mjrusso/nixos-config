@@ -14,6 +14,8 @@
      ".nrepl-port"
      ".syncthing.*.tmp"
      ".stignore*"
+     ".stfolder/"
+     ".stversions/"
      "*~"
      "*~.nib"
      "*.pbxuser"
