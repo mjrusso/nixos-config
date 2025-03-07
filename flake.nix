@@ -35,7 +35,7 @@
     let
       user = "mjrusso";
       linuxSystems = [ "x86_64-linux" "aarch64-linux" ];
-      darwinSystems = [ "aarch64-darwin" "x86_64-darwin" ];
+      darwinSystems = [ "aarch64-darwin" ];
       forAllSystems = f: nixpkgs.lib.genAttrs (linuxSystems ++ darwinSystems) f;
       devShell = system: let pkgs = nixpkgs.legacyPackages.${system}; in {
         default = with pkgs; mkShell {
@@ -83,26 +83,6 @@
 
         "aarch64-darwin@laptop" = darwin.lib.darwinSystem {
           system = "aarch64-darwin";
-          specialArgs = inputs // { systemType = "laptop"; };
-          modules = [
-            mac-app-util.darwinModules.default
-            home-manager.darwinModules.home-manager
-            ./hosts/darwin
-          ];
-        };
-
-        "x86_64-darwin@desktop" = darwin.lib.darwinSystem {
-          system = "x86_64-darwin";
-          specialArgs = inputs // { systemType = "desktop"; };
-          modules = [
-            mac-app-util.darwinModules.default
-            home-manager.darwinModules.home-manager
-            ./hosts/darwin
-          ];
-        };
-
-        "x86_64-darwin@laptop" = darwin.lib.darwinSystem {
-          system = "x86_64-darwin";
           specialArgs = inputs // { systemType = "laptop"; };
           modules = [
             mac-app-util.darwinModules.default
