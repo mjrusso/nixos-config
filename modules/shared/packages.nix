@@ -11,6 +11,7 @@ with pkgs; [
   killall
   neofetch
   nixfmt-classic
+  rsync
   sqlite
   wget
   zip

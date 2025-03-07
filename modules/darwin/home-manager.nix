@@ -5,6 +5,16 @@ let
   homeDir = "/Users/${user}";
   sharedFiles = import ../shared/files.nix { inherit user config pkgs homeDir; };
   additionalFiles = import ./files.nix { inherit user config pkgs homeDir; };
+
+  # List of folders that will be automatically mirrored to another location on
+  # the file system. (Here, rsync is used for one-way sync.) Source folders are
+  # expected to contain an `.rsyncignore` file.
+  localSyncFolders = [{
+    name = "git";
+    src = "${homeDir}/git";
+    dest = "${homeDir}/Dropbox/backup/syncthing/git";
+  }];
+
 in {
 
   users.users.${user} = {
@@ -28,6 +38,38 @@ in {
         # Also see: https://github.com/nix-community/home-manager/issues/1341
         mac-app-util.homeManagerModules.default
       ];
+
+      # Create one launchd agent per `localSyncFolders` entry. Each agent
+      # copies files from the source directory to the destination directory,
+      # whenever files in the source directory change.
+      launchd.agents = builtins.listToAttrs (map (folder: {
+        name = "local-sync-${folder.name}";
+        value = {
+          enable = true;
+          config = {
+            ProgramArguments = [
+              "${pkgs.rsync}/bin/rsync"
+              "-a"
+              "--delete"
+              "--filter=dir-merge /.rsyncignore"
+              "${lib.escapeShellArg "${folder.src}/"}"
+              "${lib.escapeShellArg "${folder.dest}/"}"
+            ];
+            RunAtLoad = true;
+            # Automatically run if the source directory changes.
+            WatchPaths = [ folder.src ];
+            # Run every 300 seconds regardless of whether anything changed.
+            StartInterval = 300;
+            # Wait a minimum 5 seconds between job invocations.
+            ThrottleInterval = 5;
+            StandardOutPath =
+              "${homeDir}/Library/Logs/local-sync-${folder.name}.log";
+            StandardErrorPath =
+              "${homeDir}/Library/Logs/local-sync-${folder.name}.log";
+          };
+        };
+      }) localSyncFolders);
+
       home = {
         enableNixpkgsReleaseCheck = false;
         packages = pkgs.callPackage ./packages.nix { };
@@ -48,6 +90,15 @@ in {
         };
         file = lib.mkMerge [ sharedFiles additionalFiles ];
         stateVersion = "23.11";
+
+        # Ensure that destination folders exist before running the launchd agent
+        # for local syncing.
+        activation.createLocalSyncDirs =
+          lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+            ${builtins.concatStringsSep "\n" (map (folder: ''
+              mkdir -p "${folder.dest}"
+            '') localSyncFolders)}
+          '';
       };
       fonts.fontconfig.enable = true;
       programs = { } // import ../shared/home-manager.nix {
