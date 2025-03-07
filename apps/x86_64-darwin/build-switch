@@ -5,12 +5,21 @@ YELLOW='\033[1;33m'
 RED='\033[1;31m'
 NC='\033[0m'
 
-SYSTEM_TYPE="x86_64-darwin"
+SYSTEM_ARCH="x86_64-darwin"
+
+if system_profiler SPHardwareDataType | grep -q "MacBook"; then
+    echo "${YELLOW}Using laptop configuration...${NC}"
+    SYSTEM_TYPE="${SYSTEM_ARCH}@laptop"
+else
+    echo "${YELLOW}Using desktop configuration...${NC}"
+    SYSTEM_TYPE="${SYSTEM_ARCH}@desktop"
+fi
+
 FLAKE_SYSTEM="darwinConfigurations.${SYSTEM_TYPE}.system"
 
 export NIXPKGS_ALLOW_UNFREE=1
 
-echo "${YELLOW}Starting build...${NC}"
+echo "${YELLOW}Starting build for ${FLAKE_SYSTEM}...${NC}"
 nix --extra-experimental-features 'nix-command flakes' build .#$FLAKE_SYSTEM $@
 
 echo "${YELLOW}Switching to new generation...${NC}"
