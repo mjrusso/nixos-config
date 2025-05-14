@@ -19,7 +19,7 @@
     # Behaviour
     window-save-state = always
     window-inherit-working-directory = true
-    confirm-close-surface = false
+    confirm-close-surface = true
 
     # Keyboard
     macos-option-as-alt = true
