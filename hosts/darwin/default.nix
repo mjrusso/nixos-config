@@ -12,7 +12,7 @@ let user = "mjrusso"; in
 
   # Setup user, packages, programs
   nix = {
-    package = pkgs.nixVersions.git;
+    package = pkgs.nixVersions.latest;
     settings.trusted-users = [ "@admin" "${user}" ];
 
     gc = {
