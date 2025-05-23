@@ -98,11 +98,11 @@
     # one.
     eg = "ec --no-wait --create-frame $argv";
 
-    # Quick shortcut to open Emacs in the terminal, specifically in the
-    # "scratch file" project (for making quick notes). Like `e`, connects to an
+    # Quick shortcut to open Emacs in the terminal, specifically to today's
+    # daily "scratch file" (for making quick notes). Like `e`, connects to an
     # existing Emacs server process (if running), otherwise starts a new one.
     enote = ''
-      ec -nw -e "(my/maybe-open-project my/persistent-scratch-files-dir)"
+      ec -nw -e "(progn (my/maybe-open-project my/persistent-scratch-files-dir) (my/daily-scratch-file))"
     '';
 
     # Quick shortcut to open Emacs in the terminal, specifically viewing my
