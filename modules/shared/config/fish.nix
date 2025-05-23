@@ -101,7 +101,7 @@
     # Quick shortcut to open Emacs in the terminal, specifically in the
     # "scratch file" project (for making quick notes). Like `e`, connects to an
     # existing Emacs server process (if running), otherwise starts a new one.
-    en = ''
+    enote = ''
       ec -nw -e "(my/maybe-open-project my/persistent-scratch-files-dir)"
     '';
 
