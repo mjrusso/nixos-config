@@ -105,6 +105,13 @@
       ec -nw -e "(my/maybe-open-project my/persistent-scratch-files-dir)"
     '';
 
+    # Quick shortcut to open Emacs in the terminal, specifically viewing my
+    # "dashboard" org file. Like `e`, connects to an existing Emacs server
+    # process (if running), otherwise starts a new one.
+    edash = ''
+      ec -nw -e "(progn (my/maybe-open-project my/primary-org-directory) (my/workspace:dashboard))"
+    '';
+
     # zat: zellij attach
     #
     # Adapted from this tmux version: https://juliu.is/a-simple-tmux/
