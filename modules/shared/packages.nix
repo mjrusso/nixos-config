@@ -76,6 +76,7 @@ with pkgs; [
   zoxide
   unrar
   unzip
+  presenterm # https://github.com/mfontanini/presenterm
 
   # Custom Emacs build
   my-emacs-with-packages
