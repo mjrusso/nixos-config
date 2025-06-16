@@ -23,5 +23,8 @@
 
     # Keyboard
     macos-option-as-alt = true
+
+    # Keybindings
+    keybind = global:cmd+shift+i=toggle_quick_terminal
   '';
 }
