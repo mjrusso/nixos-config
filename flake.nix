@@ -87,6 +87,16 @@
             ./hosts/darwin
           ];
         };
+
+        "aarch64-darwin@vm" = darwin.lib.darwinSystem {
+          system = "aarch64-darwin";
+          specialArgs = inputs // { systemType = "vm"; };
+          modules = [
+            mac-app-util.darwinModules.default
+            home-manager.darwinModules.home-manager
+            ./hosts/darwin
+          ];
+        };
       };
 
       # NixOS config.

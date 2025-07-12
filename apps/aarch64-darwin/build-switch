@@ -7,7 +7,12 @@ NC='\033[0m'
 
 SYSTEM_ARCH="aarch64-darwin"
 
-if system_profiler SPHardwareDataType | grep -q "MacBook"; then
+HARDWARE_DATA=$(system_profiler SPHardwareDataType)
+
+if echo "${HARDWARE_DATA}" | grep -q -e "Virtual" -e "Parallels" -e "VMware"; then
+    echo "${YELLOW}Using VM configuration...${NC}"
+    SYSTEM_TYPE="${SYSTEM_ARCH}@vm"
+elif echo "${HARDWARE_DATA}" | grep -q "MacBook"; then
     echo "${YELLOW}Using laptop configuration...${NC}"
     SYSTEM_TYPE="${SYSTEM_ARCH}@laptop"
 else
