@@ -59,7 +59,6 @@
       mkDarwinApps = system: {
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
-        "rollback" = mkApp "rollback" system;
       };
     in
     {
