@@ -30,7 +30,6 @@ let user = "mjrusso"; in
   # Turn off NIX_PATH warnings now that we're using flakes
   system.checks.verifyNixPath = false;
 
-
   # Load configuration that is shared across systems
   environment.systemPackages = with pkgs; [
 
@@ -41,6 +40,8 @@ let user = "mjrusso"; in
 
   system = {
     stateVersion = 4;
+
+    primaryUser = "mjrusso";
 
     defaults = {
       NSGlobalDomain = {
