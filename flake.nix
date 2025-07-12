@@ -52,13 +52,11 @@
         '')}/bin/${scriptName}";
       };
       mkLinuxApps = system: {
-        "apply" = mkApp "apply" system;
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
         "install" = mkApp "install" system;
       };
       mkDarwinApps = system: {
-        "apply" = mkApp "apply" system;
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
         "rollback" = mkApp "rollback" system;
