@@ -78,6 +78,11 @@ with pkgs; [
   unzip
   presenterm # https://github.com/mfontanini/presenterm
 
+  # Document conversion
+  pandoc
+  # mermaid-filter # Pandoc filter for creating diagrams in mermaid syntax blocks
+                   # in markdown docs. Source: https://github.com/raghur/mermaid-filter
+
   # Custom Emacs build
   my-emacs-with-packages
 
