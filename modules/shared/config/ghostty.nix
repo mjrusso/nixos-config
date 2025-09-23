@@ -1,7 +1,7 @@
 {
   text = ''
     # Presentation
-    theme = dark:Raycast_Dark,light:Raycast_Light
+    theme = dark:"Raycast Dark",light:"Raycast Light"
     font-family = Berkeley Mono
     font-size = 16
     cursor-style = block
