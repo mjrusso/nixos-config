@@ -4,7 +4,8 @@
   enable = true;
   ignores = [
     "*.swp"
-     "__private/"
+    "__private/"
+    "__TODO*"
      ".DS_Store"
      ".svn"
      ".projectile"
