@@ -113,6 +113,12 @@
   set-option -wg automatic-rename on
   set-option -g renumber-windows on
 
+  # Bind Prefix-< to open a window management menu.
+  bind-key -T prefix < display-menu -T "#[align=centre]#{window_index}:#{window_name}" -x W -y W "Move Before" b { command-prompt -T window-target "move-window -b -t %%" } "Move After" a { command-prompt -T window-target "move-window -a -t %%" } "#{?#{>:#{session_windows},1},,-}Swap Left" l { swap-window -d -t :-1 } "#{?#{>:#{session_windows},1},,-}Swap Right" r { swap-window -d -t :+1 } "#{?pane_marked_set,,-}Swap Marked" s { swap-window } ${"''"} Kill X { kill-window } Respawn R { respawn-window -k } "#{?pane_marked,Unmark,Mark}" m { select-pane -m } Rename n { command-prompt -F -I "#W" { rename-window -t "#{window_id}" "%%" } } ${"''"} "New After" w { new-window -a } "New At End" W { new-window }
+
+  # Bind Prefix-> to open a pane management menu.
+  bind-key -T prefix > display-menu -T "#[align=centre]#{pane_index} (#{pane_id})" -x P -y P "#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}" < { send-keys -X history-top } "#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}" > { send-keys -X history-bottom } ${"''"} "#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}" C-r { if-shell -F "#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}" "copy-mode -t=" ; send-keys -X -t = search-backward "#{q:mouse_word}" } "#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}" C-y { copy-mode -q ; send-keys -l "#{q:mouse_word}" } "#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}" c { copy-mode -q ; set-buffer "#{q:mouse_word}" } "#{?mouse_line,Copy Line,}" l { copy-mode -q ; set-buffer "#{q:mouse_line}" } ${"''"} "Horizontal Split" h { split-window -h } "Vertical Split" v { split-window -v } ${"''"} "#{?#{>:#{window_panes},1},,-}Swap Up" u { swap-pane -U } "#{?#{>:#{window_panes},1},,-}Swap Down" d { swap-pane -D } "#{?pane_marked_set,,-}Swap Marked" s { swap-pane } ${"''"} Kill X { kill-pane } Respawn R { respawn-pane -k } "#{?pane_marked,Unmark,Mark}" m { select-pane -m } "#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}" z { resize-pane -Z }
+
   # Should be on instead of external for tmux inception to work. Default is
   # external. TODO: Also check if OSC 52 requires the option to be on rather than
   # external.
