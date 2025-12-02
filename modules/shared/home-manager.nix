@@ -12,4 +12,5 @@ in {
   fish = import ./config/fish.nix  commonArgs;
   git = import ./config/git.nix  commonArgs;
   zoxide = import ./config/zoxide.nix commonArgs;
+  tmux = import ./config/tmux.nix commonArgs;
 }
