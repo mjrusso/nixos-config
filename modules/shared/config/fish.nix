@@ -112,6 +112,32 @@
       ec -nw -e "(progn (my/maybe-open-project my/primary-org-directory) (my/workspace:dashboard))"
     '';
 
+    # Launch tmux, first checking if there are any existing sessions. If
+    # there are existing sessions, opens an interactive session selection
+    # tree; otherwise, starts a new tmux session.
+    t = ''
+      if test (tmux list-sessions | count) -gt 0
+        tmux attach\; choose-tree -Zw;
+      else
+        tmux
+      end
+    '';
+
+    # tat: tmux attach
+    #
+    # With thanks to: https://juliu.is/a-simple-tmux/
+    tat = ''
+      set name (basename (pwd) | sed -e 's/\.//g')
+
+      if tmux ls 2>&1 | grep "$name" >/dev/null
+        tmux attach -t "$name"
+      else if test -f .envrc
+        direnv exec / tmux new-session -s "$name"
+      else
+        tmux new-session -s "$name"
+      end
+    '';
+
     # zat: zellij attach
     #
     # Adapted from this tmux version: https://juliu.is/a-simple-tmux/
