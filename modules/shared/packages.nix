@@ -103,7 +103,7 @@ with pkgs; [
       exit 1
     fi
 
-    emacsclient -a "" "$@"
+    exec emacsclient -a "" "$@"
   '')
 
   # `better-git-branch`: Display git branches ordered by last commit,
