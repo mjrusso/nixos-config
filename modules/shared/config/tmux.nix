@@ -6,21 +6,6 @@
     yank
     prefix-highlight
     # {
-    # 	plugin = dracula;
-    # 	extraConfig = ''
-    # 		set -g @dracula-show-battery false
-    # 		set -g @dracula-show-powerline true
-    # 		set -g @dracula-refresh-rate 10
-    #     set -g @dracula-plugins "time"
-    # 	'';
-    # }
-    # {
-    #   plugin = power-theme;
-    #   extraConfig = ''
-    #      set -g @tmux_power_theme 'default'
-    #   '';
-    # }
-    # {
     #   plugin = resurrect; # Used by tmux-continuum
     #
     #   # Use XDG data directory
