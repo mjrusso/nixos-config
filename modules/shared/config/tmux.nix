@@ -128,6 +128,7 @@
   set -g status-style 'fg=default,bg=default'
   set -g status-left-length 50
   set -g status-left "#{?client_prefix,#[fg=red]  ●  #[default],  ○  } #{p8:[#{session_name}]} "
+  set -g status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\"  #H "
   set -g status-right-length 100
 
   # Active/inactive pane colours
