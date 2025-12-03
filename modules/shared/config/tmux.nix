@@ -125,7 +125,7 @@
   set -s set-clipboard on
 
   set -g status-position bottom
-  set -g status-bg default
+  set -g status-style 'fg=default,bg=default'
   set -g status-left-length 50
   set -g status-left "#{?client_prefix,#[fg=red]  ●  #[default],  ○  } #{p8:[#{session_name}]} "
   set -g status-right-length 100
