@@ -5,4 +5,7 @@ let shared-packages = import ../shared/packages.nix { inherit pkgs; }; in
 shared-packages ++ [
   ncurses
   ghostty
+
+  # Virtualization
+  krunvm # Create microVMs from OCI images: https://github.com/containers/krunvm
 ]
