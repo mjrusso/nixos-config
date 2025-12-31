@@ -20,7 +20,7 @@ with pkgs; [
   pyright
 
   # Programming languages
-  elixir
+  elixir_1_19
   nodejs_22
   python3
   pipx
@@ -58,7 +58,7 @@ with pkgs; [
   nerd-fonts.droid-sans-mono
   hack-font
   noto-fonts
-  noto-fonts-emoji
+  noto-fonts-color-emoji
   meslo-lgs-nf
 
   # Text and terminal utilities
