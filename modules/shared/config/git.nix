@@ -56,22 +56,18 @@
       refs = "for-each-ref --sort='authordate:iso8601' --format=' %(color:green)%(authordate:relative)%09%(color:white)%(refname:short)' refs/heads";
       count = "!git shortlog -sn";
     };
-    extraConfig = {
-      init.defaultBranch = "main";
-      core = {
-        autocrlf = "input";
-      };
-      push = {
-        default = "current";
-      };
-      color = {
-        ui = "auto";
-        diff = "auto";
-        status = "auto";
-        branch = "auto";
-      };
-      pull.rebase = true;
-      rebase.autoStash = true;
+    init.defaultBranch = "main";
+    core = {
+      autocrlf = "input";
     };
+    color = {
+      ui = "auto";
+      diff = "auto";
+      status = "auto";
+      branch = "auto";
+    };
+    push.default = "current";
+    pull.rebase = true;
+    rebase.autoStash = true;
   };
 }
