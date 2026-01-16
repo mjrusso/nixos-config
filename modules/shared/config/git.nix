@@ -69,5 +69,6 @@
     push.default = "current";
     pull.rebase = true;
     rebase.autoStash = true;
+    rerere.enabled = true;
   };
 }
