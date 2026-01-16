@@ -26,5 +26,6 @@
 
     # Keybindings
     keybind = global:cmd+shift+i=toggle_quick_terminal
+    keybind = super+enter=unbind
   '';
 }
