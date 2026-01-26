@@ -83,6 +83,7 @@ in {
           "$HOME/.local/bin"
         ];
         sessionVariables = {
+          PATH = "$PATH:$HOME/.npm/bin";
           EDITOR = "ec";
           LIMA_WORKDIR = "/home/${user}.linux";
         };

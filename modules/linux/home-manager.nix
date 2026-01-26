@@ -11,8 +11,11 @@ in {
     homeDirectory = homeDir;
     enableNixpkgsReleaseCheck = false;
     packages = pkgs.callPackage ./packages.nix { };
-    sessionPath = [ "$HOME/.local/bin" ];
+    sessionPath = [
+      "$HOME/.local/bin"
+    ];
     sessionVariables = {
+      PATH = "$PATH:$HOME/.npm/bin";
       EDITOR = "ec";
       TERMINFO_DIRS = "$HOME/.nix-profile/share/terminfo";
     };
