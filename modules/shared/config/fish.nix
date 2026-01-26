@@ -29,6 +29,36 @@
   '';
 
   shellInitLast = ''
+    # If we're on Apple Silicon and Homebrew is installed, ensure that Homebrew
+    # is in the PATH. We insert `/opt/homebrew/bin` after Nix-managed paths but
+    # before the system paths; this way, binaries that ship with MacOS don't
+    # take priority over Homebrew (and Nix always has priority).
+    if test -d /opt/homebrew/bin
+        # Remove /opt/homebrew/bin if present to avoid duplicates and to ensure
+        # that our index calculation is stable.
+        set -l p (string match -v /opt/homebrew/bin $PATH)
+
+        # Look for where the system paths begin in the cleaned list.
+        set -l idx (contains -i /usr/local/bin $p)
+        if test -z "$idx"
+           set idx (contains -i /usr/bin $p)
+        end
+
+        # Splice /opt/homebrew/bin in before the anchor.
+        if test -n "$idx"
+            if test $idx -eq 1
+                # If anchor is at the beginning, put /opt/homebrew/bin first.
+                set -gx PATH /opt/homebrew/bin $p
+            else
+                # Anchor is not first: [Start...Before] + [Homebrew] + [Anchor...End]
+                set -gx PATH $p[1..(math $idx - 1)] /opt/homebrew/bin $p[$idx..-1]
+            end
+        else
+            # Fallback: append (no system paths found).
+            set -gx PATH $p /opt/homebrew/bin
+        end
+    end
+
     # Store private environment variables (which aren't committed to this
     # repository) in ~/.localrc.fish.
     if test -f ~/.localrc.fish
