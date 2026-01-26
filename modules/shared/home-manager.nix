@@ -9,8 +9,8 @@ let
   };
 in {
   direnv = import ./config/direnv.nix commonArgs;
-  fish = import ./config/fish.nix  commonArgs;
-  git = import ./config/git.nix  commonArgs;
+  fish = import ./config/fish.nix commonArgs;
+  git = import ./config/git.nix commonArgs;
   npm = import ./config/npm.nix commonArgs;
   zoxide = import ./config/zoxide.nix commonArgs;
   tmux = import ./config/tmux.nix commonArgs;
