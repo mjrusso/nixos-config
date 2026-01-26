@@ -13,6 +13,11 @@
     macos-titlebar-style = tabs
     macos-non-native-fullscreen = visible-menu
 
+    # Quick terminal
+    quick-terminal-position = bottom
+    quick-terminal-size = 30%,60%
+    quick-terminal-autohide = false
+
     # Shell [NOTE: shell integration configured manually]
     shell-integration = none
 
