@@ -4,7 +4,8 @@ let
   user = "mjrusso";
   xdg_configHome  = "/home/${user}/.config";
   shared-programs = import ../shared/home-manager.nix { inherit config osConfig pkgs lib; };
-  shared-files = import ../shared/files.nix { inherit config pkgs; };
+  homeDir = "/home/${user}";
+  shared-files = import ../shared/files.nix { inherit user config pkgs homeDir; };
 
   polybar-user_modules = builtins.readFile (pkgs.substituteAll {
     src = ./config/polybar/user_modules.ini;
@@ -41,11 +42,11 @@ in
     enable = true;
     iconTheme = {
       name = "Adwaita-dark";
-      package = pkgs.gnome.adwaita-icon-theme;
+      package = pkgs.adwaita-icon-theme;
     };
     theme = {
       name = "Adwaita-dark";
-      package = pkgs.gnome.adwaita-icon-theme;
+      package = pkgs.adwaita-icon-theme;
     };
   };
 

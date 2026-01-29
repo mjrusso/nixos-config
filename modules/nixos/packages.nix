@@ -40,7 +40,7 @@ shared-packages ++ [
   direnv
   rofi
   rofi-calc
-  rnix-lsp # lsp-mode for nix
+  nil # lsp for nix
   postgresql
   libtool # for Emacs vterm
 
