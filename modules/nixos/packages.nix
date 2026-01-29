@@ -66,7 +66,6 @@ shared-packages ++ [
   xdg-utils
 
   # Other utilities
-  yad # yad-calendar is used with polybar
   xdotool
   google-chrome
 
