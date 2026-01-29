@@ -1,11 +1,11 @@
-{ config, osConfig, pkgs, lib, ... }:
+{ config, osConfig, pkgs, lib, userInfo, ... }:
 
 let
   commonArgs = {
     inherit config osConfig pkgs lib;
-    name = "Michael Russo";
-    user = "mjrusso";
-    email = "mjr@mjrusso.com";
+    name = userInfo.name;
+    user = userInfo.user;
+    email = userInfo.email;
   };
 in {
   direnv = import ./config/direnv.nix commonArgs;

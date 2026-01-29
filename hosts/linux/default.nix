@@ -1,6 +1,6 @@
-{ config, osConfig, pkgs, ... }:
+{ config, osConfig, pkgs, userInfo, ... }:
 
-let user = "mjrusso"; in
+let user = userInfo.user; in
 
 {
   imports = [

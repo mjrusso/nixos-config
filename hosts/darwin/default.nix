@@ -1,6 +1,6 @@
-{ config, osConfig, pkgs, ... }:
+{ config, osConfig, pkgs, userInfo, ... }:
 
-let user = "mjrusso"; in
+let user = userInfo.user; in
 
 {
 
@@ -41,7 +41,7 @@ let user = "mjrusso"; in
   system = {
     stateVersion = 4;
 
-    primaryUser = "mjrusso";
+    primaryUser = user;
 
     defaults = {
       NSGlobalDomain = {

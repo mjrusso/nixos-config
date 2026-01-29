@@ -192,6 +192,12 @@ To update dependencies, run:
 nix flake update
 ```
 
+## Personalization
+
+All personal information is centralized in [`user-info.nix`](./user-info.nix).
+When forking, edit that file appropriately to set your system username, full
+name, email address, and SSH public keys.
+
 ## References
 
 - https://github.com/dustinlyons/nixos-config

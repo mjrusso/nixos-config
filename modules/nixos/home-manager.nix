@@ -1,8 +1,8 @@
-{ config, osConfig, pkgs, lib, ... }:
+{ config, osConfig, pkgs, lib, userInfo, ... }:
 
 let
-  user = "mjrusso";
-  shared-programs = import ../shared/home-manager.nix { inherit config osConfig pkgs lib; };
+  user = userInfo.user;
+  shared-programs = import ../shared/home-manager.nix { inherit config osConfig pkgs lib userInfo; };
   homeDir = "/home/${user}";
   shared-files = import ../shared/files.nix { inherit user config pkgs homeDir; };
 

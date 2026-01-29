@@ -1,7 +1,7 @@
-{ config, inputs, pkgs, lib, ... }:
+{ config, inputs, pkgs, lib, userInfo, ... }:
 
-let user = "mjrusso";
-    keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOk8iAnIaa1deoc7jw8YACPNVka1ZFJxhnU4G74TmS+p" ]; in
+let user = userInfo.user;
+    keys = userInfo.sshKeys; in
 {
   imports = [
     ../../modules/nixos/disk-config.nix

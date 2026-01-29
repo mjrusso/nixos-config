@@ -35,7 +35,8 @@
 
   outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, nixos-generators } @inputs:
     let
-      user = "mjrusso";
+      userInfo = import ./user-info.nix;
+      user = userInfo.user;
       linuxSystems = [ "x86_64-linux" "aarch64-linux" ];
       darwinSystems = [ "aarch64-darwin" ];
       forAllSystems = f: nixpkgs.lib.genAttrs (linuxSystems ++ darwinSystems) f;
@@ -78,7 +79,7 @@
       darwinConfigurations = {
         "aarch64-darwin@desktop" = darwin.lib.darwinSystem {
           system = "aarch64-darwin";
-          specialArgs = inputs // { systemType = "desktop"; };
+          specialArgs = inputs // { systemType = "desktop"; inherit userInfo; };
           modules = [
             mac-app-util.darwinModules.default
             home-manager.darwinModules.home-manager
@@ -88,7 +89,7 @@
 
         "aarch64-darwin@laptop" = darwin.lib.darwinSystem {
           system = "aarch64-darwin";
-          specialArgs = inputs // { systemType = "laptop"; };
+          specialArgs = inputs // { systemType = "laptop"; inherit userInfo; };
           modules = [
             mac-app-util.darwinModules.default
             home-manager.darwinModules.home-manager
@@ -98,7 +99,7 @@
 
         "aarch64-darwin@vm" = darwin.lib.darwinSystem {
           system = "aarch64-darwin";
-          specialArgs = inputs // { systemType = "vm"; };
+          specialArgs = inputs // { systemType = "vm"; inherit userInfo; };
           modules = [
             mac-app-util.darwinModules.default
             home-manager.darwinModules.home-manager
@@ -111,13 +112,14 @@
 
       nixosConfigurations = nixpkgs.lib.genAttrs linuxSystems (system: nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = inputs;
+        specialArgs = inputs // { inherit userInfo; };
         modules = [
           disko.nixosModules.disko
           home-manager.nixosModules.home-manager {
             home-manager = {
               useGlobalPkgs = true;
               useUserPackages = true;
+              extraSpecialArgs = { inherit userInfo; };
               users.${user} = import ./modules/nixos/home-manager.nix;
             };
           }
@@ -127,12 +129,10 @@
 
       # Linux (non-NixOS) config.
 
-      homeConfigurations = nixpkgs.lib.genAttrs linuxSystems (system: let
-        user = "mjrusso";
-      in
+      homeConfigurations = nixpkgs.lib.genAttrs linuxSystems (system:
         home-manager.lib.homeManagerConfiguration {
           pkgs = nixpkgs.legacyPackages.${system};
-          extraSpecialArgs = inputs;
+          extraSpecialArgs = inputs // { inherit userInfo; };
           modules = [
             ./hosts/linux
           ];
@@ -148,6 +148,7 @@
               home-manager = {
                 useGlobalPkgs = true;
                 useUserPackages = true;
+                extraSpecialArgs = { inherit userInfo; };
                 users.${user} = import ./modules/container/home-manager.nix;
               };
             }
@@ -155,7 +156,7 @@
           ];
           generate = format: nixos-generators.nixosGenerate {
             inherit system;
-            specialArgs = inputs;
+            specialArgs = inputs // { inherit userInfo; };
             modules = containerModules;
             inherit format;
           };
