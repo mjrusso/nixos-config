@@ -136,6 +136,34 @@ nix run .#build-switch
 > `nix run .#build` or `nix run .#build-switch`, or they will be ignored. (The
 > files do not need to be committed to the repo.)
 
+### Container and VM Images
+
+Container and VM images can be built using
+[nixos-generators](https://github.com/nix-community/nixos-generators). The
+following formats are supported:
+
+| Format         | Description                                |
+| -------------- | ------------------------------------------ |
+| `lxc`          | LXC container tarball                      |
+| `lxc-metadata` | LXC metadata tarball (needed for Incus)    |
+| `docker`       | Docker/OCI image                           |
+| `qcow`         | QEMU qcow2 disk image                      |
+| `raw`          | Raw disk image                             |
+| `iso`          | Bootable ISO image                         |
+
+To build an image:
+
+``` bash
+nix build .#images.x86_64-linux.docker
+nix build .#images.x86_64-linux.lxc
+nix build .#images.aarch64-linux.qcow
+```
+
+The resulting image will be written to `./result`.
+
+These images use a minimal NixOS configuration with SSH (key-only auth), Fish
+shell, and CLI development tools — no GUI, no desktop services.
+
 To update dependencies:
 
 ``` bash

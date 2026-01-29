@@ -26,9 +26,14 @@
     emacs-flake = {
       url = "github:mjrusso/emacs-flake";
     };
+
+    nixos-generators = {
+      url = "github:nix-community/nixos-generators";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake } @inputs:
+  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, nixos-generators } @inputs:
     let
       user = "mjrusso";
       linuxSystems = [ "x86_64-linux" "aarch64-linux" ];
@@ -125,6 +130,36 @@
           modules = [
             ./hosts/linux
           ];
+        }
+      );
+
+      # Container and VM image builds via nixos-generators.
+
+      images = nixpkgs.lib.genAttrs linuxSystems (system:
+        let
+          containerModules = [
+            home-manager.nixosModules.home-manager {
+              home-manager = {
+                useGlobalPkgs = true;
+                useUserPackages = true;
+                users.${user} = import ./modules/container/home-manager.nix;
+              };
+            }
+            ./hosts/container
+          ];
+          generate = format: nixos-generators.nixosGenerate {
+            inherit system;
+            specialArgs = inputs;
+            modules = containerModules;
+            inherit format;
+          };
+        in {
+          lxc = generate "lxc";
+          lxc-metadata = generate "lxc-metadata";
+          docker = generate "docker";
+          qcow = generate "qcow";
+          raw = generate "raw";
+          iso = generate "iso";
         }
       );
 
