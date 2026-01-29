@@ -74,9 +74,28 @@ which must be manually installed.
 
 #### Emacs
 
-Emacs is installed via Nix, but [my
-configuration](https://github.com/mjrusso/.emacs.d) is not part of this
-repository (and not managed by _home-manager_).
+Emacs is installed via Nix, using a custom build
+([mjrusso/emacs-flake](https://github.com/mjrusso/emacs-flake)).
+
+This flake is automatically built and
+[cached](https://garnix.io/docs/ci/caching/) by [Garnix](https://garnix.io/).
+
+- Garnix's binary cache is configured automatically for Darwin and NixOS hosts
+  (see [modules/shared/caches/](./modules/shared/caches)).
+
+- For Linux (non-NixOS) hosts, the Garnix cache must be configured manually.
+Add the following to `/etc/nix/nix.conf` (or `~/.config/nix/nix.conf` if your
+user is trusted):
+
+    ```
+    extra-substituters = https://cache.garnix.io
+    extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
+    ```
+
+    _(See [Garnix's documentation](https://garnix.io/docs/ci/caching/#caching).)_
+
+Note that my [Emacs configuration](https://github.com/mjrusso/.emacs.d) is not
+part of this repository (and not managed by _home-manager_).
 
 To grab my config:
 

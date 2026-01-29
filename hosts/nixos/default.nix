@@ -6,7 +6,7 @@ let user = "mjrusso";
   imports = [
     ../../modules/nixos/disk-config.nix
     ../../modules/shared
-    ../../modules/shared/cachix
+    ../../modules/shared/caches
   ];
 
   # Use the systemd-boot EFI boot loader.
@@ -220,7 +220,7 @@ let user = "mjrusso";
     # Emacs runs as a daemon
     emacs = {
       enable = true;
-      package = pkgs.emacs-unstable;
+      package = pkgs.my-emacs-with-packages;
     };
   };
 

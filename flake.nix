@@ -23,15 +23,12 @@
       url = "github:hraban/mac-app-util";
     };
 
-    # https://nixos.wiki/wiki/Emacs
-    # https://nixos.wiki/wiki/Overlays#In_a_Nix_flake
-    emacs-overlay = {
-      url = "github:nix-community/emacs-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
+    emacs-flake = {
+      url = "github:mjrusso/emacs-flake";
     };
   };
 
-  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-overlay } @inputs:
+  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake } @inputs:
     let
       user = "mjrusso";
       linuxSystems = [ "x86_64-linux" "aarch64-linux" ];

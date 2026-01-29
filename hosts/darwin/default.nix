@@ -7,7 +7,7 @@ let user = "mjrusso"; in
   imports = [
     ../../modules/darwin/home-manager.nix
     ../../modules/shared
-    ../../modules/shared/cachix
+    ../../modules/shared/caches
   ];
 
   # Setup user, packages, programs

@@ -1,4 +1,4 @@
-{ config, osConfig, pkgs, emacs-overlay, ... }:
+{ config, osConfig, pkgs, emacs-flake, ... }:
 
 {
 
@@ -11,7 +11,11 @@
     };
 
     overlays =
-      [(import emacs-overlay)] ++
+      [
+        (final: prev: {
+          my-emacs-with-packages = emacs-flake.packages.${prev.system}.default;
+        })
+      ] ++
       # Apply each overlay found in the /overlays directory
       (let path = ../../overlays; in with builtins;
        map (n: import (path + ("/" + n)))
