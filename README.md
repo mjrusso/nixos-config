@@ -2,9 +2,8 @@
 
 ## Setup and Installation
 
-> [!NOTE]
->
-> Mac and Linux (non-NixOS) only for now. I haven't tested on NixOS yet.
+Start by editing [`user-info.nix`](./user-info.nix) to set your desired
+username, full name, email address, and SSH public keys.
 
 ### Mac
 
@@ -65,6 +64,34 @@ sudo /sbin/usermod -s ~/.nix-profile/bin/fish $USER
 Finally, reboot the system. (Rebooting is required for terminal definitions to
 be properly installed; see `$TERMINFO_DIRS`.)
 
+### Container and VM Images
+
+Container and VM images can be built using
+[nixos-generators](https://github.com/nix-community/nixos-generators). The
+following formats are supported:
+
+| Format         | Description                             |
+|----------------|-----------------------------------------|
+| `lxc`          | LXC container tarball                   |
+| `lxc-metadata` | LXC metadata tarball (needed for Incus) |
+| `docker`       | Docker/OCI image                        |
+| `qcow`         | QEMU qcow2 disk image                   |
+| `raw`          | Raw disk image                          |
+| `iso`          | Bootable ISO image                      |
+
+To build an image:
+
+``` bash
+nix build .#images.x86_64-linux.docker
+nix build .#images.x86_64-linux.lxc
+nix build .#images.aarch64-linux.qcow
+```
+
+The resulting image will be written to `./result`.
+
+These images use a minimal NixOS configuration with SSH (key-only auth), Fish
+shell, and CLI development tools — no GUI, no desktop services.
+
 ### Additional Setup
 
 #### Fonts
@@ -84,32 +111,22 @@ This flake is automatically built and
   (see [modules/shared/caches/](./modules/shared/caches)).
 
 - For Linux (non-NixOS) hosts, the Garnix cache must be configured manually.
-Add the following to `/etc/nix/nix.conf` (or `~/.config/nix/nix.conf` if your
-user is trusted):
+  _(See [Garnix's documentation](https://garnix.io/docs/ci/caching/#caching).)_
+  Add the following to `/etc/nix/nix.conf` (or `~/.config/nix/nix.conf` if your
+  user is trusted):
 
     ```
     extra-substituters = https://cache.garnix.io
     extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
     ```
 
-    _(See [Garnix's documentation](https://garnix.io/docs/ci/caching/#caching).)_
-
 Note that my [Emacs configuration](https://github.com/mjrusso/.emacs.d) is not
-part of this repository (and not managed by _home-manager_).
-
-To grab my config:
+part of this repository (and not managed by _home-manager_). To grab my Emacs
+config, run:
 
 ``` bash
 git clone https://github.com/mjrusso/.emacs.d ~/.emacs.d
 ```
-
-Notes:
-
-- consider automating symlinking for _.emacs.d_ (perhaps merge my [existing emacs repo](https://github.com/mjrusso/.emacs.d) into this one?)
- - https://www.reddit.com/r/NixOS/comments/197wnuy/help_making_a_direct_symlink_from_config_repo_to/
- - https://github.com/kenranunderscore/dotfiles/blob/310fb5694934010dbee577f5659a45a3144d3626/home-manager-modules/emacs/default.nix#L11-L17
- - https://discourse.nixos.org/t/how-to-manage-dotfiles-with-home-manager/30576
- - alternatively can I set it up this way? https://www.reddit.com/r/NixOS/comments/vj95cd/home_manager_and_separate_dotfiles_repo/
 
 ## Usage
 
@@ -136,38 +153,18 @@ nix run .#build-switch
 > `nix run .#build` or `nix run .#build-switch`, or they will be ignored. (The
 > files do not need to be committed to the repo.)
 
-### Container and VM Images
+### Updating dependencies
 
-Container and VM images can be built using
-[nixos-generators](https://github.com/nix-community/nixos-generators). The
-following formats are supported:
-
-| Format         | Description                                |
-| -------------- | ------------------------------------------ |
-| `lxc`          | LXC container tarball                      |
-| `lxc-metadata` | LXC metadata tarball (needed for Incus)    |
-| `docker`       | Docker/OCI image                           |
-| `qcow`         | QEMU qcow2 disk image                      |
-| `raw`          | Raw disk image                             |
-| `iso`          | Bootable ISO image                         |
-
-To build an image:
+To update dependencies, run:
 
 ``` bash
-nix build .#images.x86_64-linux.docker
-nix build .#images.x86_64-linux.lxc
-nix build .#images.aarch64-linux.qcow
+nix flake update
 ```
-
-The resulting image will be written to `./result`.
-
-These images use a minimal NixOS configuration with SSH (key-only auth), Fish
-shell, and CLI development tools — no GUI, no desktop services.
 
 ### Checks
 
-To verify that all configurations (Darwin, NixOS, home-manager, and container
-images) evaluate without errors:
+To verify that all configurations (Darwin, NixOS, home-manager, and
+container/VM images) evaluate without errors:
 
 ``` bash
 nix flake check --show-trace --print-build-logs
@@ -183,20 +180,6 @@ nix build .#checks.aarch64-darwin.image-x86_64-linux-docker
 
 These checks work on any platform, by forcing full evaluation of each
 configuration's module system without building the target derivation.
-
-### Updating dependencies
-
-To update dependencies, run:
-
-``` bash
-nix flake update
-```
-
-## Personalization
-
-All personal information is centralized in [`user-info.nix`](./user-info.nix).
-When forking, edit that file appropriately to set your system username, full
-name, email address, and SSH public keys.
 
 ## References
 
