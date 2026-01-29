@@ -164,7 +164,29 @@ The resulting image will be written to `./result`.
 These images use a minimal NixOS configuration with SSH (key-only auth), Fish
 shell, and CLI development tools — no GUI, no desktop services.
 
-To update dependencies:
+### Checks
+
+To verify that all configurations (Darwin, NixOS, home-manager, and container
+images) evaluate without errors:
+
+``` bash
+nix flake check --show-trace --print-build-logs
+```
+
+Examples of how to run a single check:
+
+``` bash
+nix build .#checks.aarch64-darwin.darwin-aarch64-darwin@desktop
+nix build .#checks.aarch64-darwin.nixos-x86_64-linux
+nix build .#checks.aarch64-darwin.image-x86_64-linux-docker
+```
+
+These checks work on any platform, by forcing full evaluation of each
+configuration's module system without building the target derivation.
+
+### Updating dependencies
+
+To update dependencies, run:
 
 ``` bash
 nix flake update

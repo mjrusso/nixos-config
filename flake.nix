@@ -62,6 +62,12 @@
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
       };
+      mkEvalCheck = { system, name, drvPath }:
+        (nixpkgs.legacyPackages.${system}).runCommand "check-eval-${name}" {} ''
+          echo "Configuration '${name}' evaluates successfully."
+          echo "  drvPath: ${drvPath}"
+          touch $out
+        '';
     in
     {
       devShells = forAllSystems devShell;
@@ -161,6 +167,45 @@
           raw = generate "raw";
           iso = generate "iso";
         }
+      );
+
+      # Evaluation checks — verifies all configurations evaluate without errors.
+      # Uses the .drvPath interpolation trick so checks are buildable on any
+      # platform (the runCommand wrapper is native; the drvPath forces full
+      # cross-platform evaluation of the target config).
+
+      checks = forAllSystems (system:
+        let
+          check = name: drvPath: mkEvalCheck { inherit system name drvPath; };
+
+          darwinChecks = nixpkgs.lib.mapAttrs'
+            (name: cfg: nixpkgs.lib.nameValuePair
+              "darwin-${name}"
+              (check "darwin-${name}" cfg.system.drvPath))
+            self.darwinConfigurations;
+
+          nixosChecks = nixpkgs.lib.mapAttrs'
+            (name: cfg: nixpkgs.lib.nameValuePair
+              "nixos-${name}"
+              (check "nixos-${name}" cfg.config.system.build.toplevel.drvPath))
+            self.nixosConfigurations;
+
+          homeChecks = nixpkgs.lib.mapAttrs'
+            (name: cfg: nixpkgs.lib.nameValuePair
+              "home-${name}"
+              (check "home-${name}" cfg.activationPackage.drvPath))
+            self.homeConfigurations;
+
+          imageChecks = nixpkgs.lib.foldl' (acc: imgSystem:
+            acc // nixpkgs.lib.mapAttrs'
+              (format: drv: nixpkgs.lib.nameValuePair
+                "image-${imgSystem}-${format}"
+                (check "image-${imgSystem}-${format}" drv.drvPath))
+              self.images.${imgSystem}
+          ) {} linuxSystems;
+
+        in
+          darwinChecks // nixosChecks // homeChecks // imageChecks
       );
 
   };
