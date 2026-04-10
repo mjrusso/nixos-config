@@ -38,8 +38,8 @@
       f   = "fetch";
       fo  = "fetch origin";
       co  = "checkout";
-      com = "checkout main";
-      pom = "pull origin main";
+      com = "!git show-ref --verify --quiet refs/heads/main && git checkout main || git checkout master";
+      pom = "!git show-ref --verify --quiet refs/heads/main && git pull origin main || git pull origin master";
       cod = "checkout develop";
       pod = "pull origin develop";
       st  = "status -sb";
