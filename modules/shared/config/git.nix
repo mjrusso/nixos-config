@@ -11,7 +11,7 @@
     ".projectile"
     ".dir-locals.el"
     ".envrc"
-    ".claude/settings.local.json"
+    "**/.claude/settings.local.json"
     ".direnv/"
     ".nrepl-port"
     ".syncthing.*.tmp"
