@@ -60,6 +60,7 @@ let user = userInfo.user;
   environment.systemPackages = with pkgs; [
     gitFull
     inetutils
+    ghostty.terminfo
   ];
 
   system.stateVersion = "24.11";
