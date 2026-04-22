@@ -124,12 +124,20 @@ vm rm scratch            # delete VM and all its state
 ```
 
 On first `up`, the post-boot bootstrap script
-([`scripts/vm-bootstrap`](./scripts/vm-bootstrap)) runs over SSH to perform
-imperative setup that is awkward or impractical to express using Home Manager.
+([`vm-bootstrap`](./scripts/vm-bootstrap)) runs over SSH to perform imperative
+setup that is awkward or impractical to express using Home Manager.
 
 Subsequent `up`s skip provisioning. To force provisioning, pass the
 `--provision` flag, or use `vm provision <name>` against an already-running VM.
 (The bootstrap script is idempotent.)
+
+Other `vm up` flags:
+
+- `--no-provision` — skip the bootstrap script even on a fresh boot.
+- `--no-wait` — launch the VM and return immediately, without waiting for SSH
+  to come up or running bootstrap. Useful when you want to observe the boot
+  yourself (e.g. `tail -F ~/vms/<name>/serial.log` in another terminal).
+  Incompatible with `--provision`.
 
 The `vm` command drives two back-ends:
 
