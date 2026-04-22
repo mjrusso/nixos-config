@@ -107,6 +107,53 @@ with pkgs; [
     exec emacsclient -a "" "$@"
   '')
 
+  # Custom Emacs server quit wrapper
+  (pkgs.writeShellScriptBin "equit" ''
+    # Tells the Emacs server to save all file-visiting buffers and then
+    # exit. Mirrors the behaviour of `C-x C-c` (save-buffers-kill-emacs),
+    # except that modified buffers are saved silently rather than prompting,
+    # and the "active processes exist; kill them?" prompt is suppressed.
+    #
+    # `kill-emacs-query-functions` are still honoured, so packages like Magit
+    # can still block exit (e.g. to warn about unpushed commits).
+    #
+    # For an immediate exit (no save, no query hooks), use `ekill`. For a
+    # SIGKILL when the server is unresponsive, use `ekill9`.
+
+    exec emacsclient -e '(let ((confirm-kill-processes nil)) (save-buffers-kill-emacs t))'
+  '')
+
+  # Custom Emacs server kill wrapper
+  (pkgs.writeShellScriptBin "ekill" ''
+    # Tells the Emacs server to exit immediately via `kill-emacs`. Runs
+    # `kill-emacs-hook` but does NOT prompt about (or save) modified
+    # buffers, so any unsaved work will be lost.
+    #
+    # For a save-and-exit, use `equit`. For a SIGKILL when the server is
+    # unresponsive, use `ekill9`.
+
+    exec emacsclient -e '(kill-emacs)'
+  '')
+
+  # Custom Emacs server force-kill wrapper
+  (pkgs.writeShellScriptBin "ekill9" ''
+    # SIGKILL the Emacs daemon process. For use when the server is wedged
+    # and not responding to `ekill`.
+    #
+    # On macOS, BSD `killall` matches against the process name (basename of
+    # argv[0]), which is just `emacs` — so `killall -9 emacs` targets the
+    # daemon without hitting `emacsclient`.
+    #
+    # On Linux, `killall` (psmisc) matches against `/proc/<pid>/comm`, which
+    # for the Nix build is a truncated wrapped-binary name like
+    # `.emacs-31.0.50-` — so `killall emacs` finds nothing. We fall back to
+    # `pkill -f`, which matches the full argv and is stable across rebuilds.
+
+    ${if pkgs.stdenv.isDarwin
+      then "exec killall -9 emacs"
+      else "exec pkill -9 -f 'emacs.*daemon'"}
+  '')
+
   # Custom virtual machine management script
   (pkgs.writeShellScriptBin "vm" ''
     export VM_BOOTSTRAP=${../../scripts/vm-bootstrap}
