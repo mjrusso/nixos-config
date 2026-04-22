@@ -2,7 +2,7 @@
 
 let
   user = userInfo.user;
-  homeDir = "/home/${user}.linux";
+  homeDir = "/home/${user}";
   sharedFiles = import ../shared/files.nix { inherit user config pkgs homeDir; };
   additionalFiles = import ./files.nix { inherit user config pkgs homeDir; };
 in {
