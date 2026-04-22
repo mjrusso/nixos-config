@@ -107,6 +107,13 @@ with pkgs; [
     exec emacsclient -a "" "$@"
   '')
 
+  # Custom virtual machine management script
+  (pkgs.writeShellScriptBin "vm" ''
+    export VM_BOOTSTRAP=${../../scripts/vm-bootstrap}
+    ${pkgs.lib.optionalString pkgs.stdenv.isLinux "export VM_QEMU_AARCH64_UEFI=${pkgs.qemu}/share/qemu/edk2-aarch64-code.fd"}
+    exec ${pkgs.bash}/bin/bash ${../../scripts/vm} "$@"
+  '')
+
   # `better-git-branch`: Display git branches ordered by last commit,
   # ahead/behind info, and descriptions. With thanks to [0]. Also see: [1].
   #

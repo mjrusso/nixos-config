@@ -92,6 +92,65 @@ The resulting image will be written to `./result`.
 These images use a minimal NixOS configuration with SSH (key-only auth), Fish
 shell, and CLI development tools — no GUI, no desktop services.
 
+#### Running VM Images
+
+Additional tooling is provided that makes it easy to build and run VM images:
+
+- `[bake-golden](./scripts/bake-golden)` builds an `.#images.<system>.<format>`
+  virtual machine output and copies it to `$VMS_DIR` (default `~/vms`) as
+  `golden-<system>.<ext>`, with a per-image `.meta.json` sidecar that records
+  relevant image metadata.
+- `[vm](./scripts/vm)` orchestrates the VM lifecycle (boot, SSH, provision,
+  teardown, etc.), reading the appropriate pre-baked golden image and its
+  sidecar from `$VMS_DIR` as necessary.
+
+To start, from the root of this repository, bake (produce) a golden image:
+
+``` bash
+./scripts/bake-golden         # (flags: --system x86_64-linux|aarch64-linux, --format qcow|raw)
+```
+
+Then, to run and manage virtual machines:
+
+``` bash
+vm up scratch                 # boot a VM named "scratch"
+vm up emacs-test              # boot another VM (see networking notes below)
+vm list                       # show state
+vm ssh scratch                # SSH in
+vm provision scratch          # re-run bootstrap against a running VM
+vm up scratch --rebuild       # wipe disk, reinstall from current golden
+vm down scratch               # graceful shutdown
+vm rm scratch                 # delete VM and all its state
+```
+
+On first `up`, the post-boot bootstrap script (`scripts/vm-bootstrap`) runs
+over SSH to perform imperative setup that is awkward or impractical to express
+using Home Manager. Subsequent `up`s skip provisioning; force with
+`--provision`, or use `vm provision <name>` against an already-running VM. (The
+bootstrap script is idempotent.)
+
+The `vm` command drives two back-ends:
+
+- **Linux hosts** (`x86_64` or `aarch64`) use qemu + KVM, configured with
+  port-forwarded networking (SSH to `localhost:<allocated-port>`).
+- **Darwin hosts** (`aarch64` or `x86_64`) use
+  [vfkit](https://github.com/crc-org/vfkit) (which itself uses Apple's
+  `Virtualization.framework` under-the-covers), configured with NAT networking
+  with DHCP (SSH to the guest's assigned IP on port 22, as resolved from
+  `/var/db/dhcpd_leases`).
+
+Additional notes:
+
+- The host architecture must match the image architecture in both cases, as
+  cross-arch TCG emulation isn't wired up.
+- `vm list` shows the effective SSH endpoint in the `SSH` column regardless of
+  backend.
+- `bake-golden` defaults to `qcow` on Linux and `raw` on Darwin; the `vm`
+  script picks the matching disk extension automatically.
+- `vm` is available on the `PATH`, so you can run it from anywhere.
+- Per-VM state (disk, port, pidfile, serial log, provisioning sentinel) lives
+  under `$VMS_DIR/<name>/`.
+
 ### Additional Setup
 
 #### Fonts

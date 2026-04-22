@@ -8,4 +8,5 @@ shared-packages ++ [
   docker
   docker-compose
   kitty
+  vfkit
 ]

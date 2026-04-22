@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: bake-golden [--system SYSTEM] [--format FORMAT] [--output-dir DIR]
+
+Builds the flake's `.#images.<system>.<format>` output and installs it
+under $VMS_DIR (default ~/vms) as a "golden" image with a per-image
+`.meta.json` sidecar (user, bake timestamp, flake revision). The `vm`
+command picks golden images from that directory based on the host
+architecture and VMM, with no further knowledge of this repo.
+
+Options:
+  --system SYSTEM     One of: x86_64-linux, aarch64-linux.
+                      Defaults to the host architecture.
+  --format FORMAT     One of: qcow, raw. Defaults to the host's VMM:
+                      qcow on Linux (qemu), raw on Darwin (vfkit).
+  --output-dir DIR    Where to install. Defaults to $VMS_DIR or ~/vms.
+  -h, --help          Show this help.
+
+Output files:
+  <output-dir>/golden-<system>.<ext>             (ext is qcow2 or raw)
+  <output-dir>/golden-<system>.<ext>.meta.json   (sibling sidecar)
+USAGE
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
+}
+
+# Copy an image file preserving sparseness. Darwin's BSD cp has no
+# sparse detection, so a cp of a (potentially sparse) raw image fully
+# allocates the destination. `cp -c` uses clonefile(2) for an instant
+# CoW clone when source and destination are on the same APFS volume,
+# which is both faster and disk-space-free. Fall back to plain cp when
+# clonefile isn't possible (cross-volume, non-APFS) or on Linux, where
+# GNU cp's default --sparse=auto already does the right thing.
+copy_image() {
+  local src="$1" dst="$2"
+  if [ "$(uname -s)" = "Darwin" ] && cp -c "$src" "$dst" 2>/dev/null; then
+    return 0
+  fi
+  cp "$src" "$dst"
+}
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/.." && pwd))"
+
+SYSTEM=""
+FORMAT=""
+OUTPUT_DIR="${VMS_DIR:-$HOME/vms}"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --system) SYSTEM="$2"; shift 2 ;;
+    --format) FORMAT="$2"; shift 2 ;;
+    --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [ -z "$SYSTEM" ]; then
+  case "$(uname -m)" in
+    x86_64) SYSTEM="x86_64-linux" ;;
+    arm64|aarch64) SYSTEM="aarch64-linux" ;;
+    *) echo "Unknown host arch: $(uname -m). Pass --system explicitly." >&2; exit 1 ;;
+  esac
+fi
+
+if [ -z "$FORMAT" ]; then
+  case "$(uname -s)" in
+    Linux)  FORMAT="qcow" ;;
+    Darwin) FORMAT="raw" ;;
+    *) echo "Unknown host OS: $(uname -s). Pass --format explicitly." >&2; exit 1 ;;
+  esac
+fi
+
+case "$FORMAT" in
+  qcow) OUT_EXT="qcow2" ;;
+  raw)  OUT_EXT="raw" ;;
+  *) echo "Unsupported format: $FORMAT (use qcow or raw)" >&2; exit 1 ;;
+esac
+
+require_cmd nix
+require_cmd jq
+
+mkdir -p "$OUTPUT_DIR"
+
+echo "Building .#images.${SYSTEM}.${FORMAT} from $REPO_ROOT..."
+(cd "$REPO_ROOT" && nix build ".#images.${SYSTEM}.${FORMAT}")
+
+SRC="$(find -L "$REPO_ROOT/result" -maxdepth 3 -type f \( -name "*.qcow2" -o -name "*.raw" -o -name "*.img" \) -print -quit)"
+[ -n "${SRC:-}" ] && [ -f "$SRC" ] || {
+  echo "No image file found under $REPO_ROOT/result" >&2
+  exit 1
+}
+
+DEST="$OUTPUT_DIR/golden-$SYSTEM.$OUT_EXT"
+META="$DEST.meta.json"
+
+echo "Installing golden image: $DEST"
+rm -f "$DEST.partial"
+copy_image "$SRC" "$DEST.partial"
+chmod u+w "$DEST.partial"
+mv "$DEST.partial" "$DEST"
+
+USER_FIELD="$(nix eval --raw -f "$REPO_ROOT/user-info.nix" user)"
+BAKED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+FLAKE_REV="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
+  FLAKE_REV="${FLAKE_REV}-dirty"
+fi
+
+echo "Writing meta sidecar: $META"
+jq -n \
+  --arg user "$USER_FIELD" \
+  --arg baked_at "$BAKED_AT" \
+  --arg flake_rev "$FLAKE_REV" \
+  --arg system "$SYSTEM" \
+  --arg format "$OUT_EXT" \
+  '{user: $user, baked_at: $baked_at, flake_rev: $flake_rev, system: $system, format: $format}' \
+  > "$META.partial"
+mv "$META.partial" "$META"
+
+echo ""
+echo "Done."
+echo "  Image: $DEST"
+echo "  Meta:  $META"

@@ -10,6 +10,7 @@ shared-packages ++ [
 
   docker
   docker-compose
+  qemu
 
   openssh
 
