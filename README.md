@@ -117,6 +117,7 @@ vm up scratch            # boot a VM named "scratch"
 vm up emacs-test         # boot another VM (see networking notes below)
 vm list                  # show state
 vm ssh scratch           # SSH in
+vm console scratch       # stream the serial log (live boot output)
 vm provision scratch     # re-run bootstrap against a running VM
 vm up scratch --rebuild  # wipe disk, reinstall from current golden
 vm down scratch          # graceful shutdown
@@ -136,8 +137,8 @@ Other `vm up` flags:
 - `--no-provision` — skip the bootstrap script even on a fresh boot.
 - `--no-wait` — launch the VM and return immediately, without waiting for SSH
   to come up or running bootstrap. Useful when you want to observe the boot
-  yourself (e.g. `tail -F ~/vms/<name>/serial.log` in another terminal).
-  Incompatible with `--provision`.
+  yourself (e.g. `vm console <name>` in another terminal). Incompatible with
+  `--provision`.
 
 The `vm` command drives two back-ends:
 

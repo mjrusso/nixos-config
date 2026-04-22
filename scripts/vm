@@ -19,6 +19,8 @@ Subcommands:
   down <name>             Stop the VM (graceful kill, then SIGKILL).
   rm <name>               Stop and delete the VM and all its state.
   ssh <name> [args...]    SSH into the VM.
+  console <name>          Stream the VM's serial log (follows live boot
+                          output; Ctrl-C detaches without touching the VM).
   provision <name>        Re-run the bootstrap script against the VM.
   list                    List known VMs and their status.
 
@@ -44,6 +46,21 @@ if [ -z "$VMS_DIR" ] || [ "$VMS_DIR" = "/" ]; then
   echo "Refusing to operate with VMS_DIR='$VMS_DIR'." >&2
   exit 1
 fi
+# Reject whitespace and shell metacharacters in VMS_DIR. The only
+# *load-bearing* character is "'" — acquire_up_lock installs an EXIT
+# trap whose body embeds $d (= $VMS_DIR/$name) inside single quotes,
+# and a stray "'" there would break out of the quoting and inject
+# shell. The rest are hygiene (whitespace breaks unquoted expansions
+# elsewhere in the script; the remaining metacharacters are
+# belt-and-suspenders against future refactors that might drop the
+# single quotes around $d). validate_name further restricts $name to
+# [a-zA-Z0-9_-]; both halves of $d have to stay clean.
+case "$VMS_DIR" in
+  *"'"*|*[$' \t\n\r"`$\\;&|<>(){}*?!#~']*)
+    echo "Refusing to operate with VMS_DIR containing whitespace or shell metacharacters: '$VMS_DIR'." >&2
+    exit 1
+    ;;
+esac
 PORT_LOW=2222
 PORT_HIGH=2299
 
@@ -312,18 +329,39 @@ try_graceful_shutdown() {
   echo "system_powerdown" | socat - "UNIX-CONNECT:$socket" >/dev/null 2>&1
 }
 
-# Find live driver processes associated with a VM's state dir by
-# matching on its disk path (unique per VM). Used to catch stragglers
-# whose PID is no longer in the pidfile — e.g. when a prior `vm up`
-# crashed, a later retry overwrote the pidfile, and the earlier qemu
-# outlived it.
-find_vm_processes() {
-  # Strip trailing slash: cmd_list iterates "$VMS_DIR"/*/ which yields
-  # a trailing slash, and a // in the pgrep regex would never match
-  # real argv (single slash).
-  local d="${1%/}"
-  command -v pgrep >/dev/null 2>&1 || return 0
-  pgrep -f "$d/disk\\." 2>/dev/null || true
+# Acquire a per-VM launch lock at $d/.lock (a symlink whose target is
+# the holder's pid). symlink(2) is atomic on both Linux and Darwin,
+# which makes the create-and-record-holder step a single syscall — no
+# window where a reader can see the lock without a holder. Auto-recovers
+# if the holder pid is dead.
+acquire_up_lock() {
+  local d="$1"
+  while ! ln -s "$$" "$d/.lock" 2>/dev/null; do
+    # Bail out if the state dir itself has vanished — a concurrent
+    # `vm rm` already inside its own lock can `rm -rf "$d"` out from
+    # under us, at which point `ln -s` fails with ENOENT forever and
+    # the loop would spin.
+    [ -d "$d" ] || return 1
+    local holder=""
+    holder="$(readlink "$d/.lock" 2>/dev/null || true)"
+    if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+      echo "vm up already in progress for $(basename "$d") (pid $holder)." >&2
+      return 1
+    fi
+    # Re-check the target before unlinking, so a concurrent acquirer's
+    # fresh lock (with a different target) isn't clobbered during our
+    # TOCTOU window.
+    local still=""
+    still="$(readlink "$d/.lock" 2>/dev/null || true)"
+    [ "$still" = "$holder" ] && rm -f "$d/.lock" 2>/dev/null || true
+  done
+  # This is the only EXIT trap in the script. Bash allows one handler
+  # per signal, so adding another `trap ... EXIT` elsewhere would
+  # silently replace this one and strand .lock files. If you need
+  # another EXIT action, chain it here rather than installing a
+  # second trap.
+  # shellcheck disable=SC2064
+  trap "rm -f '$d/.lock' 2>/dev/null || true" EXIT
 }
 
 wait_for_ssh() {
@@ -408,6 +446,12 @@ cmd_up() {
   local d disk
   d="$(vm_dir "$name")"
   mkdir -p "$d"
+  # Hold the launch lock across the is_running check → driver launch →
+  # pidfile write window. Released by the EXIT trap installed inside
+  # acquire_up_lock. Ordering is load-bearing: is_running must run
+  # *inside* the lock so two concurrent `vm up`s can't both observe
+  # "not running" and both proceed to launch.
+  acquire_up_lock "$d" || exit 1
   disk="$(disk_path_for "$d")"
 
   if is_running "$d/vm.pid"; then
@@ -450,6 +494,16 @@ cmd_up() {
 
   local user; user="$(ssh_user "$d")" || exit 1
 
+  # qemu is daemonized and vfkit is nohup'd, so a signal between driver
+  # launch and trap installation would otherwise leave the VM running
+  # and holding its port. Install the trap *before* the launch so it
+  # covers the launch itself. The explicit `exit 130` is load-bearing:
+  # it guarantees the EXIT trap (installed by acquire_up_lock) fires
+  # and removes $d/.lock. Do not replace with a bare return.
+  trap 'echo >&2; echo "Interrupted — tearing down VM '"'"'$name'"'"'." >&2; cmd_down "$name" || true; exit 130' INT TERM
+
+  : > "$d/serial.log"
+
   case "$driver" in
     qemu)  boot_qemu  "$d" "$name" "$image_arch" "$disk" ;;
     vfkit) boot_vfkit "$d" "$name" "$disk" ;;
@@ -460,15 +514,15 @@ cmd_up() {
   port="$(cat "$d/port")"
 
   if [ "$no_wait" -eq 1 ]; then
+    # Clear the signal trap: with --no-wait we're about to exit
+    # cleanly, and we don't want a tty SIGHUP during shell teardown to
+    # tear the VM the user just asked us to launch. The EXIT trap (lock
+    # cleanup) stays.
+    trap - INT TERM
     echo ""
     echo "VM '$name' launched (pid $(cat "$d/vm.pid")). SSH not verified; bootstrap skipped."
   else
-    # qemu is daemonized and vfkit is nohup'd, so Ctrl-C during the
-    # wait would otherwise leave the VM running and holding its port.
-    # Tear it down on interrupt. Cleared once SSH is verified — after
-    # that, provision failures deliberately leave the VM up.
-    trap 'echo >&2; echo "Interrupted — tearing down VM '"'"'$name'"'"'." >&2; cmd_down "$name" || true; exit 130' INT TERM
-    echo "(For live boot output: tail -F $d/serial.log)"
+    echo "(For live boot output: vm console $name)"
     if ! wait_for_ssh "$host" "$port" "$user"; then
       echo "Tearing down unresponsive VM '$name'. Check $d/serial.log for boot output." >&2
       cmd_down "$name" || true
@@ -497,7 +551,7 @@ cmd_up() {
     echo "VM '$name' is up."
   fi
   echo "  ssh:     vm ssh $name   (or: ssh -p $port $user@$host)"
-  echo "  serial:  tail -f $d/serial.log"
+  echo "  console: vm console $name   (tails $d/serial.log)"
   case "$driver" in
     qemu)  echo "  monitor: socat - UNIX-CONNECT:$d/qemu.mon" ;;
     vfkit) echo "  control: curl --unix-socket $d/vfkit.sock http://_/vm/state" ;;
@@ -564,6 +618,18 @@ boot_vfkit() {
   local sock="$d/vfkit.sock"
   rm -f "$sock" "$d/qemu.mon"
 
+  # Endpoint-file ordering: write the known-good value ($d/port = 22
+  # for vfkit) and wipe any stale $d/ssh_host *before* launch, so a
+  # SIGKILL of this launcher during the IP-discovery window can't
+  # leave vfkit alive with endpoint files that disagree with reality.
+  # The `nohup vfkit & echo $! > vm.pid` pair below still has a
+  # microsecond window between fork and pidfile-write; backstops are
+  # the launch lock held across this whole region by cmd_up, and
+  # is_running's /proc/<pid>/comm check against vfkit*. Not worth the
+  # extra sh -c wrapper to close the microsecond window.
+  rm -f "$d/ssh_host"
+  echo "22" > "$d/port"
+
   echo "Starting VM '$name' via vfkit..."
 
   # vfkit runs in the foreground and has no --daemonize equivalent, so
@@ -600,7 +666,6 @@ boot_vfkit() {
   }
   echo " — $ip"
   echo "$ip" > "$d/ssh_host"
-  echo "22" > "$d/port"
 }
 
 cmd_down() {
@@ -608,10 +673,7 @@ cmd_down() {
   validate_name "$name"
   local d; d="$(vm_dir "$name")"
 
-  local acted=0
-
   if is_running "$d/vm.pid"; then
-    acted=1
     local pid; pid="$(cat "$d/vm.pid")"
 
     if try_graceful_shutdown "$d/qemu.mon"; then
@@ -632,29 +694,7 @@ cmd_down() {
       echo "Still alive after 20s, sending SIGKILL (may corrupt disk)." >&2
       kill -9 "$pid" 2>/dev/null || true
     fi
-  fi
-
-  # Sweep for any driver processes still holding this VM's disk. The
-  # pidfile-based path above only kills what's currently recorded; a
-  # prior crashed `vm up` could have left qemu/vfkit running after its
-  # PID was overwritten or cleared from the pidfile.
-  local stragglers
-  stragglers="$(find_vm_processes "$d")"
-  if [ -n "$stragglers" ]; then
-    acted=1
-    # shellcheck disable=SC2086
-    echo "Found straggler process(es) for VM '$name': $(echo $stragglers | tr '\n' ' ')— terminating." >&2
-    # shellcheck disable=SC2086
-    kill $stragglers 2>/dev/null || true
-    sleep 2
-    stragglers="$(find_vm_processes "$d")"
-    if [ -n "$stragglers" ]; then
-      # shellcheck disable=SC2086
-      kill -9 $stragglers 2>/dev/null || true
-    fi
-  fi
-
-  if [ "$acted" -eq 0 ]; then
+  else
     echo "VM '$name' is not running."
   fi
 
@@ -664,8 +704,16 @@ cmd_down() {
 cmd_rm() {
   local name="${1:?Usage: vm rm <name>}"
   validate_name "$name"
+  local d; d="$(vm_dir "$name")"
+  # Hold the launch lock so a concurrent `vm up <same name>` can't tear
+  # in mid-removal. Skip the lock if the state dir is already gone —
+  # `ln -s` into a nonexistent directory would fail forever. The EXIT
+  # trap's rm -f is a harmless no-op after `rm -rf "$d"` completes.
+  if [ -d "$d" ]; then
+    acquire_up_lock "$d" || exit 1
+  fi
   cmd_down "$name" || true
-  rm -rf "$(vm_dir "$name")"
+  rm -rf "$d"
   echo "Removed VM '$name'."
 }
 
@@ -682,6 +730,20 @@ cmd_ssh() {
   exec ssh -p "$port" $opts "$user@$host" "$@"
 }
 
+cmd_console() {
+  local name="${1:?Usage: vm console <name>}"
+  validate_name "$name"
+  local d; d="$(vm_dir "$name")"
+  [ -d "$d" ] || { echo "No such VM '$name' — did you mean 'vm up $name'?" >&2; exit 1; }
+  # `tail -F` = `tail -f --retry`: waits for the file to appear if it's
+  # not yet created (driver still starting) and follows across rotation.
+  # `-n +1` starts from the top so a late-attaching console sees the
+  # full boot log. This pairs with the `: > serial.log` truncation in
+  # cmd_up — without it, -n +1 would dump the concatenated history of
+  # every prior boot.
+  exec tail -n +1 -F "$d/serial.log"
+}
+
 cmd_provision() {
   local name="${1:?Usage: vm provision <name>}"
   validate_name "$name"
@@ -696,7 +758,6 @@ cmd_provision() {
 
 cmd_list() {
   local any=0
-  local warnings=""
   local fmt="%-18s %-9s %-22s %-7s %-11s %-10s %s\n"
   for d in "$VMS_DIR"/*/; do
     [ -d "$d" ] || continue
@@ -734,34 +795,10 @@ cmd_list() {
       fi
     fi
 
-    # Detect driver processes not accounted for in the pidfile — e.g.
-    # a prior crashed `vm up` whose qemu survived and whose PID got
-    # overwritten by a later retry. These won't show up in STATUS
-    # alone, so surface them as warnings.
-    local procs; procs="$(find_vm_processes "$d")"
-    if [ -n "$procs" ]; then
-      local tracked="" untracked
-      [ "$status" = "running" ] && [ -f "$d/vm.pid" ] && tracked="$(cat "$d/vm.pid")"
-      if [ -n "$tracked" ]; then
-        untracked="$(echo "$procs" | grep -vx "$tracked" || true)"
-      else
-        untracked="$procs"
-      fi
-      if [ -n "$untracked" ]; then
-        local count; count="$(echo "$untracked" | grep -c .)"
-        # shellcheck disable=SC2086
-        warnings+="warning: VM '$name' has $count untracked driver process(es) (pid $(echo $untracked | tr '\n' ' ')) — run 'vm down $name' to clean up."$'\n'
-      fi
-    fi
-
     # shellcheck disable=SC2059
     printf "$fmt" "$name" "$status" "$ssh_endpoint" "$size" "$baked" "$rev" "$d"
   done
   [ "$any" -eq 0 ] && echo "No VMs."
-  if [ -n "$warnings" ]; then
-    echo "" >&2
-    printf '%s' "$warnings" >&2
-  fi
   return 0
 }
 
@@ -770,6 +807,7 @@ case "${1:-}" in
   down) shift; cmd_down "$@" ;;
   rm) shift; cmd_rm "$@" ;;
   ssh) shift; cmd_ssh "$@" ;;
+  console) shift; cmd_console "$@" ;;
   provision) shift; cmd_provision "$@" ;;
   list|ls) cmd_list ;;
   -h|--help|help|"") usage ;;
