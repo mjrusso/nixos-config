@@ -70,6 +70,7 @@ with pkgs; [
   jq
   ripgrep
   fd
+  socat
   tree
   tmux
   zellij
