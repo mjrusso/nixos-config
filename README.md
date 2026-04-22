@@ -153,6 +153,17 @@ Additional notes:
 
 ### Additional Setup
 
+After `nix run .#build-switch` completes on a fresh machine, run
+`home-bootstrap` to perform additional setup steps:
+
+``` bash
+home-bootstrap
+```
+
+The [`home-bootstrap`](./scripts/home-bootstrap) script performs a limited
+number of imperative steps, mostly for operations that are awkward to implement
+with _home-manager_.
+
 #### Fonts
 
 I use [Berkeley Mono](https://berkeleygraphics.com/typefaces/berkeley-mono/),
@@ -180,8 +191,9 @@ This flake is automatically built and
     ```
 
 Note that my [Emacs configuration](https://github.com/mjrusso/.emacs.d) is not
-part of this repository (and not managed by _home-manager_). To grab my Emacs
-config, run:
+part of this repository (and not managed by _home-manager_). It is cloned into
+`~/.emacs.d` automatically by the [`home-bootstrap`](./scripts/home-bootstrap)
+script, or can alternatively be cloned directly:
 
 ``` bash
 git clone https://github.com/mjrusso/.emacs.d ~/.emacs.d

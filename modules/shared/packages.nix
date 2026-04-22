@@ -160,6 +160,11 @@ with pkgs; [
     exec ${pkgs.bash}/bin/bash ${../../scripts/vm} "$@"
   '')
 
+  # Post-install bootstrap script to perform additional imperative setup.
+  (pkgs.writeShellScriptBin "home-bootstrap" ''
+    exec ${pkgs.bash}/bin/bash ${../../scripts/home-bootstrap} "$@"
+  '')
+
   # `better-git-branch`: Display git branches ordered by last commit,
   # ahead/behind info, and descriptions. With thanks to [0]. Also see: [1].
   #

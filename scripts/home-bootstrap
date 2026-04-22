@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# IMPORTANT: This script must be idempotent (safe to re-run multiple times).
+
+log() { echo "[home-bootstrap] $*"; }
+
+clone_if_missing() {
+  local url="$1" dest="$2"
+  if [ -d "$dest" ]; then
+    log "$dest already exists — skipping"
+    return 0
+  fi
+  log "cloning $url -> $dest"
+  git clone "$url" "$dest"
+}
+
+clone_if_missing "https://github.com/mjrusso/.emacs.d" "$HOME/.emacs.d"
+
+mkdir -p "$HOME/git/github.com/mjrusso"
+
+clone_if_missing "https://github.com/mjrusso/wingman" "$HOME/git/github.com/mjrusso/wingman"
+
+log "done"
