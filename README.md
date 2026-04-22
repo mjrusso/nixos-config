@@ -100,9 +100,9 @@ Additional tooling is provided that makes it easy to build and run VM images:
   virtual machine output and copies it to `$VMS_DIR` (default `~/vms`) as
   `golden-<system>.<ext>`, with a per-image `.meta.json` sidecar that records
   relevant image metadata.
-- [`vm`](./scripts/vm) orchestrates the VM lifecycle (boot, SSH, provision,
-  teardown, etc.), reading the appropriate pre-baked golden image and its
-  sidecar from `$VMS_DIR` as necessary.
+- [`vm`](./scripts/vm) orchestrates the VM lifecycle (boot, SSH, teardown,
+  etc.), reading the appropriate pre-baked golden image and its sidecar from
+  `$VMS_DIR` as necessary.
 
 To start, from the root of this repository, bake (produce) a golden image:
 
@@ -118,27 +118,16 @@ vm up emacs-test         # boot another VM (see networking notes below)
 vm list                  # show state
 vm ssh scratch           # SSH in
 vm console scratch       # stream the serial log (live boot output)
-vm provision scratch     # re-run bootstrap against a running VM
 vm up scratch --rebuild  # wipe disk, reinstall from current golden
 vm down scratch          # graceful shutdown
 vm rm scratch            # delete VM and all its state
 ```
 
-On first `up`, the post-boot bootstrap script
-([`vm-bootstrap`](./scripts/vm-bootstrap)) runs over SSH to perform imperative
-setup that is awkward or impractical to express using Home Manager.
+`vm up` flags:
 
-Subsequent `up`s skip provisioning. To force provisioning, pass the
-`--provision` flag, or use `vm provision <name>` against an already-running VM.
-(The bootstrap script is idempotent.)
-
-Other `vm up` flags:
-
-- `--no-provision` — skip the bootstrap script even on a fresh boot.
 - `--no-wait` — launch the VM and return immediately, without waiting for SSH
-  to come up or running bootstrap. Useful when you want to observe the boot
-  yourself (e.g. `vm console <name>` in another terminal). Incompatible with
-  `--provision`.
+  to come up. Useful when you want to observe the boot yourself (e.g.
+  `vm console <name>` in another terminal).
 
 The `vm` command drives two back-ends:
 
@@ -159,8 +148,8 @@ Additional notes:
 - `bake-golden` defaults to `qcow` on Linux and `raw` on Darwin; the `vm`
   script picks the matching disk extension automatically.
 - `vm` is available on the `PATH`, so you can run it from anywhere.
-- Per-VM state (disk, port, pidfile, serial log, provisioning sentinel) lives
-  under `$VMS_DIR/<name>/`.
+- Per-VM state (disk, port, pidfile, serial log) lives under
+  `$VMS_DIR/<name>/`.
 
 ### Additional Setup
 

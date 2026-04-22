@@ -6,22 +6,17 @@ usage() {
 Usage: vm <subcommand> [args]
 
 Subcommands:
-  up <name> [--rebuild] [--provision] [--no-provision] [--no-wait]
-        Boot a VM from the host's golden image. On the first `up` the
-        bootstrap script runs; subsequent `up`s skip it.
+  up <name> [--rebuild] [--no-wait]
+        Boot a VM from the host's golden image.
         --rebuild         wipe the VM's disk and reinstall from the
                           current golden image (destroys VM state)
-        --provision       force running bootstrap even on a non-fresh boot
-        --no-provision    skip running bootstrap even on a fresh boot
         --no-wait         return as soon as the VM process is launched;
-                          skip the SSH readiness check and bootstrap.
-                          Incompatible with --provision.
+                          skip the SSH readiness check.
   down <name>             Stop the VM (graceful kill, then SIGKILL).
   rm <name>               Stop and delete the VM and all its state.
   ssh <name> [args...]    SSH into the VM.
   console <name>          Stream the VM's serial log (follows live boot
                           output; Ctrl-C detaches without touching the VM).
-  provision <name>        Re-run the bootstrap script against the VM.
   list                    List known VMs and their status.
 
 State directory: $VMS_DIR (default: ~/vms). Golden images and their
@@ -38,8 +33,6 @@ Networking depends on the backend:
 USAGE
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BOOTSTRAP="${VM_BOOTSTRAP:-$SCRIPT_DIR/vm-bootstrap}"
 VMS_DIR="${VMS_DIR:-$HOME/vms}"
 # Sanity-check VMS_DIR before anything in this script does `rm -rf` under it.
 if [ -z "$VMS_DIR" ] || [ "$VMS_DIR" = "/" ]; then
@@ -89,23 +82,15 @@ meta_for_golden() {
 }
 
 ssh_user() {
-  # Optional $1: a VM's state directory. If given and its meta.json
-  # exists (snapshotted at `up` time), prefer that — it's pinned to the
-  # golden the VM was actually installed from, so rebakes don't produce
-  # mismatches. Fall back to the current golden's sidecar for fresh
-  # lookups before the VM has been created.
+  # $1: a VM's state directory. Read the username from its meta.json
+  # sidecar, snapshotted at `up` time and pinned to the golden the VM
+  # was actually installed from, so later rebakes don't produce
+  # mismatches.
   #
   # Typically called via command substitution, so use `return` instead
   # of `exit` — callers should check the exit status (via `|| exit`).
   command -v jq >/dev/null 2>&1 || { echo "Missing required command: jq" >&2; return 1; }
-  local d="${1:-}" meta
-  if [ -n "$d" ] && [ -f "$d/meta.json" ]; then
-    meta="$d/meta.json"
-  else
-    local golden
-    golden="$(golden_image_path)" || return 1
-    meta="$(meta_for_golden "$golden")"
-  fi
+  local meta="$1/meta.json"
   [ -f "$meta" ] || {
     echo "Missing meta sidecar: $meta" >&2
     echo "Run ./scripts/bake-golden from the nixos-config repo." >&2
@@ -382,32 +367,18 @@ wait_for_ssh() {
   return 1
 }
 
-provision() {
-  local host="$1" port="$2" user="$3"
-  local opts; opts="$(ssh_opts)"
-  echo "Running bootstrap..."
-  # shellcheck disable=SC2086
-  ssh -p "$port" $opts "$user@$host" 'bash -s' < "$BOOTSTRAP"
-}
-
 cmd_up() {
-  local name="" rebuild=0 provision_override="" no_wait=0
+  local name="" rebuild=0 no_wait=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --rebuild) rebuild=1; shift ;;
-      --provision) provision_override="yes"; shift ;;
-      --no-provision) provision_override="no"; shift ;;
       --no-wait) no_wait=1; shift ;;
       -*) echo "Unknown flag: $1" >&2; exit 1 ;;
       *) name="$1"; shift ;;
     esac
   done
-  [ -n "$name" ] || { echo "Usage: vm up <name> [--rebuild] [--provision] [--no-provision] [--no-wait]" >&2; exit 1; }
+  [ -n "$name" ] || { echo "Usage: vm up <name> [--rebuild] [--no-wait]" >&2; exit 1; }
   validate_name "$name"
-  if [ "$no_wait" -eq 1 ] && [ "$provision_override" = "yes" ]; then
-    echo "--no-wait and --provision are incompatible (provisioning needs SSH)." >&2
-    exit 1
-  fi
 
   require_cmd ssh
   require_cmd jq
@@ -459,24 +430,18 @@ cmd_up() {
       echo "VM '$name' is running — stop it with 'vm down $name' before rebuilding." >&2
       exit 1
     fi
-    local host port user
+    local host port
     host="$(ssh_host_for "$d")"
     port="$(cat "$d/port")"
-    user="$(ssh_user "$d")" || exit 1
     echo "VM '$name' is already running (pid $(cat "$d/vm.pid"), $host:$port)."
-    if [ "$provision_override" = "yes" ]; then
-      provision "$host" "$port" "$user"
-      touch "$d/.provisioned"
-    else
-      echo "Nothing to do. Use --provision to re-run bootstrap, or 'vm down $name' first to reboot."
-    fi
+    echo "Nothing to do. Run 'vm down $name' first to reboot."
     return 0
   fi
 
   if [ "$rebuild" -eq 1 ]; then
     # Full reset. Wipe either disk format (in case the host driver
-    # changed since last boot), EFI vars, and provisioning sentinel.
-    rm -f "$d/disk.qcow2" "$d/disk.raw" "$d/.provisioned" "$d/efi-vars.fd"
+    # changed since last boot) and EFI vars.
+    rm -f "$d/disk.qcow2" "$d/disk.raw" "$d/efi-vars.fd"
   fi
 
   if [ ! -f "$disk" ]; then
@@ -489,7 +454,6 @@ cmd_up() {
     # Snapshot the golden's sidecar so `vm list` can report what this
     # specific VM was baked from, even after later rebakes.
     cp "$(meta_for_golden "$golden")" "$d/meta.json"
-    rm -f "$d/.provisioned"
   fi
 
   local user; user="$(ssh_user "$d")" || exit 1
@@ -520,7 +484,7 @@ cmd_up() {
     # cleanup) stays.
     trap - INT TERM
     echo ""
-    echo "VM '$name' launched (pid $(cat "$d/vm.pid")). SSH not verified; bootstrap skipped."
+    echo "VM '$name' launched (pid $(cat "$d/vm.pid")). SSH not verified."
   else
     echo "(For live boot output: vm console $name)"
     if ! wait_for_ssh "$host" "$port" "$user"; then
@@ -529,23 +493,6 @@ cmd_up() {
       exit 1
     fi
     trap - INT TERM
-
-    local needs_provisioning=0
-    [ ! -f "$d/.provisioned" ] && needs_provisioning=1
-
-    local should_provision="$needs_provisioning"
-    [ "$provision_override" = "yes" ] && should_provision=1
-    [ "$provision_override" = "no" ] && should_provision=0
-
-    if [ "$should_provision" -eq 1 ]; then
-      if ! provision "$host" "$port" "$user"; then
-        echo "Provisioning failed — VM is still up. Fix and run: vm provision $name" >&2
-        exit 1
-      fi
-      touch "$d/.provisioned"
-    else
-      echo "Skipping bootstrap (disk already provisioned). Use --provision to force."
-    fi
 
     echo ""
     echo "VM '$name' is up."
@@ -744,18 +691,6 @@ cmd_console() {
   exec tail -n +1 -F "$d/serial.log"
 }
 
-cmd_provision() {
-  local name="${1:?Usage: vm provision <name>}"
-  validate_name "$name"
-  local d; d="$(vm_dir "$name")"
-  is_running "$d/vm.pid" || { echo "VM '$name' is not running." >&2; exit 1; }
-  local port; port="$(cat "$d/port")"
-  local host; host="$(ssh_host_for "$d")"
-  local user; user="$(ssh_user "$d")" || exit 1
-  provision "$host" "$port" "$user"
-  touch "$d/.provisioned"
-}
-
 cmd_list() {
   local any=0
   local fmt="%-18s %-9s %-22s %-7s %-11s %-10s %s\n"
@@ -808,7 +743,6 @@ case "${1:-}" in
   rm) shift; cmd_rm "$@" ;;
   ssh) shift; cmd_ssh "$@" ;;
   console) shift; cmd_console "$@" ;;
-  provision) shift; cmd_provision "$@" ;;
   list|ls) cmd_list ;;
   -h|--help|help|"") usage ;;
   *) echo "Unknown subcommand: $1" >&2; usage >&2; exit 1 ;;
