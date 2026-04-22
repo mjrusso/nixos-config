@@ -96,38 +96,40 @@ shell, and CLI development tools — no GUI, no desktop services.
 
 Additional tooling is provided that makes it easy to build and run VM images:
 
-- `[bake-golden](./scripts/bake-golden)` builds an `.#images.<system>.<format>`
+- [`bake-golden`](./scripts/bake-golden) builds an `.#images.<system>.<format>`
   virtual machine output and copies it to `$VMS_DIR` (default `~/vms`) as
   `golden-<system>.<ext>`, with a per-image `.meta.json` sidecar that records
   relevant image metadata.
-- `[vm](./scripts/vm)` orchestrates the VM lifecycle (boot, SSH, provision,
+- [`vm`](./scripts/vm) orchestrates the VM lifecycle (boot, SSH, provision,
   teardown, etc.), reading the appropriate pre-baked golden image and its
   sidecar from `$VMS_DIR` as necessary.
 
 To start, from the root of this repository, bake (produce) a golden image:
 
 ``` bash
-./scripts/bake-golden         # (flags: --system x86_64-linux|aarch64-linux, --format qcow|raw)
+./scripts/bake-golden    # (flags: --system x86_64-linux|aarch64-linux, --format qcow|raw)
 ```
 
 Then, to run and manage virtual machines:
 
 ``` bash
-vm up scratch                 # boot a VM named "scratch"
-vm up emacs-test              # boot another VM (see networking notes below)
-vm list                       # show state
-vm ssh scratch                # SSH in
-vm provision scratch          # re-run bootstrap against a running VM
-vm up scratch --rebuild       # wipe disk, reinstall from current golden
-vm down scratch               # graceful shutdown
-vm rm scratch                 # delete VM and all its state
+vm up scratch            # boot a VM named "scratch"
+vm up emacs-test         # boot another VM (see networking notes below)
+vm list                  # show state
+vm ssh scratch           # SSH in
+vm provision scratch     # re-run bootstrap against a running VM
+vm up scratch --rebuild  # wipe disk, reinstall from current golden
+vm down scratch          # graceful shutdown
+vm rm scratch            # delete VM and all its state
 ```
 
-On first `up`, the post-boot bootstrap script (`scripts/vm-bootstrap`) runs
-over SSH to perform imperative setup that is awkward or impractical to express
-using Home Manager. Subsequent `up`s skip provisioning; force with
-`--provision`, or use `vm provision <name>` against an already-running VM. (The
-bootstrap script is idempotent.)
+On first `up`, the post-boot bootstrap script
+([`scripts/vm-bootstrap`](./scripts/vm-bootstrap)) runs over SSH to perform
+imperative setup that is awkward or impractical to express using Home Manager.
+
+Subsequent `up`s skip provisioning. To force provisioning, pass the
+`--provision` flag, or use `vm provision <name>` against an already-running VM.
+(The bootstrap script is idempotent.)
 
 The `vm` command drives two back-ends:
 
