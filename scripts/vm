@@ -363,7 +363,11 @@ print_endpoints() {
   host="$(ssh_host_for "$d")"
   port="$( [ -f "$d/port" ] && cat "$d/port" || echo - )"
   user="$(ssh_user "$d")" || return 1
-  echo "  ssh:     vm ssh $name   (or: ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$host)"
+  echo "  ssh (from this host):    vm ssh $name   (or: ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$host)"
+  case "$(uname -s)" in
+    Linux)  echo "  ssh (from another host): ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@HOST" ;;
+    Darwin) echo "  ssh (from another host): ssh -J you@HOST -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$host" ;;
+  esac
   echo "  console: vm console $name   (tails $d/serial.log)"
   case "$(uname -s)" in
     Linux)  echo "  monitor: socat - UNIX-CONNECT:$d/qemu.mon" ;;
