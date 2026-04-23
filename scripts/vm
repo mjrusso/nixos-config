@@ -17,6 +17,8 @@ Subcommands:
   ssh <name> [args...]    SSH into the VM.
   console <name>          Stream the VM's serial log (follows live boot
                           output; Ctrl-C detaches without touching the VM).
+  info <name>             Print connection info (ssh/console/monitor)
+                          for an existing VM.
   list                    List known VMs and their status.
 
 State directory: $VMS_DIR (default: ~/vms). Golden images and their
@@ -349,6 +351,20 @@ acquire_up_lock() {
   trap "rm -f '$d/.lock' 2>/dev/null || true" EXIT
 }
 
+print_endpoints() {
+  local d="$1" name="$2"
+  local host port user
+  host="$(ssh_host_for "$d")"
+  port="$( [ -f "$d/port" ] && cat "$d/port" || echo - )"
+  user="$(ssh_user "$d")" || return 1
+  echo "  ssh:     vm ssh $name   (or: ssh -p $port $user@$host)"
+  echo "  console: vm console $name   (tails $d/serial.log)"
+  case "$(uname -s)" in
+    Linux)  echo "  monitor: socat - UNIX-CONNECT:$d/qemu.mon" ;;
+    Darwin) echo "  control: curl --unix-socket $d/vfkit.sock http://_/vm/state" ;;
+  esac
+}
+
 wait_for_ssh() {
   local host="$1" port="$2" user="$3"
   local opts; opts="$(ssh_opts)"
@@ -497,12 +513,7 @@ cmd_up() {
     echo ""
     echo "VM '$name' is up."
   fi
-  echo "  ssh:     vm ssh $name   (or: ssh -p $port $user@$host)"
-  echo "  console: vm console $name   (tails $d/serial.log)"
-  case "$driver" in
-    qemu)  echo "  monitor: socat - UNIX-CONNECT:$d/qemu.mon" ;;
-    vfkit) echo "  control: curl --unix-socket $d/vfkit.sock http://_/vm/state" ;;
-  esac
+  print_endpoints "$d" "$name"
 }
 
 boot_qemu() {
@@ -691,6 +702,19 @@ cmd_console() {
   exec tail -n +1 -F "$d/serial.log"
 }
 
+cmd_info() {
+  local name="${1:?Usage: vm info <name>}"
+  validate_name "$name"
+  local d; d="$(vm_dir "$name")"
+  [ -d "$d" ] || { echo "No such VM '$name'." >&2; exit 1; }
+
+  local status="stopped"
+  is_running "$d/vm.pid" && status="running"
+
+  echo "VM '$name' ($status)"
+  print_endpoints "$d" "$name"
+}
+
 cmd_list() {
   local any=0
   local fmt="%-18s %-9s %-22s %-7s %-11s %-10s %s\n"
@@ -743,6 +767,7 @@ case "${1:-}" in
   rm) shift; cmd_rm "$@" ;;
   ssh) shift; cmd_ssh "$@" ;;
   console) shift; cmd_console "$@" ;;
+  info) shift; cmd_info "$@" ;;
   list|ls) cmd_list ;;
   -h|--help|help|"") usage ;;
   *) echo "Unknown subcommand: $1" >&2; usage >&2; exit 1 ;;
