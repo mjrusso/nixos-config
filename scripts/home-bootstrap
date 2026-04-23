@@ -1,7 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# IMPORTANT: This script must be idempotent (safe to re-run multiple times).
+# IMPORTANT: This script must be idempotent (i.e., it must be safe to re-run
+# multiple times).
+#
+# GitHub authentication, and other secrets, are deliberately not handled here.
+#
+# For GitHub specifically, either before or after running this script,
+# authenticate using the `gh` CLI based on the machine's role:
+#
+#   - Primary machine (trusted, interactive use): run `gh auth login` and
+#     follow the browser/device flow. The OAuth token lands in the OS keyring,
+#     and home-manager's `programs.gh` has already wired the git credential
+#     helper, so HTTPS pushes/pulls just work.
+#
+#   - Ephemeral or "agent" VM (e.g. running coding agents with
+#     `--dangerously-skip-permissions` or similar flags that bypass
+#     permissions): do *NOT* use the `gh auth login`'s device flow, because
+#     the token this grants is far too permissive. Instead, mint a fine-grained
+#     PAT restricted to the exact repos and permissions the agent needs, with a
+#     short expiry, and pipe it in from 1Password on the host:
+#
+#       op read "op://Private/github-vm-pat-xxx/credential" \
+#         | vm ssh <name> 'gh auth login --with-token'
+#
+#     Adjust the `op://` reference to match the vault and item names. This
+#     requires the 1Password CLI (`op`) and the 1Password desktop app with CLI
+#     integration enabled (Settings → Developer → "Integrate with 1Password
+#     CLI").
+#
+# On a related note, do not forward the host's ssh-agent into an ephemeral/
+# agent VM.
 
 log() { echo "[home-bootstrap] $*"; }
 
