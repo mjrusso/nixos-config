@@ -69,6 +69,7 @@ with pkgs; [
   iftop
   jetbrains-mono
   jq
+  osc
   ripgrep
   fd
   socat
