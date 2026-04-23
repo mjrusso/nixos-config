@@ -297,11 +297,17 @@ is_running() {
   [ -f "$pidfile" ] || return 1
   local pid; pid="$(cat "$pidfile")"
   kill -0 "$pid" 2>/dev/null || return 1
-  # Guard against PID reuse: check the live pid's process name matches
-  # one of the drivers we know how to start.
+  # Guard against PID reuse: check the live pid's command name matches one of
+  # the drivers we know how to start. Prefer /proc/<pid>/cmdline's argv[0] over
+  # /proc/<pid>/comm: comm is capped at TASK_COMM_LEN (15 chars) and reflects
+  # the *exec'd* binary's name, which on NixOS is e.g.
+  # `.qemu-system-x86_64-wrapped` (truncates to `.qemu-system-x8`, which fails
+  # the qemu-system* match). NixOS's makeWrapper sets argv[0] to the unwrapped
+  # name, so cmdline gives us `qemu-system-x86_64`.
   local comm
-  if [ -r "/proc/$pid/comm" ]; then
-    comm="$(cat "/proc/$pid/comm" 2>/dev/null)" || return 1
+  if [ -r "/proc/$pid/cmdline" ]; then
+    comm="$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | head -n1)" || return 1
+    comm="${comm##*/}"
   else
     comm="$(ps -o comm= -p "$pid" 2>/dev/null)" || return 1
     comm="${comm##*/}"
