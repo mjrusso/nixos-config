@@ -5,6 +5,21 @@
 Start by editing [`user-info.nix`](./user-info.nix) to set your desired
 username, full name, email address, and SSH public keys.
 
+To prevent local edits to this file from showing up as modifications (and to
+prevent committing changes), flag the file with the [`skip-worktree`
+bit](https://git-scm.com/docs/git-update-index#_skip_worktree_bit) in each
+clone:
+
+``` bash
+git update-index --skip-worktree user-info.nix
+```
+
+_(To verify the flag is set, run `git ls-files -v user-info.nix`; an `S` prefix
+means `skip-worktree` is on.)_
+
+To undo (e.g. to pull an upstream change to the template), run the same
+command with `--no-skip-worktree`.
+
 ### Mac
 
 Install dependencies:
