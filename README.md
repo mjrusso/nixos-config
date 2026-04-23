@@ -133,6 +133,7 @@ vm up emacs-test         # boot another VM (see networking notes below)
 vm list                  # show state
 vm ssh scratch           # SSH in
 vm console scratch       # stream the serial log (live boot output)
+vm info scratch          # reprint connection details (ssh/console/monitor)
 vm up scratch --rebuild  # wipe disk, reinstall from current golden
 vm down scratch          # graceful shutdown
 vm rm scratch            # delete VM and all its state
