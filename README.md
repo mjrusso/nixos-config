@@ -180,6 +180,17 @@ This flake is automatically built and
 - Garnix's binary cache is configured automatically for Darwin and NixOS hosts
   (see [modules/shared/caches/](./modules/shared/caches)).
 
+  - However, on first run, the caches module will not have been activated yet.
+    Bootstrap by exporting `NIX_CONFIG` for the initial `build-switch` (note
+    that once that switch completes, `/etc/nix/nix.conf` should contain the
+    Garnix-related entries, so the manual override will no longer be needed):
+
+      ``` bash
+      export NIX_CONFIG='extra-substituters = https://cache.garnix.io
+      extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g='
+      nix run .#build-switch
+      ```
+
 - For Linux (non-NixOS) hosts, the Garnix cache must be configured manually.
   _(See [Garnix's documentation](https://garnix.io/docs/ci/caching/#caching).)_
   Add the following to `/etc/nix/nix.conf` (or `~/.config/nix/nix.conf` if your
@@ -189,6 +200,16 @@ This flake is automatically built and
     extra-substituters = https://cache.garnix.io
     extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
     ```
+
+To verify the Garnix substituter is active on the current machine:
+
+``` bash
+nix config show substituters | grep garnix
+nix config show trusted-public-keys | grep garnix
+```
+
+If nothing matches, Nix won't query Garnix, and any build that depends on a
+pre-built artifact there (such as Emacs) will fall through to building from source.
 
 Note that my [Emacs configuration](https://github.com/mjrusso/.emacs.d) is not
 part of this repository (and not managed by _home-manager_). It is cloned into
