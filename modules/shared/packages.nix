@@ -83,6 +83,7 @@ with pkgs; [
 
   # Document conversion
   pandoc
+  typst # Use as a pandoc PDF engine (e.g. `pandoc in.md -o out.pdf --pdf-engine=typst`)
   # mermaid-filter # Pandoc filter for creating diagrams in mermaid syntax blocks
                    # in markdown docs. Source: https://github.com/raghur/mermaid-filter
 

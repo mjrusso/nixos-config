@@ -183,6 +183,34 @@
         end
     '';
 
+    # md2pdf: render a markdown file to PDF via pandoc + typst.
+    #
+    # Usage: md2pdf <input.md> [output.pdf]
+    #
+    # If the output path is omitted, it's derived from the input (foo.md →
+    # foo.pdf). Explicit fonts are passed because pandoc's typst template
+    # errors out with "font fallback list must not be empty" when the font
+    # variables are unset.
+    md2pdf = ''
+      if test (count $argv) -lt 1
+          echo "usage: md2pdf <input.md> [output.pdf]"
+          return 1
+      end
+      set -l input $argv[1]
+      set -l output
+      if test (count $argv) -ge 2
+          set output $argv[2]
+      else
+          set output (string replace -r '\.(md|markdown)$' '.pdf' $input)
+          if test "$output" = "$input"
+              set output "$input.pdf"
+          end
+      end
+      pandoc $input -o $output --pdf-engine=typst \
+          -V mainfont="DejaVu Sans" -V monofont="JetBrains Mono" \
+          -V fontsize=10pt
+    '';
+
     # https://fishshell.com/docs/current/cmds/fish_git_prompt.html
     # https://mariuszs.github.io/blog/2013/informative_git_prompt.html
     fish_prompt = ''
