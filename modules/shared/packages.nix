@@ -76,7 +76,6 @@ with pkgs; [
   tree
   tmux
   workmux
-  zellij
   zoxide
   unrar
   unzip

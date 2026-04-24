@@ -168,21 +168,6 @@
       end
     '';
 
-    # zat: zellij attach
-    #
-    # Adapted from this tmux version: https://juliu.is/a-simple-tmux/
-    zat = ''
-        set name (basename (pwd))
-
-        if zellij list-sessions 2>&1 | grep "$name" >/dev/null
-            zellij attach "$name"
-        else if test -f .envrc
-            direnv exec / zellij --session "$name"
-        else
-            zellij --session "$name"
-        end
-    '';
-
     # md2pdf: render a markdown file to PDF via pandoc + typst.
     #
     # Usage: md2pdf <input.md> [output.pdf]
