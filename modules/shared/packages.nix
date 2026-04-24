@@ -75,6 +75,7 @@ with pkgs; [
   socat
   tree
   tmux
+  workmux
   zellij
   zoxide
   unrar
