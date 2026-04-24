@@ -158,8 +158,14 @@ with pkgs; [
       else "exec pkill -9 -f 'emacs.*daemon'"}
   '')
 
+  # gvproxy provides user-mode networking for VMs: host-side unix sockets for
+  # qemu/vfkit and an HTTP forwarder API that is reachable from both the host
+  # and guest. (Invoked by the `vm` script below via VM_GVPROXY.)
+  gvproxy
+
   # Custom virtual machine management script
   (pkgs.writeShellScriptBin "vm" ''
+    export VM_GVPROXY=${pkgs.gvproxy}/bin/gvproxy
     ${pkgs.lib.optionalString pkgs.stdenv.isLinux "export VM_QEMU_AARCH64_UEFI=${pkgs.qemu}/share/qemu/edk2-aarch64-code.fd"}
     exec ${pkgs.bash}/bin/bash ${../../scripts/vm} "$@"
   '')

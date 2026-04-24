@@ -17,9 +17,19 @@ Subcommands:
   ssh <name> [args...]    SSH into the VM.
   console <name>          Stream the VM's serial log (follows live boot
                           output; Ctrl-C detaches without touching the VM).
-  info <name>             Print connection info (ssh/console/monitor)
+  info <name>             Print connection info (ssh/console/forwards)
                           for an existing VM.
   list                    List known VMs and their status.
+
+  expose <name> <guest-port> [<host-port>] [--bind <addr>] [--auto]
+        Forward a guest port to the host. Defaults: host-port = guest-port,
+        bind = 0.0.0.0 (reachable from other hosts on the LAN). Pass
+        --bind 127.0.0.1 for loopback-only. Pass --auto to let the host
+        pick a free port (30000-60000); the picked port is printed on
+        stdout so `port=$(vm expose ...)` works for scripting.
+  unexpose <name> <host-port> [--bind <addr>]
+        Remove a previously-added forward.
+  forwards <name>         List all active forwards for a VM.
 
 State directory: $VMS_DIR (default: ~/vms). Golden images and their
 `.meta.json` sidecars are expected there — bake them from the
@@ -27,11 +37,13 @@ nixos-config repo:
 
   ./scripts/bake-golden
 
-Networking depends on the backend:
-  - qemu (Linux): user-mode NAT with hostfwd; SSH port auto-allocated
-    from 2222-2299 and persisted per VM.
-  - vfkit (Darwin): vmnet NAT with DHCP; SSH goes to the guest's
-    assigned IP on port 22 (resolved from /var/db/dhcpd_leases).
+Networking:
+  A per-VM gvproxy instance provides user-mode networking for both
+  qemu (Linux) and vfkit (Darwin), unifying the two drivers. SSH is
+  exposed on the allocated port (2222-2299), bound 0.0.0.0 so the
+  VM is reachable from other hosts. Additional forwards are managed
+  through gvproxy's HTTP API from the host via `vm expose`/`vm
+  unexpose`.
 USAGE
 }
 
@@ -177,15 +189,10 @@ disk_path_for() {
 }
 
 ssh_host_for() {
-  # Which host to SSH to for this VM. qemu runs with user-mode NAT and
-  # hostfwd, so it's always localhost. vfkit's NAT gives the guest a
-  # real IP on the host's virtual bridge, which boot_vfkit records.
-  local d="$1"
-  if [ -f "$d/ssh_host" ]; then
-    cat "$d/ssh_host"
-  else
-    echo "localhost"
-  fi
+  # SSH is always reached via localhost from the VM host. start_gvproxy
+  # rebinds the SSH forward to all interfaces (0.0.0.0) so other hosts
+  # can also reach it at <vm-host-ip>:$port.
+  echo "localhost"
 }
 
 vm_mac() {
@@ -199,55 +206,6 @@ vm_mac() {
     h="$(printf '%s' "$name" | md5 -q | cut -c1-10)"
   fi
   printf '02:%s:%s:%s:%s:%s\n' "${h:0:2}" "${h:2:2}" "${h:4:2}" "${h:6:2}" "${h:8:2}"
-}
-
-# Parse macOS's DHCP lease file to map a MAC to its last-assigned IP.
-# The file format is a series of `{ ... }` records with key=value lines,
-# including `hw_address=1,<mac>` and `ip_address=<ip>`. Apple's bootpd
-# strips leading zeros from each octet (e.g., 02:0a → 2:a), so normalize
-# both sides before comparing.
-vfkit_guest_ip_lookup() {
-  local mac="$1"
-  local leases="/var/db/dhcpd_leases"
-  [ -r "$leases" ] || return 1
-  awk -v mac="$(printf '%s' "$mac" | tr '[:upper:]' '[:lower:]')" '
-    function strip_mac(m,    parts, n, i, v, out) {
-      n = split(m, parts, ":")
-      out = ""
-      for (i = 1; i <= n; i++) {
-        v = parts[i]; sub(/^0+/, "", v); if (v == "") v = "0"
-        out = out (i>1 ? ":" : "") v
-      }
-      return out
-    }
-    BEGIN { RS="}"; FS="\n"; mac = strip_mac(mac) }
-    {
-      ip=""; hw=""
-      for (i = 1; i <= NF; i++) {
-        if ($i ~ /ip_address=/) { sub(/.*ip_address=[[:space:]]*/, "", $i); ip=$i }
-        if ($i ~ /hw_address=/) {
-          sub(/.*hw_address=[0-9]+,[[:space:]]*/, "", $i)
-          hw=tolower($i)
-        }
-      }
-      gsub(/[[:space:]\r]/, "", ip)
-      gsub(/[[:space:]\r]/, "", hw)
-      if (ip != "" && strip_mac(hw) == mac) { print ip; exit }
-    }
-  ' "$leases"
-}
-
-vfkit_wait_for_ip() {
-  local mac="$1" ip
-  for _ in $(seq 1 60); do
-    ip="$(vfkit_guest_ip_lookup "$mac")"
-    if [ -n "$ip" ]; then
-      echo "$ip"
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
 }
 
 try_vfkit_graceful_shutdown() {
@@ -292,6 +250,26 @@ allocate_port() {
   exit 1
 }
 
+# Like allocate_port but scans a wider ephemeral-friendly range. Used
+# by `vm expose --auto` when the caller doesn't care which host port
+# they get. Starts at a random offset so concurrent --auto callers
+# don't all collide on the same first candidate.
+allocate_free_port() {
+  local lo=30000 hi=60000
+  local span=$((hi - lo + 1))
+  local start=$(( lo + (RANDOM % span) ))
+  local port
+  local i
+  for i in $(seq 0 $((span - 1))); do
+    port=$(( lo + ((start - lo + i) % span) ))
+    if ! port_in_use "$port"; then
+      echo "$port"; return 0
+    fi
+  done
+  echo "No free port in $lo-$hi" >&2
+  return 1
+}
+
 is_running() {
   local pidfile="$1"
   [ -f "$pidfile" ] || return 1
@@ -321,6 +299,177 @@ try_graceful_shutdown() {
   command -v socat >/dev/null 2>&1 || return 1
   echo "system_powerdown" | socat - "UNIX-CONNECT:$socket" >/dev/null 2>&1
 }
+
+# gvproxy provides user-mode networking for both qemu and vfkit via a
+# unix socket, unifying what were previously two divergent NAT paths
+# (hostfwd vs. vmnet+dhcpd_leases). Each VM runs its own gvproxy
+# process with its own socket triple:
+#   - $d/network.sock     host-side HTTP forwarder API (`vm expose` etc.)
+#   - $d/qemu-net.sock    qemu's -netdev stream endpoint (Linux)
+#   - $d/vfkit-net.sock   vfkit's virtio-net unixSocketPath (Darwin)
+# The forwarder API is host-side only (on $d/network.sock). gvproxy's
+# -services flag creates another host listener, not a virtual-network
+# one, so guest-initiated forwarding via that path is not available —
+# use `vm expose` from the host.
+
+# gvproxy's default virtual network reserves .1 (gateway) and .2
+# (host.containers.internal). The first DHCP client gets .3, and
+# since each VM runs its own gvproxy instance with its own fresh
+# network, the sole guest always lands at .3. `vm expose` hard-codes
+# it as the forward target.
+GVPROXY_GUEST=192.168.127.3
+
+# Resolve the gvproxy binary: pinned by the Nix wrapper via VM_GVPROXY,
+# falling back to $PATH for non-Nix hosts.
+gvproxy_bin() {
+  if [ -n "${VM_GVPROXY:-}" ] && [ -x "$VM_GVPROXY" ]; then
+    echo "$VM_GVPROXY"
+    return 0
+  fi
+  command -v gvproxy 2>/dev/null && return 0
+  echo "Missing required command: gvproxy (pin via VM_GVPROXY or add to PATH)" >&2
+  return 1
+}
+
+is_gvproxy_running() {
+  local pidfile="$1"
+  [ -f "$pidfile" ] || return 1
+  local pid; pid="$(cat "$pidfile")"
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  # Same PID-reuse guard as is_running. gvproxy's NixOS wrap exposes
+  # argv[0] as "gvproxy" via makeWrapper; comm would be truncated to
+  # `.gvproxy-wrapped` which this accepts too.
+  local comm
+  if [ -r "/proc/$pid/cmdline" ]; then
+    comm="$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | head -n1)" || return 1
+    comm="${comm##*/}"
+  else
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null)" || return 1
+    comm="${comm##*/}"
+  fi
+  [[ "$comm" == gvproxy* ]] || [[ "$comm" == .gvproxy* ]]
+}
+
+# Launch gvproxy for a VM. Returns once the VM-side socket is ready
+# for the driver to connect to; fails fast if gvproxy dies early.
+# Also rebinds the SSH forward from 127.0.0.1 to 0.0.0.0 so other
+# hosts can reach the VM — otherwise the only way in is from the
+# VM host itself.
+start_gvproxy() {
+  local d="$1" driver="$2" port="$3"
+  local bin; bin="$(gvproxy_bin)" || return 1
+
+  local vm_sock vm_flag
+  case "$driver" in
+    qemu)  vm_sock="$d/qemu-net.sock";  vm_flag="-listen-qemu"  ;;
+    vfkit) vm_sock="$d/vfkit-net.sock"; vm_flag="-listen-vfkit" ;;
+    *) echo "Unknown driver for gvproxy: $driver" >&2; return 1 ;;
+  esac
+
+  rm -f "$d/network.sock" "$vm_sock" "$d/gvproxy.pid"
+
+  # -ssh-port: gvproxy installs a built-in 127.0.0.1:$port → guest:22 forward.
+  #            The flag is required to pick a unique port per VM; we then
+  #            immediately swap that forward's bind to 0.0.0.0 (see below).
+  # -pid-file: written asynchronously after startup; we also capture the
+  #            nohup'd pid as a fallback while gvproxy flushes it.
+  # Socket endpoints need the `unix://` scheme prefix — `-listen-qemu`
+  # and `-listen-vfkit` parse their argument as a URL and reject bare
+  # paths with "unexpected scheme".
+  nohup "$bin" \
+    -listen "unix://$d/network.sock" \
+    "$vm_flag" "unix://$vm_sock" \
+    -ssh-port "$port" \
+    -pid-file "$d/gvproxy.pid" \
+    > "$d/gvproxy.log" 2>&1 &
+  local pid=$!
+  disown "$pid" 2>/dev/null || true
+  # Backstop for the pid-file write race (see -pid-file note above):
+  # record the nohup'd pid immediately so stop_gvproxy has a target
+  # even if gvproxy is killed before writing its own pidfile.
+  echo "$pid" > "$d/gvproxy.pid"
+
+  # Wait up to ~5s for gvproxy to create its VM-side socket. If it
+  # dies before that, surface the log and give up.
+  local ready=0
+  for _ in $(seq 1 50); do
+    if [ -S "$vm_sock" ] || [ -e "$vm_sock" ]; then
+      ready=1; break
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "gvproxy exited before its VM socket appeared. See $d/gvproxy.log." >&2
+      rm -f "$d/gvproxy.pid"
+      return 1
+    fi
+    sleep 0.1
+  done
+  if [ "$ready" -ne 1 ]; then
+    echo "Timed out waiting for gvproxy's VM socket at $vm_sock." >&2
+    kill "$pid" 2>/dev/null || true
+    rm -f "$d/gvproxy.pid"
+    return 1
+  fi
+
+  # Swap the loopback SSH forward for an all-interfaces one. gvproxy's
+  # -ssh-port flag binds 127.0.0.1:$port, which means SSH only works
+  # from the VM host itself — but `vm` is the only way to manage VMs,
+  # so a loopback-only SSH leaves no path in from other hosts. The
+  # forwarder API treats the -ssh-port entry as a normal rule we can
+  # remove and replace.
+  if ! forwarder_unexpose "$d" "127.0.0.1:$port" >/dev/null 2>&1; then
+    echo "Warning: could not remove gvproxy's built-in SSH forward." >&2
+  fi
+  if ! forwarder_expose "$d" ":$port" "$GVPROXY_GUEST:22" >/dev/null; then
+    echo "Warning: could not add 0.0.0.0 SSH forward; SSH may only be reachable via loopback." >&2
+  fi
+
+  return 0
+}
+
+stop_gvproxy() {
+  local d="$1"
+  if is_gvproxy_running "$d/gvproxy.pid"; then
+    local pid; pid="$(cat "$d/gvproxy.pid")"
+    kill "$pid" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  rm -f "$d/gvproxy.pid" "$d/network.sock" "$d/qemu-net.sock" "$d/vfkit-net.sock"
+}
+
+# Thin wrappers over curl against gvproxy's HTTP forwarder API on
+# $d/network.sock. The "http://_" host is a placeholder required by
+# curl; the unix-socket carries the real connection.
+forwarder_api() {
+  # forwarder_api <vm-state-dir> <method> <path> [<json-body>]
+  local d="$1" method="$2" path="$3" body="${4:-}"
+  local sock="$d/network.sock"
+  [ -S "$sock" ] || {
+    echo "gvproxy control socket missing: $sock (is the VM running?)" >&2
+    return 1
+  }
+  if [ -n "$body" ]; then
+    curl --fail-with-body --silent --show-error \
+      --unix-socket "$sock" \
+      -X "$method" \
+      -H 'Content-Type: application/json' \
+      -d "$body" \
+      "http://_$path"
+  else
+    curl --fail-with-body --silent --show-error \
+      --unix-socket "$sock" \
+      -X "$method" \
+      "http://_$path"
+  fi
+}
+
+forwarder_list()     { forwarder_api "$1" GET  /services/forwarder/all; }
+forwarder_expose()   { forwarder_api "$1" POST /services/forwarder/expose   "{\"local\":\"$2\",\"remote\":\"$3\"}"; }
+forwarder_unexpose() { forwarder_api "$1" POST /services/forwarder/unexpose "{\"local\":\"$2\"}"; }
 
 # Acquire a per-VM launch lock at $d/.lock (a symlink whose target is
 # the holder's pid). symlink(2) is atomic on both Linux and Darwin,
@@ -363,15 +512,15 @@ print_endpoints() {
   host="$(ssh_host_for "$d")"
   port="$( [ -f "$d/port" ] && cat "$d/port" || echo - )"
   user="$(ssh_user "$d")" || return 1
-  echo "  ssh (from this host):    vm ssh $name   (or: ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$host)"
+  echo "  ssh (from this host):     vm ssh $name   (or: ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$host)"
+  echo "  ssh (from another host):  ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@HOST"
+  echo "  console:                  vm console $name   (tails $d/serial.log)"
+  echo "  forwards (list):          vm forwards $name"
+  echo "  expose a port externally: vm expose $name <guest-port> [<host-port>]"
+  echo "  gvproxy API:              curl --unix-socket $d/network.sock http://_/services/forwarder/all"
   case "$(uname -s)" in
-    Linux)  echo "  ssh (from another host): ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@HOST" ;;
-    Darwin) echo "  ssh (from another host): ssh -J you@HOST -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$host" ;;
-  esac
-  echo "  console: vm console $name   (tails $d/serial.log)"
-  case "$(uname -s)" in
-    Linux)  echo "  monitor: socat - UNIX-CONNECT:$d/qemu.mon" ;;
-    Darwin) echo "  control: curl --unix-socket $d/vfkit.sock http://_/vm/state" ;;
+    Linux)  echo "  qemu monitor:             socat - UNIX-CONNECT:$d/qemu.mon" ;;
+    Darwin) echo "  vfkit control:            curl --unix-socket $d/vfkit.sock http://_/vm/state" ;;
   esac
 }
 
@@ -408,6 +557,7 @@ cmd_up() {
 
   require_cmd ssh
   require_cmd jq
+  require_cmd curl
   require_cmd uname
 
   # Host + image arch detection.
@@ -443,11 +593,11 @@ cmd_up() {
   local d disk
   d="$(vm_dir "$name")"
   mkdir -p "$d"
-  # Hold the launch lock across the is_running check → driver launch →
-  # pidfile write window. Released by the EXIT trap installed inside
-  # acquire_up_lock. Ordering is load-bearing: is_running must run
-  # *inside* the lock so two concurrent `vm up`s can't both observe
-  # "not running" and both proceed to launch.
+  # Hold the launch lock across is_running → gvproxy launch → driver
+  # launch → pidfile writes. Released by the EXIT trap installed
+  # inside acquire_up_lock. Ordering is load-bearing: is_running must
+  # run *inside* the lock so two concurrent `vm up`s can't both
+  # observe "not running" and both proceed to launch.
   acquire_up_lock "$d" || exit 1
   disk="$(disk_path_for "$d")"
 
@@ -463,6 +613,11 @@ cmd_up() {
     echo "Nothing to do. Run 'vm down $name' first to reboot."
     return 0
   fi
+
+  # Defensive cleanup of a stranded gvproxy from a previous launch
+  # that was SIGKILL'd between gvproxy start and driver start. Safe
+  # to call when there's nothing to stop.
+  stop_gvproxy "$d"
 
   if [ "$rebuild" -eq 1 ]; then
     # Full reset. Wipe either disk format (in case the host driver
@@ -484,24 +639,48 @@ cmd_up() {
 
   local user; user="$(ssh_user "$d")" || exit 1
 
-  # qemu is daemonized and vfkit is nohup'd, so a signal between driver
-  # launch and trap installation would otherwise leave the VM running
-  # and holding its port. Install the trap *before* the launch so it
-  # covers the launch itself. The explicit `exit 130` is load-bearing:
-  # it guarantees the EXIT trap (installed by acquire_up_lock) fires
-  # and removes $d/.lock. Do not replace with a bare return.
+  # Allocate or reuse the host SSH port. gvproxy's -ssh-port flag
+  # binds 127.0.0.1:$port → guest:22 as a built-in forward; additional
+  # forwards (including 0.0.0.0 binds for external access) go through
+  # the forwarder API later via `vm expose`.
+  local port
+  if [ -f "$d/port" ]; then
+    port="$(cat "$d/port")"
+    if port_in_use "$port"; then
+      echo "Stored port $port for VM '$name' is in use; reallocating." >&2
+      port="$(allocate_port)"
+      echo "$port" > "$d/port"
+    fi
+  else
+    port="$(allocate_port)"
+    echo "$port" > "$d/port"
+  fi
+
+  # qemu is daemonized and vfkit/gvproxy are nohup'd, so a signal
+  # between launch and trap installation would leave processes
+  # running and sockets bound. Install the trap *before* any launch
+  # so it covers the whole dance. The explicit `exit 130` is
+  # load-bearing: it guarantees the EXIT trap (installed by
+  # acquire_up_lock) fires and removes $d/.lock. Do not replace with
+  # a bare return.
   trap 'echo >&2; echo "Interrupted — tearing down VM '"'"'$name'"'"'." >&2; cmd_down "$name" || true; exit 130' INT TERM
 
   : > "$d/serial.log"
+
+  # gvproxy must be up before the driver — the driver connects to
+  # gvproxy's VM-side socket on startup.
+  if ! start_gvproxy "$d" "$driver" "$port"; then
+    trap - INT TERM
+    exit 1
+  fi
 
   case "$driver" in
     qemu)  boot_qemu  "$d" "$name" "$image_arch" "$disk" ;;
     vfkit) boot_vfkit "$d" "$name" "$disk" ;;
   esac
 
-  local host port
+  local host
   host="$(ssh_host_for "$d")"
-  port="$(cat "$d/port")"
 
   if [ "$no_wait" -eq 1 ]; then
     # Clear the signal trap: with --no-wait we're about to exit
@@ -531,28 +710,20 @@ boot_qemu() {
   local qemu_bin="qemu-system-$image_arch"
   require_cmd "$qemu_bin"
 
-  local port
-  if [ -f "$d/port" ]; then
-    port="$(cat "$d/port")"
-    if port_in_use "$port"; then
-      echo "Stored port $port for VM '$name' is in use; reallocating." >&2
-      port="$(allocate_port)"
-      echo "$port" > "$d/port"
-    fi
-  else
-    port="$(allocate_port)"
-    echo "$port" > "$d/port"
-  fi
-  echo "localhost" > "$d/ssh_host"
+  echo "Starting VM '$name' via qemu (gvproxy network)..."
+  rm -f "$d/qemu.mon"
 
-  echo "Starting VM '$name' via qemu on ssh port $port..."
-  rm -f "$d/qemu.mon" "$d/vfkit.sock"
+  local mac; mac="$(vm_mac "$name")"
 
+  # -netdev stream (qemu 7.2+): client-side unix stream socket into
+  # gvproxy's -listen-qemu endpoint. Replaces the former SLIRP
+  # `-netdev user ... hostfwd=...` pattern; all port forwarding is
+  # now handled by gvproxy's forwarder API.
   local qemu_args=(
     -enable-kvm -cpu host -smp 4 -m 4096
     -drive "file=$disk,if=virtio"
-    -netdev "user,id=net0,hostfwd=tcp::${port}-:22"
-    -device "virtio-net-pci,netdev=net0"
+    -netdev "stream,id=net0,server=off,addr.type=unix,addr.path=$d/qemu-net.sock"
+    -device "virtio-net-pci,netdev=net0,mac=$mac"
     -display none
     -serial "file:$d/serial.log"
     -monitor "unix:$d/qemu.mon,server,nowait"
@@ -575,7 +746,6 @@ boot_qemu() {
 boot_vfkit() {
   local d="$1" name="$2" disk="$3"
   require_cmd vfkit
-  require_cmd curl
 
   # Per-VM EFI variable store; created on first boot, reused thereafter.
   local efi_store="$d/efi-vars.fd"
@@ -584,31 +754,19 @@ boot_vfkit() {
 
   local mac; mac="$(vm_mac "$name")"
   local sock="$d/vfkit.sock"
-  rm -f "$sock" "$d/qemu.mon"
+  rm -f "$sock"
 
-  # Endpoint-file ordering: write the known-good value ($d/port = 22
-  # for vfkit) and wipe any stale $d/ssh_host *before* launch, so a
-  # SIGKILL of this launcher during the IP-discovery window can't
-  # leave vfkit alive with endpoint files that disagree with reality.
-  # The `nohup vfkit & echo $! > vm.pid` pair below still has a
-  # microsecond window between fork and pidfile-write; backstops are
-  # the launch lock held across this whole region by cmd_up, and
-  # is_running's /proc/<pid>/comm check against vfkit*. Not worth the
-  # extra sh -c wrapper to close the microsecond window.
-  rm -f "$d/ssh_host"
-  echo "22" > "$d/port"
+  echo "Starting VM '$name' via vfkit (gvproxy network)..."
 
-  echo "Starting VM '$name' via vfkit..."
-
-  # vfkit runs in the foreground and has no --daemonize equivalent, so
-  # wrap with nohup to survive terminal close, redirect output, and
-  # detach from the job table.
+  # virtio-net,unixSocketPath: vfkit connects to gvproxy's
+  # -listen-vfkit unixgram socket. Replaces the former vmnet NAT
+  # plus /var/db/dhcpd_leases IP discovery dance.
   nohup vfkit \
     --cpus 4 \
     --memory 4096 \
     --bootloader "$bootloader" \
     --device "virtio-blk,path=$disk" \
-    --device "virtio-net,nat,mac=$mac" \
+    --device "virtio-net,unixSocketPath=$d/vfkit-net.sock,mac=$mac" \
     --device virtio-rng \
     --device "virtio-serial,logFilePath=$d/serial.log" \
     --restful-uri "unix://$sock" \
@@ -623,17 +781,6 @@ boot_vfkit() {
     echo "vfkit exited immediately. Check $d/vfkit.log" >&2
     exit 1
   fi
-
-  echo -n "Discovering guest IP for MAC $mac"
-  local ip
-  ip="$(vfkit_wait_for_ip "$mac")" || {
-    echo ""
-    echo "Could not find guest IP in /var/db/dhcpd_leases." >&2
-    echo "Guest may still be booting; check $d/serial.log." >&2
-    exit 1
-  }
-  echo " — $ip"
-  echo "$ip" > "$d/ssh_host"
 }
 
 cmd_down() {
@@ -667,6 +814,11 @@ cmd_down() {
   fi
 
   rm -f "$d/vm.pid" "$d/qemu.mon" "$d/vfkit.sock"
+
+  # gvproxy teardown is unconditional: even if the driver was already
+  # stopped, stop_gvproxy cleans up stale pid/sockets and is a no-op
+  # when nothing is running.
+  stop_gvproxy "$d"
 }
 
 cmd_rm() {
@@ -725,6 +877,103 @@ cmd_info() {
   print_endpoints "$d" "$name"
 }
 
+# Parse expose/unexpose positional args + flags. Populates globals
+# _PARSE_NAME / _PARSE_PORTS (array) / _PARSE_BIND (empty = 0.0.0.0) /
+# _PARSE_AUTO (0/1). Avoids subshell gymnastics around arrays.
+_parse_forward_args() {
+  _PARSE_NAME=""
+  _PARSE_BIND=""
+  _PARSE_AUTO=0
+  _PARSE_PORTS=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --bind)   _PARSE_BIND="$2"; shift 2 ;;
+      --bind=*) _PARSE_BIND="${1#--bind=}"; shift ;;
+      --auto)   _PARSE_AUTO=1; shift ;;
+      -*)       echo "Unknown flag: $1" >&2; return 1 ;;
+      *)
+        if [ -z "$_PARSE_NAME" ]; then
+          _PARSE_NAME="$1"
+        else
+          _PARSE_PORTS+=("$1")
+        fi
+        shift
+        ;;
+    esac
+  done
+}
+
+cmd_expose() {
+  _parse_forward_args "$@" || exit 1
+  [ -n "$_PARSE_NAME" ] && [ "${#_PARSE_PORTS[@]}" -ge 1 ] || {
+    echo "Usage: vm expose <name> <guest-port> [<host-port>] [--bind <addr>] [--auto]" >&2
+    exit 1
+  }
+  [ "${#_PARSE_PORTS[@]}" -le 2 ] || {
+    echo "Too many port arguments to 'vm expose'." >&2; exit 1
+  }
+  validate_name "$_PARSE_NAME"
+  local guest_port="${_PARSE_PORTS[0]}"
+  local host_port=""
+  if [ "$_PARSE_AUTO" = "1" ]; then
+    [ "${#_PARSE_PORTS[@]}" -eq 1 ] || {
+      echo "--auto is incompatible with an explicit host-port." >&2; exit 1
+    }
+    host_port="$(allocate_free_port)" || exit 1
+  else
+    host_port="${_PARSE_PORTS[1]:-$guest_port}"
+  fi
+  local d; d="$(vm_dir "$_PARSE_NAME")"
+  is_running "$d/vm.pid" || { echo "VM '$_PARSE_NAME' is not running." >&2; exit 1; }
+  # Empty _PARSE_BIND → ":$port", which gvproxy interprets as 0.0.0.0.
+  local local_addr="$_PARSE_BIND:$host_port"
+  if forwarder_expose "$d" "$local_addr" "$GVPROXY_GUEST:$guest_port" >/dev/null; then
+    if [ "$_PARSE_AUTO" = "1" ]; then
+      # stdout is just the port so `port=$(vm expose $name P --auto)` works.
+      echo "Exposed $local_addr → $GVPROXY_GUEST:$guest_port" >&2
+      echo "$host_port"
+    else
+      echo "Exposed $local_addr → $GVPROXY_GUEST:$guest_port"
+    fi
+  else
+    exit 1
+  fi
+}
+
+cmd_unexpose() {
+  _parse_forward_args "$@" || exit 1
+  [ -n "$_PARSE_NAME" ] && [ "${#_PARSE_PORTS[@]}" -eq 1 ] && [ "$_PARSE_AUTO" = "0" ] || {
+    echo "Usage: vm unexpose <name> <host-port> [--bind <addr>]" >&2
+    exit 1
+  }
+  validate_name "$_PARSE_NAME"
+  local host_port="${_PARSE_PORTS[0]}"
+  local d; d="$(vm_dir "$_PARSE_NAME")"
+  is_running "$d/vm.pid" || { echo "VM '$_PARSE_NAME' is not running." >&2; exit 1; }
+  local local_addr="$_PARSE_BIND:$host_port"
+  if forwarder_unexpose "$d" "$local_addr" >/dev/null; then
+    echo "Unexposed $local_addr"
+  else
+    exit 1
+  fi
+}
+
+cmd_forwards() {
+  local name="${1:?Usage: vm forwards <name>}"
+  validate_name "$name"
+  local d; d="$(vm_dir "$name")"
+  is_running "$d/vm.pid" || { echo "VM '$name' is not running." >&2; exit 1; }
+  # gvproxy returns an array of {local, remote, protocol}. Empty array
+  # is a valid "no forwards yet" response.
+  local json
+  json="$(forwarder_list "$d")" || exit 1
+  if [ "$(printf '%s' "$json" | jq 'length')" = "0" ]; then
+    echo "No forwards for VM '$name'."
+    return 0
+  fi
+  printf '%s\n' "$json" | jq -r '.[] | "  \(.protocol // "tcp")  \(.local)  →  \(.remote)"'
+}
+
 cmd_list() {
   local any=0
   local fmt="%-18s %-9s %-22s %-7s %-11s %-10s %s\n"
@@ -779,6 +1028,9 @@ case "${1:-}" in
   console) shift; cmd_console "$@" ;;
   info) shift; cmd_info "$@" ;;
   list|ls) cmd_list ;;
+  expose) shift; cmd_expose "$@" ;;
+  unexpose) shift; cmd_unexpose "$@" ;;
+  forwards) shift; cmd_forwards "$@" ;;
   -h|--help|help|"") usage ;;
   *) echo "Unknown subcommand: $1" >&2; usage >&2; exit 1 ;;
 esac

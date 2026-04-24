@@ -129,11 +129,11 @@ Then, to run and manage virtual machines:
 
 ``` bash
 vm up scratch            # boot a VM named "scratch"
-vm up emacs-test         # boot another VM (see networking notes below)
+vm up emacs-test         # boot another VM
 vm list                  # show state
 vm ssh scratch           # SSH in
 vm console scratch       # stream the serial log (live boot output)
-vm info scratch          # reprint connection details (ssh/console/monitor)
+vm info scratch          # reprint connection details (ssh/forwards/console)
 vm up scratch --rebuild  # wipe disk, reinstall from current golden
 vm down scratch          # graceful shutdown
 vm rm scratch            # delete VM and all its state
@@ -145,27 +145,58 @@ vm rm scratch            # delete VM and all its state
   to come up. Useful when you want to observe the boot yourself (e.g.
   `vm console <name>` in another terminal).
 
-The `vm` command drives two back-ends:
-
-- **Linux hosts** (`x86_64` or `aarch64`) use qemu + KVM, configured with
-  port-forwarded networking (SSH to `localhost:<allocated-port>`).
-- **Darwin hosts** (`aarch64` or `x86_64`) use
-  [vfkit](https://github.com/crc-org/vfkit) (which itself uses Apple's
-  `Virtualization.framework` under-the-covers), configured with NAT networking
-  with DHCP (SSH to the guest's assigned IP on port 22, as resolved from
-  `/var/db/dhcpd_leases`).
+The `vm` command drives two back-ends: qemu + KVM on Linux hosts, and
+[vfkit](https://github.com/crc-org/vfkit) (Apple's `Virtualization.framework`)
+on Darwin hosts. However, networking is unified via a per-VM
+[gvproxy](https://github.com/containers/gvisor-tap-vsock) process. The VM host
+always reaches each guest through `localhost:<allocated-port>` (the SSH port is
+auto-allocated from 2222–2299 and persisted per VM). SSH binds all interfaces,
+so other hosts on your LAN can reach the VM at `<vm-host>:<allocated-port>`
+too. Additional service ports are forwarded through gvproxy on demand; see
+**Publishing ports** below.
 
 Additional notes:
 
 - The host architecture must match the image architecture in both cases, as
   cross-arch TCG emulation isn't wired up.
-- `vm list` shows the effective SSH endpoint in the `SSH` column regardless of
-  backend.
+- `vm list` shows the effective SSH endpoint in the `SSH` column.
 - `bake-golden` defaults to `qcow` on Linux and `raw` on Darwin; the `vm`
   script picks the matching disk extension automatically.
 - `vm` is available on the `PATH`, so you can run it from anywhere.
-- Per-VM state (disk, port, pidfile, serial log) lives under
+- Per-VM state (disk, port, pidfile, serial log, gvproxy sockets) lives under
   `$VMS_DIR/<name>/`.
+
+##### Publishing ports
+
+By default each VM is reachable on its SSH port, with no other ports exposed.
+To expose additional ports (web servers, databases, whatever else is listening
+inside the guest), use the `vm expose` / `vm unexpose` / `vm forwards`
+subcommands, which manage forwards on a running VM (via gvproxy's HTTP API)
+without restarting it:
+
+``` bash
+vm expose scratch 8080                   # 0.0.0.0:8080 on the host → guest:8080
+vm expose scratch 5432 15432             # remap: host 15432 → guest 5432
+vm expose scratch 3000 --bind 127.0.0.1  # loopback-only on the host
+vm expose scratch 8080 --auto            # pick a free host port; prints it on stdout
+vm forwards scratch                      # list all active forwards
+vm unexpose scratch 8080                 # remove the forward
+```
+
+Note that `--auto` picks a port in the range 30000–60000 and prints just the
+port number on stdout, so `port=$(vm expose scratch 8080 --auto)` works for
+scripting purposes.
+
+Forwards are identified by their full `<bind>:<host-port>` tuple, so
+`vm unexpose` must be given the same `--bind` that was used at expose time
+(e.g., `vm unexpose scratch 3000 --bind 127.0.0.1` to undo the loopback
+forward above). `vm forwards <name>` prints the exact local addresses, which
+can be copy-pasted back into `vm unexpose`.
+
+Forwards are only managed from the host. The gvproxy forwarder API is exposed
+on a unix socket under `$VMS_DIR/<name>/network.sock` (host-side only); there
+is no built-in path for processes inside the guest to register their own
+forwards.
 
 ### Additional Setup
 
