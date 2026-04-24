@@ -109,6 +109,9 @@
   # external.
   set -s set-clipboard on
 
+  # Allow programs inside tmux (e.g. `osc`) to emit OSC/DCS escape sequences.
+  set -g allow-passthrough on
+
   set -g status-position bottom
   set -g status-style 'fg=default,bg=default'
   set -g status-left-length 50
