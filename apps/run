@@ -1,0 +1,142 @@
+#!/bin/sh -e
+
+GREEN='\033[1;32m'
+RED='\033[1;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+APP_SYSTEM=${1:?missing app system}
+SCRIPT_NAME=${2:?missing script name}
+shift 2
+
+case "$SCRIPT_NAME" in
+    build)
+        ACTION="build"
+        ;;
+    build-switch)
+        ACTION="switch"
+        ;;
+    *)
+        echo "${RED}Unsupported app: $SCRIPT_NAME${NC}"
+        exit 1
+        ;;
+esac
+
+warn_if_user_info_is_hidden_from_git() {
+    # Warn about the skip-worktree / assume-unchanged trap: if user-info.nix has
+    # been edited on disk but git reports the whole tree as clean, Nix builds with
+    # the HEAD version and silently ignores the edits.
+    if [ -f user-info.nix ] && git diff --quiet HEAD -- 2>/dev/null; then
+        disk_hash=$(git hash-object user-info.nix 2>/dev/null || echo "")
+        head_hash=$(git rev-parse HEAD:user-info.nix 2>/dev/null || echo "")
+        if [ -n "$head_hash" ] && [ "$disk_hash" != "$head_hash" ]; then
+            echo "${YELLOW}WARNING: user-info.nix on disk differs from HEAD, but git"
+            echo "reports the working tree as clean (likely skip-worktree or"
+            echo "assume-unchanged is set). Nix may build with the HEAD version"
+            echo "and silently ignore your edits.${NC}"
+            echo ""
+            echo "${YELLOW}To make git notice the file for this run:${NC}"
+            echo "  git update-index --no-skip-worktree user-info.nix"
+            echo "  nix run .#$SCRIPT_NAME"
+            echo "  git update-index --skip-worktree user-info.nix"
+            echo ""
+        fi
+    fi
+}
+
+is_nix_os() {
+    [ -e /etc/NIXOS ] && return 0
+
+    return 1
+}
+
+linux_flake_target() {
+    system=$(uname -m)
+
+    case "$system" in
+        x86_64)
+            echo "x86_64-linux"
+            ;;
+        aarch64)
+            echo "aarch64-linux"
+            ;;
+        *)
+            echo "${RED}Unsupported architecture: $system${NC}" >&2
+            exit 1
+            ;;
+    esac
+}
+
+run_linux() {
+    flake_target=$(linux_flake_target)
+
+    if [ "$ACTION" = "build" ]; then
+        echo "${YELLOW}Starting build...${NC}"
+    else
+        echo "${YELLOW}Starting...${NC}"
+    fi
+
+    if is_nix_os; then
+        echo "Running on a NixOS-based system"
+        /run/current-system/sw/bin/nixos-rebuild "$ACTION" --flake ".#$flake_target" "$@"
+    else
+        echo "Running on a Linux system (non-NixOS)"
+        home-manager "$ACTION" --flake ".#$flake_target" "$@"
+    fi
+}
+
+darwin_system_type() {
+    system_arch="aarch64-darwin"
+    hardware_data=$(system_profiler SPHardwareDataType)
+
+    if echo "$hardware_data" | grep -q -e "Virtual" -e "Parallels" -e "VMware"; then
+        echo "${YELLOW}Using VM configuration...${NC}" >&2
+        echo "${system_arch}@vm"
+    elif echo "$hardware_data" | grep -q "MacBook"; then
+        echo "${YELLOW}Using laptop configuration...${NC}" >&2
+        echo "${system_arch}@laptop"
+    else
+        echo "${YELLOW}Using desktop configuration...${NC}" >&2
+        echo "${system_arch}@desktop"
+    fi
+}
+
+run_darwin() {
+    system_type=$(darwin_system_type)
+    flake_system="darwinConfigurations.${system_type}.system"
+
+    export NIXPKGS_ALLOW_UNFREE=1
+
+    echo "${YELLOW}Starting build for ${flake_system}...${NC}"
+    if [ "$ACTION" = "build" ]; then
+        nix --extra-experimental-features 'nix-command flakes' --show-trace build ".#$flake_system" "$@"
+    else
+        nix --extra-experimental-features 'nix-command flakes' build ".#$flake_system" "$@"
+        echo "${YELLOW}Switching to new generation...${NC}"
+        sudo ./result/sw/bin/darwin-rebuild switch --flake ".#${system_type}" "$@"
+    fi
+
+    echo "${YELLOW}Cleaning up...${NC}"
+    unlink ./result
+}
+
+warn_if_user_info_is_hidden_from_git
+
+case "$APP_SYSTEM" in
+    *-linux)
+        run_linux "$@"
+        ;;
+    aarch64-darwin)
+        run_darwin "$@"
+        ;;
+    *)
+        echo "${RED}Unsupported app system: $APP_SYSTEM${NC}"
+        exit 1
+        ;;
+esac
+
+if [ "$ACTION" = "build" ]; then
+    echo "${GREEN}Build complete!${NC}"
+else
+    echo "${GREEN}Switch to new generation complete!${NC}"
+fi

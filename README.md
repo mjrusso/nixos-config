@@ -306,20 +306,30 @@ To build **and** apply changes:
 nix run .#build-switch
 ```
 
-On NixOS, these wrappers detect `/etc/NIXOS` and call `nixos-rebuild` for the
-current architecture. On x86_64 NixOS, the direct equivalents are:
+Both commands are flake apps that call the shared [`apps/run`](./apps/run)
+dispatcher. The dispatcher maps `build` to a build-only action and
+`build-switch` to a switch action, then chooses the right backend for the
+current platform.
+
+On NixOS, it detects `/etc/NIXOS` and calls `nixos-rebuild` for the current
+architecture. On x86_64 NixOS, the direct equivalents are:
 
 ``` bash
 sudo nixos-rebuild build --flake .#x86_64-linux
 sudo nixos-rebuild switch --flake .#x86_64-linux
 ```
 
-On non-NixOS Linux, the same wrappers call standalone `home-manager` instead:
+On non-NixOS Linux, the dispatcher calls standalone `home-manager` instead:
 
 ``` bash
 home-manager build --flake .#x86_64-linux
 home-manager switch --flake .#x86_64-linux
 ```
+
+On Darwin, it selects the `aarch64-darwin@desktop`, `@laptop`, or `@vm`
+configuration from `system_profiler`, builds
+`darwinConfigurations.<system>.system`, and `build-switch` then runs
+`darwin-rebuild switch` from the build result.
 
 > [!NOTE]
 >
