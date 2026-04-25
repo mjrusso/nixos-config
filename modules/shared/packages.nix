@@ -31,6 +31,7 @@ with pkgs; [
 
   # Development tools
   just
+  shellcheck
   git-recent # Run: `git recent` to see a list of recent git branches.
 
   # AI development tools
