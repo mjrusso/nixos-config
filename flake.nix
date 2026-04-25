@@ -40,6 +40,7 @@
   outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, nixos-generators, workmux } @inputs:
     let
       userInfo = import ./user-info.nix;
+      hostInfo = import ./host-info.nix;
       user = userInfo.user;
       linuxSystems = [ "x86_64-linux" "aarch64-linux" ];
       darwinSystems = [ "aarch64-darwin" ];
@@ -115,7 +116,7 @@
 
       nixosConfigurations = nixpkgs.lib.genAttrs linuxSystems (system: nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = inputs // { inherit userInfo; };
+        specialArgs = inputs // { inherit userInfo hostInfo; };
         modules = [
           disko.nixosModules.disko
           home-manager.nixosModules.home-manager {

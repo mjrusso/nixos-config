@@ -1,31 +1,80 @@
-_: {
-  # This formats the disk with the ext4 filesystem
-  # Other examples found here: https://github.com/nix-community/disko/tree/master/example
+let
+  mainDisk = "/dev/disk/by-id/REPLACE_ME";
+in
+{
+  assertions = [
+    {
+      assertion = mainDisk != "/dev/disk/by-id/REPLACE_ME";
+      message = "Set mainDisk in modules/nixos/disk-config.nix to the target drive's stable /dev/disk/by-id path before building the NixOS host.";
+    }
+  ];
+
   disko.devices = {
-    disk = {
-      vdb = {
-        device = "/dev/%DISK%";
-        type = "disk";
-        content = {
-          type = "gpt";
-          partitions = {
-            ESP = {
-              type = "EF00";
-              size = "100M";
-              content = {
-                type = "filesystem";
-                format = "vfat";
-                mountpoint = "/boot";
-              };
+    disk.main = {
+      device = mainDisk;
+      type = "disk";
+      content = {
+        type = "gpt";
+        partitions = {
+          ESP = {
+            type = "EF00";
+            size = "1G";
+            content = {
+              type = "filesystem";
+              format = "vfat";
+              mountpoint = "/boot";
+              mountOptions = [ "umask=0077" ];
             };
-            root = {
-              size = "100%";
-              content = {
-                type = "filesystem";
-                format = "ext4";
-                mountpoint = "/";
-              };
+          };
+          zfs = {
+            size = "100%";
+            content = {
+              type = "zfs";
+              pool = "rpool";
             };
+          };
+        };
+      };
+    };
+
+    zpool.rpool = {
+      type = "zpool";
+      options.ashift = "12";
+      rootFsOptions = {
+        compression = "zstd";
+        atime = "off";
+        xattr = "sa";
+        acltype = "posixacl";
+        mountpoint = "none";
+        encryption = "aes-256-gcm";
+        keyformat = "passphrase";
+        keylocation = "prompt";
+        "com.sun:auto-snapshot" = "false";
+      };
+      datasets = {
+        root = {
+          type = "zfs_fs";
+          mountpoint = "/";
+          options."com.sun:auto-snapshot" = "true";
+        };
+        home = {
+          type = "zfs_fs";
+          mountpoint = "/home";
+          options."com.sun:auto-snapshot" = "true";
+        };
+        nix = {
+          type = "zfs_fs";
+          mountpoint = "/nix";
+          options."com.sun:auto-snapshot" = "false";
+        };
+        vms = {
+          type = "zfs_fs";
+          mountpoint = "/var/lib/libvirt/images";
+          options = {
+            recordsize = "64K";
+            primarycache = "metadata";
+            logbias = "throughput";
+            "com.sun:auto-snapshot" = "false";
           };
         };
       };

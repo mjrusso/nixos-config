@@ -5,20 +5,42 @@
 Start by editing [`user-info.nix`](./user-info.nix) to set your desired
 username, full name, email address, and SSH public keys.
 
-To prevent local edits to this file from showing up as modifications (and to
-prevent committing changes), flag the file with the [`skip-worktree`
+To prevent local edits to machine-local files from showing up as modifications
+(and to prevent committing changes), flag them with the [`skip-worktree`
 bit](https://git-scm.com/docs/git-update-index#_skip_worktree_bit) in each
 clone:
 
 ``` bash
 git update-index --skip-worktree user-info.nix
+git update-index --skip-worktree host-info.nix
 ```
 
-_(To verify the flag is set, run `git ls-files -v user-info.nix`; an `S` prefix
-means `skip-worktree` is on.)_
+_(To verify the flag is set, run `git ls-files -v user-info.nix host-info.nix`;
+an `S` prefix means `skip-worktree` is on.)_
 
 To undo (e.g. to pull an upstream change to the template), run the same
 command with `--no-skip-worktree`.
+
+For NixOS hosts, keep stable machine identity in `host-info.nix` next to
+`user-info.nix`:
+
+``` nix
+{
+  nixosHostname = "hostname";
+  nixosHostId = "1234abcd";
+}
+```
+
+`nixosHostname` is the machine's NixOS hostname. `nixosHostId` is the
+8-hex-character host ID required by ZFS; generate it once and keep it stable
+for the life of the pool:
+
+``` bash
+head -c 4 /dev/urandom | od -A n -t x1 | tr -d ' '
+```
+
+Like `user-info.nix`, this file contains machine-local values and should not be
+casually changed after install.
 
 ### Mac
 
@@ -282,6 +304,21 @@ To build **and** apply changes:
 
 ``` bash
 nix run .#build-switch
+```
+
+On NixOS, these wrappers detect `/etc/NIXOS` and call `nixos-rebuild` for the
+current architecture. On x86_64 NixOS, the direct equivalents are:
+
+``` bash
+sudo nixos-rebuild build --flake .#x86_64-linux
+sudo nixos-rebuild switch --flake .#x86_64-linux
+```
+
+On non-NixOS Linux, the same wrappers call standalone `home-manager` instead:
+
+``` bash
+home-manager build --flake .#x86_64-linux
+home-manager switch --flake .#x86_64-linux
 ```
 
 > [!NOTE]

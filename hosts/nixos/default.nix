@@ -1,4 +1,4 @@
-{ config, inputs, pkgs, lib, userInfo, ... }:
+{ config, inputs, pkgs, lib, userInfo, hostInfo, ... }:
 
 let user = userInfo.user;
     keys = userInfo.sshKeys; in
@@ -7,6 +7,17 @@ let user = userInfo.user;
     ../../modules/nixos/disk-config.nix
     ../../modules/shared
     ../../modules/shared/caches
+  ];
+
+  assertions = [
+    {
+      assertion = hostInfo.nixosHostname != "REPLACE_ME";
+      message = "Set hostInfo.nixosHostname in host-info.nix before building the NixOS host.";
+    }
+    {
+      assertion = builtins.match "[0-9a-fA-F]{8}" hostInfo.nixosHostId != null;
+      message = "Set hostInfo.nixosHostId in host-info.nix to exactly 8 hex characters before building the NixOS host.";
+    }
   ];
 
   # Use the systemd-boot EFI boot loader.
@@ -18,11 +29,33 @@ let user = userInfo.user;
       };
       efi.canTouchEfiVariables = true;
     };
-    initrd.availableKernelModules = [ "xhci_pci" "ahci" "nvme" "usbhid" "usb_storage" "sd_mod" ];
+    supportedFilesystems = [ "zfs" ];
+    initrd.supportedFilesystems = [ "zfs" ];
+    initrd.availableKernelModules = [
+      "xhci_pci" "ahci" "nvme" "usbhid" "usb_storage" "sd_mod"
+      "igb"
+    ];
+    initrd.systemd.enable = true;
+    initrd.systemd.network.enable = true;
+    initrd.network = {
+      enable = true;
+      ssh = {
+        enable = true;
+        port = 2222;
+        authorizedKeys = keys;
+        hostKeys = [ "/etc/secrets/initrd/ssh_host_ed25519_key" ];
+      };
+    };
     # Uncomment for AMD GPU
     # initrd.kernelModules = [ "amdgpu" ];
-    kernelPackages = pkgs.linuxPackages_latest;
+    kernelParams = [
+      "ip=dhcp"
+      "zfs.zfs_arc_max=8589934592"
+    ];
+    kernelPackages = pkgs.linuxPackages;
     kernelModules = [ "uinput" ];
+    tmp.useTmpfs = true;
+    zfs.requestEncryptionCredentials = true;
   };
 
   # Set your time zone.
@@ -32,7 +65,11 @@ let user = userInfo.user;
   # Per-interface useDHCP will be mandatory in the future, so this generated config
   # replicates the default behaviour.
   networking = {
-    hostName = lib.mkDefault "nixos"; # Define your hostname.
+    hostName = hostInfo.nixosHostname;
+    hostId =
+      if builtins.match "[0-9a-fA-F]{8}" hostInfo.nixosHostId != null
+      then hostInfo.nixosHostId
+      else "00000000";
     useDHCP = lib.mkDefault true;
   };
 
@@ -58,6 +95,9 @@ let user = userInfo.user;
   };
 
   services = {
+    displayManager.defaultSession = "none+bspwm";
+    libinput.enable = true;
+
     xserver = {
       enable = true;
 
@@ -75,7 +115,6 @@ let user = userInfo.user;
       # '';
 
       displayManager = {
-        defaultSession = "none+bspwm";
         lightdm = {
           enable = true;
           greeters.slick.enable = true;
@@ -89,11 +128,10 @@ let user = userInfo.user;
       };
 
       # Turn Caps Lock into Ctrl
-      layout = "us";
-      xkbOptions = "ctrl:nocaps";
-
-      # Better support for general peripherals
-      libinput.enable = true;
+      xkb = {
+        layout = "us";
+        options = "ctrl:nocaps";
+      };
 
     };
 
@@ -221,6 +259,16 @@ let user = userInfo.user;
       enable = true;
       package = pkgs.my-emacs-with-packages;
     };
+
+    zfs = {
+      autoScrub.enable = true;
+      trim.enable = true;
+      autoSnapshot.enable = true;
+      zed.enableMail = false;
+    };
+    zfs.zed.settings = {
+      ZED_DEBUG_LOG = "/var/log/zed.log";
+    };
   };
 
   # When emacs builds from no cache, it exceeds the 90s timeout default
@@ -233,7 +281,8 @@ let user = userInfo.user;
 
   # Video support
   hardware = {
-    opengl.enable = true;
+    enableRedistributableFirmware = true;
+    graphics.enable = true;
     # pulseaudio.enable = true;
     # hardware.nvidia.modesetting.enable = true;
 
@@ -251,6 +300,34 @@ let user = userInfo.user;
       enable = true;
       logDriver = "json-file";
     };
+    libvirtd = {
+      enable = true;
+      qemu = {
+        package = pkgs.qemu_kvm;
+        runAsRoot = false;
+        swtpm.enable = true;
+      };
+    };
+  };
+
+  programs.virt-manager.enable = true;
+
+  systemd.services.docker.after = [ "libvirtd.service" ];
+
+  systemd.services.docker-restart-after-libvirtd = {
+    description = "Re-prime Docker firewall rules after libvirt starts";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "libvirtd.service" "docker.service" ];
+    requires = [ "libvirtd.service" "docker.service" ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      ${pkgs.systemd}/bin/systemctl try-restart docker.service
+    '';
+  };
+
+  zramSwap = {
+    enable = true;
+    memoryPercent = 50;
   };
 
   # It's me, it's you, it's everyone
@@ -260,6 +337,8 @@ let user = userInfo.user;
       extraGroups = [
         "wheel" # Enable ‘sudo’ for the user.
         "docker"
+        "libvirtd"
+        "kvm"
       ];
       shell = pkgs.fish;
       openssh.authorizedKeys.keys = keys;
