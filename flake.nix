@@ -61,7 +61,6 @@
       mkLinuxApps = system: {
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
-        "install" = mkApp "install" system;
       };
       mkDarwinApps = system: {
         "build" = mkApp "build" system;
