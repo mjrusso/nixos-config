@@ -20,23 +20,23 @@ case "$SYSTEM" in
         ;;
 esac
 
-# Detect the skip-worktree / assume-unchanged trap: if user-info.nix has been
-# edited on disk but git reports the whole tree as clean, Nix builds with the
-# HEAD version and silently ignores the edits.
+# Warn about the skip-worktree / assume-unchanged trap: if user-info.nix has
+# been edited on disk but git reports the whole tree as clean, Nix builds with
+# the HEAD version and silently ignores the edits.
 if [ -f user-info.nix ] && git diff --quiet HEAD -- 2>/dev/null; then
     disk_hash=$(git hash-object user-info.nix 2>/dev/null || echo "")
     head_hash=$(git rev-parse HEAD:user-info.nix 2>/dev/null || echo "")
     if [ -n "$head_hash" ] && [ "$disk_hash" != "$head_hash" ]; then
-        echo "${RED}ERROR: user-info.nix on disk differs from HEAD, but git"
+        echo "${YELLOW}WARNING: user-info.nix on disk differs from HEAD, but git"
         echo "reports the working tree as clean (likely skip-worktree or"
-        echo "assume-unchanged is set). Nix would build with the HEAD version"
+        echo "assume-unchanged is set). Nix may build with the HEAD version"
         echo "and silently ignore your edits.${NC}"
         echo ""
-        echo "${YELLOW}Fix — toggle the bit off, re-run, then toggle back on:${NC}"
+        echo "${YELLOW}To make git notice the file for this run:${NC}"
         echo "  git update-index --no-skip-worktree user-info.nix"
         echo "  nix run .#build"
         echo "  git update-index --skip-worktree user-info.nix"
-        exit 1
+        echo ""
     fi
 fi
 
