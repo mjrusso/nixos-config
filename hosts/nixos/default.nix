@@ -74,6 +74,7 @@ let user = userInfo.user;
       if builtins.match "[0-9a-fA-F]{8}" hostInfo.nixosHostId != null
       then hostInfo.nixosHostId
       else "00000000";
+    hosts = hostInfo.nixosExtraHosts;
     useDHCP = lib.mkDefault true;
   };
 
