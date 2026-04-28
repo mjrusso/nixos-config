@@ -1,17 +1,9 @@
-let
-  mainDisk = "/dev/disk/by-id/REPLACE_ME";
-in
-{
-  assertions = [
-    {
-      assertion = mainDisk != "/dev/disk/by-id/REPLACE_ME";
-      message = "Set mainDisk in modules/nixos/disk-config.nix to the target drive's stable /dev/disk/by-id path before building the NixOS host.";
-    }
-  ];
+{ hostInfo, ... }:
 
+{
   disko.devices = {
     disk.main = {
-      device = mainDisk;
+      device = hostInfo.nixosMainDisk;
       type = "disk";
       content = {
         type = "gpt";

@@ -18,6 +18,10 @@ let user = userInfo.user;
       assertion = builtins.match "[0-9a-fA-F]{8}" hostInfo.nixosHostId != null;
       message = "Set hostInfo.nixosHostId in host-info.nix to exactly 8 hex characters before building the NixOS host.";
     }
+    {
+      assertion = hostInfo.nixosMainDisk != "REPLACE_ME";
+      message = "Set hostInfo.nixosMainDisk in host-info.nix to the target drive's stable /dev/disk/by-id path before building the NixOS host.";
+    }
   ];
 
   # Use the systemd-boot EFI boot loader.
