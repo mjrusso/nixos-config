@@ -157,7 +157,12 @@ let user = userInfo.user;
 
       settings = {
         devices = {};
-        options.globalAnnounceEnabled = false; # Only sync on LAN
+        options = {
+          globalAnnounceEnabled = false;
+          localAnnounceEnabled = true;
+          relaysEnabled = false;
+          natEnabled = true;
+        };
       };
     };
 
