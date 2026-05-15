@@ -322,17 +322,13 @@ let user = userInfo.user;
 
   programs.virt-manager.enable = true;
 
-  systemd.services.docker.after = [ "libvirtd.service" ];
-
-  systemd.services.docker-restart-after-libvirtd = {
-    description = "Re-prime Docker firewall rules after libvirt starts";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "libvirtd.service" "docker.service" ];
-    requires = [ "libvirtd.service" "docker.service" ];
-    serviceConfig.Type = "oneshot";
-    script = ''
-      ${pkgs.systemd}/bin/systemctl try-restart docker.service
-    '';
+  # libvirtd installs its own firewall rules when it starts, which can
+  # shadow Docker's. Order Docker after libvirtd, and tie Docker's
+  # lifecycle to libvirtd (`partOf`) so Docker is restarted — and thus
+  # re-primes its firewall rules — whenever libvirtd is (re)started.
+  systemd.services.docker = {
+    after = [ "libvirtd.service" ];
+    partOf = [ "libvirtd.service" ];
   };
 
   zramSwap = {
