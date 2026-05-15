@@ -91,6 +91,12 @@ let user = userInfo.user;
   # Manages keys and such
   programs = {
     gnupg.agent.enable = true;
+    ssh = {
+      startAgent = true;
+      extraConfig = ''
+        AddKeysToAgent yes
+      '';
+    };
 
     # Needed for anything GTK related
     dconf.enable = true;
