@@ -28,6 +28,8 @@ For NixOS hosts, keep stable machine identity in `host-info.nix` next to
 {
   nixosHostname = "hostname";
   nixosHostId = "1234abcd";
+  nixosMainDisk = "/dev/disk/by-id/...";
+  nixosExtraHosts = {};
 }
 ```
 
@@ -38,6 +40,12 @@ for the life of the pool:
 ``` bash
 head -c 4 /dev/urandom | od -A n -t x1 | tr -d ' '
 ```
+
+`nixosMainDisk` is the stable `/dev/disk/by-id/...` path of the disk that disko
+partitions and installs onto (see the NixOS install section below).
+`nixosExtraHosts` is an attribute set of static `/etc/hosts` entries, mapping
+an IP address to a list of names, for example `{ "192.168.1.10" = [
+"fileserver" ]; }`.
 
 Like `user-info.nix`, this file contains machine-local values and should not be
 casually changed after install.
@@ -100,6 +108,171 @@ sudo /sbin/usermod -s ~/.nix-profile/bin/fish $USER
 
 Finally, reboot the system. (Rebooting is required for terminal definitions to
 be properly installed; see `$TERMINFO_DIRS`.)
+
+### NixOS
+
+These instructions install NixOS onto a physical machine, with full-disk ZFS
+encryption (via [disko](https://github.com/nix-community/disko)) and
+SSH-in-initrd unlock. They assume a single NVMe target disk and a wired
+ethernet connection.
+
+#### Boot the installer
+
+Boot the [NixOS minimal installer ISO](https://nixos.org/download/#nixos-iso)
+from USB. Use the latest stable release with an LTS kernel to avoid ZFS
+incompatibilities. (The installed system can still track `nixos-unstable`; this
+is specifically about the installer media.)
+
+At the installer console:
+
+``` bash
+sudo -i
+ip -br addr show           # confirm wired NIC has a DHCP lease
+ping -c2 1.1.1.1           # confirm outbound works
+cd /tmp
+git clone https://github.com/mjrusso/nixos-config.git
+cd nixos-config
+```
+
+Identify the target disk and note its stable `by-id` path:
+
+``` bash
+lsblk -d -o NAME,SIZE,TYPE
+ls -l /dev/disk/by-id/ | grep -v part
+```
+
+Then fill in `host-info.nix` and `user-info.nix` per the descriptions at the
+top of this file, with `nixosMainDisk` set to the `by-id` path identified
+above.
+
+#### Run disko and set ZFS encryption passphrase
+
+Use the command below to run disko:
+
+``` bash
+sudo nix --extra-experimental-features 'nix-command flakes' \
+  run github:nix-community/disko -- \
+  --mode disko --flake .#x86_64-linux
+cat /run/zpass             # paste this into disko's prompt
+shred -u /run/zpass
+```
+
+When prompted, type in a ZFS-encryption passphrase (and store this securely, as
+the data is not recoverable without the passphrase).
+
+Disko goes silent for ~1–2 minutes while it creates the GPT, formats the ESP,
+builds the pool, applies encryption, and mounts everything under `/mnt`.
+Verify:
+
+``` bash
+zpool status rpool
+zfs list                   # root/home/nix/vms mounted under /mnt
+mount | grep /mnt
+```
+
+#### Pre-generate SSH host keys (initrd + system)
+
+Both the initrd and the running system need stable ed25519 host keys before
+activation. The initrd key defends against first-connect TOFU during the
+SSH-in-initrd unlock; the system key does the same for normal SSH.
+
+``` bash
+mkdir -p /mnt/etc/secrets/initrd
+ssh-keygen -t ed25519 -N "" -f /mnt/etc/secrets/initrd/ssh_host_ed25519_key
+chmod 600 /mnt/etc/secrets/initrd/ssh_host_ed25519_key
+ssh-keygen -lf /mnt/etc/secrets/initrd/ssh_host_ed25519_key.pub   # record: initrd / port 2222
+
+mkdir -p /mnt/etc/ssh
+ssh-keygen -t ed25519 -N "" -f /mnt/etc/ssh/ssh_host_ed25519_key
+chmod 600 /mnt/etc/ssh/ssh_host_ed25519_key
+ssh-keygen -lf /mnt/etc/ssh/ssh_host_ed25519_key.pub              # record: system / port 22
+```
+
+Write both `SHA256:` fingerprints down. You'll verify against them on first
+SSH connect (port 2222 for the unlock, port 22 for the running system).
+
+#### Run `nixos-install`
+
+``` bash
+nixos-install --flake .#x86_64-linux
+```
+
+This builds and copies the system closure onto the new pool. When prompted for
+the **root password**, set a long random value. Save it securely alongside the
+ZFS passphrase. Then reboot:
+
+``` bash
+reboot
+```
+
+#### First boot
+
+Every boot requires unlocking the ZFS pool before the system can start. On
+first boot, do this at the physical console (keyboard and monitor attached).
+The initrd will prompt for the ZFS passphrase on `tty1`; type it there. (The
+SSH-in-initrd path below works from the first boot too, but having peripherals
+attached for the first one is a useful fallback while verifying the install.)
+
+Once the system is up, find its IP address so you can SSH in:
+
+``` bash
+ip -br addr show           # note the address on the wired NIC
+ip -br link show           # note the MAC, if you want to set a DHCP reservation
+```
+
+This is a good opportunity to create a DHCP reservation (configured on the
+router, keyed to that MAC) so the address stays stable across reboots.
+
+#### Set the user password
+
+The user defined by `user-info.nix` is created with `isNormalUser = true` and
+authorized SSH keys, but **no password**. That account can't log in at the
+console, and `sudo` from it fails because PAM has nothing to authenticate
+against. SSH key auth works (the user's keys are installed as authorized keys),
+and so does `sudo reboot` (it is declared as `NOPASSWD` in
+`security.sudo.extraRules`), but other `sudo` command requires a password.
+
+To set one, SSH in as `root` (the same SSH keys authorize root) and run
+`passwd`:
+
+``` bash
+ssh root@<box-ip>          # verify the 'system / port 22' fingerprint on first connect
+passwd <user>              # the username defined in user-info.nix
+```
+
+Generate a long random password and store it in your password manager
+alongside the ZFS and root passwords. Since `users.mutableUsers` is `true` by
+default, this password persists across `nixos-rebuild`s and is not stored in
+the flake.
+
+#### SSH-in-initrd unlock
+
+After the next reboot the box will pause in the initrd waiting for the ZFS
+passphrase. From another machine:
+
+``` bash
+ssh -t -p 2222 root@<box-ip> systemctl default
+```
+
+When SSH prompts about the host key, verify against the **initrd / port 2222**
+fingerprint. Type the ZFS passphrase. The connection closes once the real
+system continues to boot. After this system finishes booting, you can SSH into
+the running system on port 22:
+
+``` bash
+ssh <user>@<box-ip>        # verify the 'system / port 22' fingerprint
+```
+
+If `systemctl default` doesn't surface the passphrase prompt over your SSH
+session, fall back to one of:
+
+``` bash
+ssh -t -p 2222 root@<box-ip> 'systemctl default & systemd-tty-ask-password-agent --query'
+
+ssh -p 2222 root@<box-ip>  # at the initrd shell:
+zfs load-key rpool
+systemctl default
+```
 
 ### Container and VM Images
 
