@@ -11,6 +11,7 @@ with pkgs; [
   fish
   killall
   neofetch
+  nh # Nix helper; `nh clean all` garbage-collects old generations (see README)
   nixfmt-classic
   rsync
   sqlite

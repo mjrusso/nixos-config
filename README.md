@@ -520,6 +520,38 @@ To update dependencies, run:
 nix flake update
 ```
 
+### Garbage collection
+
+Every `build-switch` leaves the previous build behind as an older generation,
+and the Nix store accumulates unreferenced paths over time. To reclaim that
+space, use [`nh`](https://github.com/nix-community/nh):
+
+``` bash
+nh clean all
+```
+
+`nh clean all` works in two phases. First, it scans every profile it can find
+(NixOS system profile, per-user profiles, home-manager generations), removing
+old generations that fall outside of its keep policy. It then runs a store
+garbage collection, freeing the paths those generations were keeping alive.
+
+To preview what would be removed before committing to it:
+
+``` bash
+nh clean all --dry
+```
+
+By default `nh clean all` keeps the 1 most recent generation and anything from
+the last 0 days; loosen that to avoid throwing away generations you might want
+to roll back to:
+
+``` bash
+nh clean all --keep 5 --keep-since 7d
+```
+
+`--keep` sets how many recent generations to retain per profile, and
+`--keep-since` retains anything newer than the given age regardless of count.
+
 ### Checks
 
 To verify that all configurations (Darwin, NixOS, home-manager, and
