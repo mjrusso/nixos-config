@@ -270,12 +270,6 @@ let user = userInfo.user;
     gvfs.enable = true; # Mount, trash, and other functionalities
     tumbler.enable = true; # Thumbnail support for images
 
-    # Emacs runs as a daemon
-    emacs = {
-      enable = true;
-      package = pkgs.my-emacs-with-packages;
-    };
-
     zfs = {
       autoScrub.enable = true;
       trim.enable = true;
@@ -285,16 +279,6 @@ let user = userInfo.user;
     zfs.zed.settings = {
       ZED_DEBUG_LOG = "/var/log/zed.log";
     };
-  };
-
-  # When emacs builds from no cache, it exceeds the 90s timeout default
-  systemd.user.services.emacs = {
-    environment.TERMINFO_DIRS = lib.concatStringsSep ":" [
-      "$HOME/.nix-profile/share/terminfo"
-      "/etc/profiles/per-user/${user}/share/terminfo"
-      "/run/current-system/sw/share/terminfo"
-    ];
-    serviceConfig.TimeoutStartSec = "7min";
   };
 
   # Enable sound

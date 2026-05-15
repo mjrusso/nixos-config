@@ -183,7 +183,7 @@ let
          emacsclient -c -a emacs
 
     super + alt + e
-         systemctl --user restart emacs.service && \
+         ekill; \
          emacsclient -c -a emacs
 
     # Web browser
