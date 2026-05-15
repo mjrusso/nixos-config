@@ -29,6 +29,10 @@ with pkgs; [
   cargo
   ruby_3_3
 
+  # Editors
+  nano
+  vim
+
   # Development tools
   just
   shellcheck
