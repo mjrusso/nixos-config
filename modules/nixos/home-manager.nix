@@ -19,7 +19,11 @@ in
     sessionVariables = {
       PATH = "$PATH:$HOME/.npm/bin";
       EDITOR = "ec";
-      TERMINFO_DIRS = "$HOME/.nix-profile/share/terminfo";
+      TERMINFO_DIRS = lib.concatStringsSep ":" [
+        "$HOME/.nix-profile/share/terminfo"
+        "/etc/profiles/per-user/${user}/share/terminfo"
+        "/run/current-system/sw/share/terminfo"
+      ];
     };
     file = shared-files // import ./files.nix { inherit user; };
     stateVersion = "21.05";

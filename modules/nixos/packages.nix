@@ -6,6 +6,7 @@ shared-packages ++ [
 
   alacritty
   ghostty
+  ghostty.terminfo
   kitty
 
   docker

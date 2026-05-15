@@ -289,6 +289,11 @@ let user = userInfo.user;
 
   # When emacs builds from no cache, it exceeds the 90s timeout default
   systemd.user.services.emacs = {
+    environment.TERMINFO_DIRS = lib.concatStringsSep ":" [
+      "$HOME/.nix-profile/share/terminfo"
+      "/etc/profiles/per-user/${user}/share/terminfo"
+      "/run/current-system/sw/share/terminfo"
+    ];
     serviceConfig.TimeoutStartSec = "7min";
   };
 
@@ -387,6 +392,7 @@ let user = userInfo.user;
 
   environment.systemPackages = with pkgs; [
     gitFull
+    ghostty.terminfo
     inetutils
   ];
 
