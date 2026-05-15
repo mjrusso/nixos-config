@@ -13,8 +13,8 @@
     overlays =
       [
         (final: prev: {
-          my-emacs-with-packages = emacs-flake.packages.${prev.system}.default;
-          workmux = workmux.packages.${prev.system}.default;
+          my-emacs-with-packages = emacs-flake.packages.${prev.stdenv.hostPlatform.system}.default;
+          workmux = workmux.packages.${prev.stdenv.hostPlatform.system}.default;
         })
       ] ++
       # Apply each overlay found in the /overlays directory
