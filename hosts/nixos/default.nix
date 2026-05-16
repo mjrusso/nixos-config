@@ -5,6 +5,7 @@ let user = userInfo.user;
 {
   imports = [
     ../../modules/nixos/disk-config.nix
+    ../../modules/nixos/tailscale.nix
     ../../modules/shared
     ../../modules/shared/caches
   ];

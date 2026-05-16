@@ -274,6 +274,41 @@ zfs load-key rpool
 systemctl default
 ```
 
+#### Tailscale
+
+Physical NixOS hosts enable Tailscale via
+[`modules/nixos/tailscale.nix`](./modules/nixos/tailscale.nix). Container and
+VM images do not import this module.
+
+The module starts `tailscaled`, installs the `tailscale` CLI, trusts the
+`tailscale0` interface in the NixOS firewall, and opens Tailscale's configured
+UDP port.
+
+After the first rebuild/switch, authenticate the machine once:
+
+``` bash
+sudo tailscale up
+```
+
+Open the login URL that command prints, authenticate, and register the machine
+in the tailnet. Tailscale stores node state on disk, so later rebuilds and
+reboots should not require logging in again.
+
+Useful status checks:
+
+``` bash
+tailscale status
+tailscale ip
+ip link show tailscale0
+systemctl status tailscaled
+```
+
+To follow Tailscale logs:
+
+``` bash
+sudo journalctl -u tailscaled -f
+```
+
 ### Container and VM Images
 
 Container and VM images can be built using
