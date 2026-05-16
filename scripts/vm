@@ -199,6 +199,54 @@ disk_path_for() {
   echo "$1/disk.$(host_image_format)"
 }
 
+metadata_disk_path_for() {
+  echo "$1/metadata.raw"
+}
+
+hostname_for_vm() {
+  local name="$1"
+  local vm_host host
+  vm_host="$(hostname -s 2>/dev/null || true)"
+  if [ -z "$vm_host" ]; then
+    vm_host="$(hostname 2>/dev/null || true)"
+  fi
+  vm_host="${vm_host%%.*}"
+
+  if [ -n "$vm_host" ]; then
+    host="$vm_host-$name"
+  else
+    host="$name"
+  fi
+  host="${host//_/-}"
+  host="${host,,}"
+  host="$(printf '%s' "$host" | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
+  host="${host:0:63}"
+  host="$(printf '%s' "$host" | sed -E 's/-+$//')"
+  if [ -z "$host" ]; then
+    echo "Invalid VM hostname derived from '$name'." >&2
+    return 1
+  fi
+  echo "$host"
+}
+
+write_metadata_disk() {
+  local d="$1" name="$2"
+  local metadata; metadata="$(metadata_disk_path_for "$d")"
+  local hostname; hostname="$(hostname_for_vm "$name")" || return 1
+  local payload="$d/metadata.txt"
+
+  {
+    echo "MJRVMMETA1"
+    echo "hostname=$hostname"
+    echo "name=$name"
+  } > "$payload"
+
+  rm -f "$metadata.partial"
+  dd if=/dev/zero of="$metadata.partial" bs=4096 count=1 2>/dev/null
+  dd if="$payload" of="$metadata.partial" conv=notrunc 2>/dev/null
+  mv "$metadata.partial" "$metadata"
+}
+
 ssh_host_for() {
   # SSH is always reached via localhost from the VM host. start_gvproxy
   # rebinds the SSH forward to all interfaces (0.0.0.0) so other hosts
@@ -586,7 +634,7 @@ cmd_up() {
       ;;
   esac
 
-  local d disk
+  local d disk metadata
   d="$(vm_dir "$name")"
   mkdir -p "$d"
   # Hold the launch lock across is_running → gvproxy launch → driver
@@ -596,6 +644,7 @@ cmd_up() {
   # observe "not running" and both proceed to launch.
   acquire_up_lock "$d" || exit 1
   disk="$(disk_path_for "$d")"
+  metadata="$(metadata_disk_path_for "$d")"
 
   if is_running "$d/vm.pid"; then
     if [ "$rebuild" -eq 1 ]; then
@@ -618,7 +667,7 @@ cmd_up() {
   if [ "$rebuild" -eq 1 ]; then
     # Full reset. Wipe either disk format (in case the host driver
     # changed since last boot) and EFI vars.
-    rm -f "$d/disk.qcow2" "$d/disk.raw" "$d/efi-vars.fd"
+    rm -f "$d/disk.qcow2" "$d/disk.raw" "$d/efi-vars.fd" "$metadata"
   fi
 
   if [ ! -f "$disk" ]; then
@@ -634,6 +683,7 @@ cmd_up() {
   fi
 
   ssh_user "$d" >/dev/null || exit 1
+  write_metadata_disk "$d" "$name"
 
   # Allocate or reuse the host SSH port. gvproxy's -ssh-port flag
   # binds 127.0.0.1:$port → guest:22 as a built-in forward; additional
@@ -671,8 +721,8 @@ cmd_up() {
   fi
 
   case "$driver" in
-    qemu)  boot_qemu  "$d" "$name" "$image_arch" "$disk" ;;
-    vfkit) boot_vfkit "$d" "$name" "$disk" ;;
+    qemu)  boot_qemu  "$d" "$name" "$image_arch" "$disk" "$metadata" ;;
+    vfkit) boot_vfkit "$d" "$name" "$disk" "$metadata" ;;
   esac
 
   trap - INT TERM
@@ -684,7 +734,7 @@ cmd_up() {
 }
 
 boot_qemu() {
-  local d="$1" name="$2" image_arch="$3" disk="$4"
+  local d="$1" name="$2" image_arch="$3" disk="$4" metadata="$5"
   local qemu_bin="qemu-system-$image_arch"
   require_cmd "$qemu_bin"
   require_cmd setsid
@@ -702,6 +752,7 @@ boot_qemu() {
   local qemu_args=(
     -enable-kvm -cpu host -smp 4 -m 4096
     -drive "file=$disk,if=virtio"
+    -drive "file=$metadata,if=virtio,format=raw,readonly=on"
     -netdev "stream,id=net0,server=off,addr.type=unix,addr.path=$d/qemu-net.sock"
     -device "virtio-net-pci,netdev=net0,mac=$mac"
     -display none
@@ -740,7 +791,7 @@ boot_qemu() {
 }
 
 boot_vfkit() {
-  local d="$1" name="$2" disk="$3"
+  local d="$1" name="$2" disk="$3" metadata="$4"
   require_cmd vfkit
 
   # Per-VM EFI variable store; created on first boot, reused thereafter.
@@ -762,6 +813,7 @@ boot_vfkit() {
     --memory 4096 \
     --bootloader "$bootloader" \
     --device "virtio-blk,path=$disk" \
+    --device "virtio-blk,path=$metadata" \
     --device "virtio-net,unixSocketPath=$d/vfkit-net.sock,mac=$mac" \
     --device virtio-rng \
     --device "virtio-serial,logFilePath=$d/serial.log" \
