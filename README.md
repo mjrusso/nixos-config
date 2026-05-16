@@ -334,11 +334,13 @@ vm down scratch          # graceful shutdown
 vm rm scratch            # delete VM and all its state
 ```
 
+`vm up` launches the VM and returns after the hypervisor process starts. It
+does not wait for SSH to become reachable; use `vm console <name>` to watch
+boot output and `vm ssh <name>` to connect when the guest is ready.
+
 `vm up` flags:
 
-- `--no-wait` — launch the VM and return immediately, without waiting for SSH
-  to come up. Useful when you want to observe the boot yourself (e.g.
-  `vm console <name>` in another terminal).
+- `--rebuild` — wipe the VM disk and reinstall from the current golden image.
 
 The `vm` command drives two back-ends: qemu + KVM on Linux hosts, and
 [vfkit](https://github.com/crc-org/vfkit) (Apple's `Virtualization.framework`)

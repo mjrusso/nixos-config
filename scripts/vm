@@ -6,12 +6,10 @@ usage() {
 Usage: vm <subcommand> [args]
 
 Subcommands:
-  up <name> [--rebuild] [--no-wait]
+  up <name> [--rebuild]
         Boot a VM from the host's golden image.
         --rebuild         wipe the VM's disk and reinstall from the
                           current golden image (destroys VM state)
-        --no-wait         return as soon as the VM process is launched;
-                          skip the SSH readiness check.
   down <name>             Stop the VM (graceful kill, then SIGKILL).
   rm <name>               Stop and delete the VM and all its state.
   ssh <name> [args...]    SSH into the VM.
@@ -372,32 +370,33 @@ start_gvproxy() {
   # -ssh-port: gvproxy installs a built-in 127.0.0.1:$port → guest:22 forward.
   #            The flag is required to pick a unique port per VM; we then
   #            immediately swap that forward's bind to 0.0.0.0 (see below).
-  # -pid-file: written asynchronously after startup; we also capture the
-  #            nohup'd pid as a fallback while gvproxy flushes it.
+  # -pid-file: written asynchronously after startup and used by stop_gvproxy.
   # Socket endpoints need the `unix://` scheme prefix — `-listen-qemu`
   # and `-listen-vfkit` parse their argument as a URL and reject bare
   # paths with "unexpected scheme".
-  nohup "$bin" \
-    -listen "unix://$d/network.sock" \
-    "$vm_flag" "unix://$vm_sock" \
-    -ssh-port "$port" \
-    -pid-file "$d/gvproxy.pid" \
-    > "$d/gvproxy.log" 2>&1 &
-  local pid=$!
-  disown "$pid" 2>/dev/null || true
-  # Backstop for the pid-file write race (see -pid-file note above):
-  # record the nohup'd pid immediately so stop_gvproxy has a target
-  # even if gvproxy is killed before writing its own pidfile.
-  echo "$pid" > "$d/gvproxy.pid"
+  local gvproxy_args=(
+    -listen "unix://$d/network.sock"
+    "$vm_flag" "unix://$vm_sock"
+    -ssh-port "$port"
+    -pid-file "$d/gvproxy.pid"
+  )
+  if command -v setsid >/dev/null 2>&1; then
+    setsid -f "$bin" "${gvproxy_args[@]}" > "$d/gvproxy.log" 2>&1 < /dev/null
+  else
+    nohup "$bin" "${gvproxy_args[@]}" > "$d/gvproxy.log" 2>&1 < /dev/null &
+    local pid=$!
+    disown "$pid" 2>/dev/null || true
+    echo "$pid" > "$d/gvproxy.pid"
+  fi
 
-  # Wait up to ~5s for gvproxy to create its VM-side socket. If it
-  # dies before that, surface the log and give up.
+  # Wait up to ~5s for gvproxy to create its sockets and pidfile. If
+  # it dies before that, surface the log and give up.
   local ready=0
   for _ in $(seq 1 50); do
-    if [ -S "$vm_sock" ] || [ -e "$vm_sock" ]; then
+    if [ -s "$d/gvproxy.pid" ] && { [ -S "$vm_sock" ] || [ -e "$vm_sock" ]; } && [ -S "$d/network.sock" ]; then
       ready=1; break
     fi
-    if ! kill -0 "$pid" 2>/dev/null; then
+    if [ -s "$d/gvproxy.pid" ] && ! is_gvproxy_running "$d/gvproxy.pid"; then
       echo "gvproxy exited before its VM socket appeared. See $d/gvproxy.log." >&2
       rm -f "$d/gvproxy.pid"
       return 1
@@ -406,7 +405,10 @@ start_gvproxy() {
   done
   if [ "$ready" -ne 1 ]; then
     echo "Timed out waiting for gvproxy's VM socket at $vm_sock." >&2
-    kill "$pid" 2>/dev/null || true
+    if [ -s "$d/gvproxy.pid" ]; then
+      local pid; pid="$(cat "$d/gvproxy.pid")"
+      kill "$pid" 2>/dev/null || true
+    fi
     rm -f "$d/gvproxy.pid"
     return 1
   fi
@@ -524,38 +526,18 @@ print_endpoints() {
   esac
 }
 
-wait_for_ssh() {
-  local host="$1" port="$2" user="$3"
-  local opts; opts="$(ssh_opts)"
-  echo -n "Waiting for SSH at $user@$host:$port"
-  for _ in $(seq 1 90); do
-    # shellcheck disable=SC2086
-    if ssh -p "$port" -o ConnectTimeout=2 -o BatchMode=yes $opts "$user@$host" true 2>/dev/null; then
-      echo " — up."
-      return 0
-    fi
-    echo -n "."
-    sleep 2
-  done
-  echo ""
-  echo "Timed out waiting for SSH." >&2
-  return 1
-}
-
 cmd_up() {
-  local name="" rebuild=0 no_wait=0
+  local name="" rebuild=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --rebuild) rebuild=1; shift ;;
-      --no-wait) no_wait=1; shift ;;
       -*) echo "Unknown flag: $1" >&2; exit 1 ;;
       *) name="$1"; shift ;;
     esac
   done
-  [ -n "$name" ] || { echo "Usage: vm up <name> [--rebuild] [--no-wait]" >&2; exit 1; }
+  [ -n "$name" ] || { echo "Usage: vm up <name> [--rebuild]" >&2; exit 1; }
   validate_name "$name"
 
-  require_cmd ssh
   require_cmd jq
   require_cmd curl
   require_cmd uname
@@ -637,7 +619,7 @@ cmd_up() {
     cp "$(meta_for_golden "$golden")" "$d/meta.json"
   fi
 
-  local user; user="$(ssh_user "$d")" || exit 1
+  ssh_user "$d" >/dev/null || exit 1
 
   # Allocate or reuse the host SSH port. gvproxy's -ssh-port flag
   # binds 127.0.0.1:$port → guest:22 as a built-in forward; additional
@@ -656,7 +638,7 @@ cmd_up() {
     echo "$port" > "$d/port"
   fi
 
-  # qemu is daemonized and vfkit/gvproxy are nohup'd, so a signal
+  # qemu/vfkit/gvproxy run detached, so a signal
   # between launch and trap installation would leave processes
   # running and sockets bound. Install the trap *before* any launch
   # so it covers the whole dance. The explicit `exit 130` is
@@ -679,29 +661,11 @@ cmd_up() {
     vfkit) boot_vfkit "$d" "$name" "$disk" ;;
   esac
 
-  local host
-  host="$(ssh_host_for "$d")"
+  trap - INT TERM
 
-  if [ "$no_wait" -eq 1 ]; then
-    # Clear the signal trap: with --no-wait we're about to exit
-    # cleanly, and we don't want a tty SIGHUP during shell teardown to
-    # tear the VM the user just asked us to launch. The EXIT trap (lock
-    # cleanup) stays.
-    trap - INT TERM
-    echo ""
-    echo "VM '$name' launched (pid $(cat "$d/vm.pid")). SSH not verified."
-  else
-    echo "(For live boot output: vm console $name)"
-    if ! wait_for_ssh "$host" "$port" "$user"; then
-      echo "Tearing down unresponsive VM '$name'. Check $d/serial.log for boot output." >&2
-      cmd_down "$name" || true
-      exit 1
-    fi
-    trap - INT TERM
-
-    echo ""
-    echo "VM '$name' is up."
-  fi
+  echo ""
+  echo "VM '$name' launched (pid $(cat "$d/vm.pid"))."
+  echo "(For live boot output: vm console $name)"
   print_endpoints "$d" "$name"
 }
 
@@ -709,6 +673,7 @@ boot_qemu() {
   local d="$1" name="$2" image_arch="$3" disk="$4"
   local qemu_bin="qemu-system-$image_arch"
   require_cmd "$qemu_bin"
+  require_cmd setsid
 
   echo "Starting VM '$name' via qemu (gvproxy network)..."
   rm -f "$d/qemu.mon"
@@ -716,9 +681,10 @@ boot_qemu() {
   local mac; mac="$(vm_mac "$name")"
 
   # -netdev stream (qemu 7.2+): client-side unix stream socket into
-  # gvproxy's -listen-qemu endpoint. Replaces the former SLIRP
-  # `-netdev user ... hostfwd=...` pattern; all port forwarding is
-  # now handled by gvproxy's forwarder API.
+  # gvproxy's -listen-qemu endpoint. Run QEMU in the foreground under
+  # a new session rather than using -daemonize; daemonizing closes the
+  # stream backend connection on some hosts, leaving QEMU alive without
+  # gvproxy.
   local qemu_args=(
     -enable-kvm -cpu host -smp 4 -m 4096
     -drive "file=$disk,if=virtio"
@@ -728,7 +694,6 @@ boot_qemu() {
     -serial "file:$d/serial.log"
     -monitor "unix:$d/qemu.mon,server,nowait"
     -pidfile "$d/vm.pid"
-    -daemonize
   )
 
   if [ "$image_arch" = "aarch64" ]; then
@@ -740,7 +705,24 @@ boot_qemu() {
     qemu_args=(-machine virt "${qemu_args[@]}" -bios "$uefi")
   fi
 
-  "$qemu_bin" "${qemu_args[@]}"
+  rm -f "$d/vm.pid"
+  setsid -f "$qemu_bin" "${qemu_args[@]}" > "$d/qemu.log" 2>&1 < /dev/null
+
+  # Detect immediate startup failure (bad flags, missing KVM, socket
+  # connection failure, etc.). QEMU writes the pidfile after startup.
+  local pid=""
+  for _ in $(seq 1 50); do
+    if [ -s "$d/vm.pid" ]; then
+      pid="$(cat "$d/vm.pid")"
+      if kill -0 "$pid" 2>/dev/null; then
+        return 0
+      fi
+      break
+    fi
+    sleep 0.1
+  done
+  echo "qemu exited immediately. Check $d/qemu.log" >&2
+  return 1
 }
 
 boot_vfkit() {
@@ -840,6 +822,7 @@ cmd_rm() {
 cmd_ssh() {
   local name="${1:?Usage: vm ssh <name> [args...]}"; shift
   validate_name "$name"
+  require_cmd ssh
   local d; d="$(vm_dir "$name")"
   is_running "$d/vm.pid" || { echo "VM '$name' is not running." >&2; exit 1; }
   local port; port="$(cat "$d/port")"
