@@ -73,6 +73,19 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
 }
 
+external_host_hint() {
+  local host=""
+  host="$(hostname -f 2>/dev/null || true)"
+  if [ -z "$host" ]; then
+    host="$(hostname 2>/dev/null || true)"
+  fi
+  if [ -n "$host" ]; then
+    echo "$host"
+  else
+    echo "HOST"
+  fi
+}
+
 # Copy an image file preserving sparseness. Darwin's BSD cp has no
 # sparse detection, so a cp of a (potentially sparse) raw image fully
 # allocates the destination — which means every `vm up` would balloon
@@ -510,12 +523,13 @@ acquire_up_lock() {
 
 print_endpoints() {
   local d="$1" name="$2"
-  local host port user
+  local host external_host port user
   host="$(ssh_host_for "$d")"
+  external_host="$(external_host_hint)"
   port="$( [ -f "$d/port" ] && cat "$d/port" || echo - )"
   user="$(ssh_user "$d")" || return 1
   echo "  ssh (from this host):     vm ssh $name   (or: ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$host)"
-  echo "  ssh (from another host):  ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@HOST"
+  echo "  ssh (from another host):  ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$external_host"
   echo "  console:                  vm console $name   (tails $d/serial.log)"
   echo "  forwards (list):          vm forwards $name"
   echo "  expose a port externally: vm expose $name <guest-port> [<host-port>]"
