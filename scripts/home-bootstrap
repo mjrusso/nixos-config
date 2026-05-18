@@ -44,10 +44,41 @@ clone_if_missing() {
   git clone "$url" "$dest"
 }
 
+warm_emacs() {
+  local emacs_dir="$HOME/.emacs.d"
+  if [ ! -d "$emacs_dir" ]; then
+    log "$emacs_dir does not exist — skipping Emacs warm-up"
+    return 0
+  fi
+
+  if ! command -v emacs >/dev/null 2>&1; then
+    log "emacs is not available — skipping Emacs warm-up"
+    return 0
+  fi
+
+  if ! command -v emacsclient >/dev/null 2>&1; then
+    log "emacsclient is not available — skipping Emacs warm-up"
+    return 0
+  fi
+
+  local server_name="home-bootstrap-$$"
+  log "warming Emacs by starting temporary daemon '$server_name'"
+  emacs --daemon="$server_name"
+
+  log "stopping temporary Emacs daemon '$server_name'"
+  if ! emacsclient -s "$server_name" -e '(kill-emacs)' >/dev/null; then
+    log "failed to stop temporary Emacs daemon '$server_name'"
+    pkill -f "emacs.*--daemon=$server_name" 2>/dev/null || true
+    return 1
+  fi
+}
+
 clone_if_missing "https://github.com/mjrusso/.emacs.d" "$HOME/.emacs.d"
 
 mkdir -p "$HOME/git/github.com/mjrusso"
 
 clone_if_missing "https://github.com/mjrusso/wingman" "$HOME/git/github.com/mjrusso/wingman"
+
+warm_emacs
 
 log "done"
