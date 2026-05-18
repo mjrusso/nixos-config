@@ -13,6 +13,9 @@ Subcommands:
   down <name>             Stop the VM (graceful kill, then SIGKILL).
   rm <name>               Stop and delete the VM and all its state.
   ssh <name> [args...]    SSH into the VM.
+  switch <name> [nixos-rebuild args...]
+        Apply this repo's switchable VM NixOS config to the running VM
+        over root SSH. Supported on Linux hosts only.
   console <name>          Stream the VM's serial log (follows live boot
                           output; Ctrl-C detaches without touching the VM).
   info <name>             Print connection info (ssh/console/forwards)
@@ -534,6 +537,44 @@ forwarder_list()     { forwarder_api "$1" GET  /services/forwarder/all; }
 forwarder_expose()   { forwarder_api "$1" POST /services/forwarder/expose   "{\"local\":\"$2\",\"remote\":\"$3\"}"; }
 forwarder_unexpose() { forwarder_api "$1" POST /services/forwarder/unexpose "{\"local\":\"$2\"}"; }
 
+repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || {
+    echo "Run 'vm switch' from within the nixos-config git repository." >&2
+    return 1
+  }
+}
+
+current_flake_rev() {
+  local repo="$1"
+  local rev
+  rev="$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo unknown)"
+  if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then
+    rev="${rev}-dirty"
+  fi
+  echo "$rev"
+}
+
+record_switch_meta() {
+  local d="$1" flake_target="$2" repo="$3"
+  command -v jq >/dev/null 2>&1 || return 0
+  [ -f "$d/meta.json" ] || return 0
+
+  local switched_at flake_rev
+  switched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  flake_rev="$(current_flake_rev "$repo")"
+  jq \
+    --arg switched_at "$switched_at" \
+    --arg switch_flake_rev "$flake_rev" \
+    --arg switch_flake_target "$flake_target" \
+    '. + {
+      switched_at: $switched_at,
+      switch_flake_rev: $switch_flake_rev,
+      switch_flake_target: $switch_flake_target
+    }' \
+    "$d/meta.json" > "$d/meta.json.partial"
+  mv "$d/meta.json.partial" "$d/meta.json"
+}
+
 # Acquire a per-VM launch lock at $d/.lock (a symlink whose target is
 # the holder's pid). symlink(2) is atomic on both Linux and Darwin,
 # which makes the create-and-record-holder step a single syscall — no
@@ -899,6 +940,40 @@ cmd_ssh() {
   exec ssh -p "$port" $opts "$user@$host" "$@"
 }
 
+cmd_switch() {
+  local name="${1:?Usage: vm switch <name> [nixos-rebuild args...]}"; shift
+  validate_name "$name"
+  if [ "$(uname -s)" != "Linux" ]; then
+    echo "vm switch is only supported on Linux hosts for now." >&2
+    echo "On Darwin, rebuild the golden image or update from inside the VM." >&2
+    exit 1
+  fi
+  require_cmd nixos-rebuild
+  require_cmd ssh
+  require_cmd nix
+
+  local d; d="$(vm_dir "$name")"
+  is_running "$d/vm.pid" || { echo "VM '$name' is not running." >&2; exit 1; }
+
+  local repo image_system port host opts target flake_target
+  repo="$(repo_root)" || exit 1
+  image_system="$(host_image_system)" || exit 1
+  flake_target="vm-${image_system}-qcow"
+  port="$(cat "$d/port")"
+  host="$(ssh_host_for "$d")"
+  opts="$(ssh_opts)"
+  target="root@$host"
+
+  echo "Switching VM '$name' using flake target .#$flake_target..."
+  # shellcheck disable=SC2086
+  NIX_SSHOPTS="-p $port $opts" \
+    nixos-rebuild switch \
+      --flake "$repo#$flake_target" \
+      --target-host "$target" \
+      "$@"
+  record_switch_meta "$d" "$flake_target" "$repo"
+}
+
 cmd_console() {
   local name="${1:?Usage: vm console <name>}"
   validate_name "$name"
@@ -1054,7 +1129,7 @@ cmd_list() {
       baked="$(jq -r '.baked_at // "-"' "$d/meta.json")"
       baked="${baked:0:10}"
       local r
-      r="$(jq -r '.flake_rev // "-"' "$d/meta.json")"
+      r="$(jq -r '.switch_flake_rev // .flake_rev // "-"' "$d/meta.json")"
       if [[ "$r" == *-dirty ]]; then
         rev="${r%%-dirty}"; rev="${rev:0:7}*"
       else
@@ -1074,6 +1149,7 @@ case "${1:-}" in
   down) shift; cmd_down "$@" ;;
   rm) shift; cmd_rm "$@" ;;
   ssh) shift; cmd_ssh "$@" ;;
+  switch) shift; cmd_switch "$@" ;;
   console) shift; cmd_console "$@" ;;
   info) shift; cmd_info "$@" ;;
   list|ls) cmd_list ;;

@@ -67,9 +67,36 @@ linux_flake_target() {
     esac
 }
 
-run_linux() {
+is_vm_guest() {
+    [ -e /etc/mjr-vm-guest ] && return 0
+    return 1
+}
+
+vm_image_format() {
+    if [ -r /etc/mjr-vm-image-format ]; then
+        format=$(tr -d '[:space:]' < /etc/mjr-vm-image-format)
+        case "$format" in
+            qcow|raw)
+                echo "$format"
+                return 0
+                ;;
+        esac
+    fi
+
+    echo "qcow"
+}
+
+nixos_flake_target() {
     flake_target=$(linux_flake_target)
 
+    if is_vm_guest; then
+        echo "vm-${flake_target}-$(vm_image_format)"
+    else
+        echo "$flake_target"
+    fi
+}
+
+run_linux() {
     if [ "$ACTION" = "build" ]; then
         echo "${YELLOW}Starting build...${NC}"
     else
@@ -77,9 +104,11 @@ run_linux() {
     fi
 
     if is_nix_os; then
+        flake_target=$(nixos_flake_target)
         echo "Running on a NixOS-based system"
         /run/current-system/sw/bin/nixos-rebuild "$ACTION" --flake ".#$flake_target" "$@"
     else
+        flake_target=$(linux_flake_target)
         echo "Running on a Linux system (non-NixOS)"
         home-manager "$ACTION" --flake ".#$flake_target" "$@"
     fi

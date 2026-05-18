@@ -158,6 +158,7 @@ with pkgs; [
   # qemu/vfkit and an HTTP forwarder API that is reachable from both the host
   # and guest. (Invoked by the `vm` script below via VM_GVPROXY.)
   gvproxy
+  nixos-rebuild
 
   # Custom virtual machine management script
   (pkgs.writeShellScriptBin "vm" ''

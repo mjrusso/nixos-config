@@ -73,6 +73,76 @@
           echo "  drvPath: ${drvPath}"
           touch $out
         '';
+      mkVmModules = system: [
+        home-manager.nixosModules.home-manager {
+          home-manager = {
+            useGlobalPkgs = true;
+            useUserPackages = true;
+            extraSpecialArgs = { inherit userInfo; };
+            users.${user} = import ./modules/container/home-manager.nix;
+          };
+        }
+        ./hosts/container
+      ];
+      mkVmImageMarkerModule = format: {
+        environment.etc."mjr-vm-guest".text = "1\n";
+        environment.etc."mjr-vm-image-format".text = "${format}\n";
+      };
+      mkSwitchableVmModules = system: format: (mkVmModules system) ++ [
+        (mkVmImageMarkerModule format)
+        ({ lib, modulesPath, pkgs, ... }: {
+          imports = lib.optionals (format == "qcow") [
+            "${toString modulesPath}/profiles/qemu-guest.nix"
+          ];
+
+          fileSystems."/" = {
+            device = "/dev/disk/by-label/nixos";
+            autoResize = true;
+            fsType = "ext4";
+          };
+
+          boot = {
+            growPartition = true;
+            kernelParams = [ "console=ttyS0" ];
+            initrd.availableKernelModules = lib.optionals (format == "raw") [ "uas" ];
+            loader = {
+              grub = {
+                device =
+                  if format == "raw" || pkgs.stdenv.system == "x86_64-linux"
+                  then lib.mkDefault "/dev/vda"
+                  else lib.mkDefault "nodev";
+                efiSupport =
+                  if format == "qcow" && pkgs.stdenv.system != "x86_64-linux"
+                  then lib.mkDefault true
+                  else lib.mkDefault false;
+                efiInstallAsRemovable =
+                  if format == "qcow" && pkgs.stdenv.system != "x86_64-linux"
+                  then lib.mkDefault true
+                  else lib.mkDefault false;
+              };
+              timeout = lib.mkDefault 0;
+            };
+          };
+        })
+      ];
+      mkSwitchableVmSystem = { system, format }: nixpkgs.lib.nixosSystem {
+        inherit system;
+        specialArgs = inputs // { inherit userInfo; };
+        modules = mkSwitchableVmModules system format;
+      };
+      mkVmSystems = nixpkgs.lib.listToAttrs (nixpkgs.lib.flatten (map (system:
+        [
+          (nixpkgs.lib.nameValuePair "vm-${system}" (mkSwitchableVmSystem { inherit system; format = "qcow"; }))
+          (nixpkgs.lib.nameValuePair "vm-${system}-qcow" (mkSwitchableVmSystem { inherit system; format = "qcow"; }))
+          (nixpkgs.lib.nameValuePair "vm-${system}-raw" (mkSwitchableVmSystem { inherit system; format = "raw"; }))
+        ]
+      ) linuxSystems));
+      /*
+      Keep the generated image modules separate from the switchable NixOS
+      configurations. nixos-generators' format modules also define image output
+      options; the switchable configs only need the matching runtime disk/boot
+      assumptions.
+      */
     in
     {
       devShells = forAllSystems devShell;
@@ -129,7 +199,7 @@
           }
           ./hosts/nixos
         ];
-      });
+      }) // mkVmSystems;
 
       # Linux (non-NixOS) config.
 
@@ -147,21 +217,12 @@
 
       images = nixpkgs.lib.genAttrs linuxSystems (system:
         let
-          containerModules = [
-            home-manager.nixosModules.home-manager {
-              home-manager = {
-                useGlobalPkgs = true;
-                useUserPackages = true;
-                extraSpecialArgs = { inherit userInfo; };
-                users.${user} = import ./modules/container/home-manager.nix;
-              };
-            }
-            ./hosts/container
-          ];
           generate = format: nixos-generators.nixosGenerate {
             inherit system;
             specialArgs = inputs // { inherit userInfo; };
-            modules = containerModules;
+            modules = (mkVmModules system) ++ nixpkgs.lib.optionals
+              (format == "qcow" || format == "raw")
+              [ (mkVmImageMarkerModule format) ];
             inherit format;
           };
         in {
@@ -173,7 +234,6 @@
           iso = generate "iso";
         }
       );
-
       # Evaluation checks — verifies all configurations evaluate without errors.
       # Uses the .drvPath interpolation trick so checks are buildable on any
       # platform (the runCommand wrapper is native; the drvPath forces full

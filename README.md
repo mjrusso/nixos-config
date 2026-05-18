@@ -362,6 +362,7 @@ vm up scratch            # boot a VM named "scratch"
 vm up emacs-test         # boot another VM
 vm list                  # show state
 vm ssh scratch           # SSH in
+vm switch scratch        # apply this repo's current VM config (only supported on Linux hosts)
 vm console scratch       # stream the serial log (live boot output)
 vm info scratch          # reprint connection details (ssh/forwards/console)
 vm up scratch --rebuild  # wipe disk, reinstall from current golden
@@ -376,6 +377,27 @@ boot output and `vm ssh <name>` to connect when the guest is ready.
 `vm up` flags:
 
 - `--rebuild` — wipe the VM disk and reinstall from the current golden image.
+
+`vm switch <name>` is supported exclusively on Linux hosts. This command builds
+the NixOS configuration locally, copies the closure to the running guest over
+SSH, and activates it with `nixos-rebuild switch`. On Darwin hosts, rebuild the
+golden image and recreate the VM with `vm up <name> --rebuild`, or update
+manually from inside the guest.
+
+> [!TIP]
+>
+> To update manually from inside the guest, SSH into the VM, clone or update
+> this repository at `~/nixos-config`, and run `build-switch`:
+>
+> ``` bash
+> vm ssh scratch
+> git clone https://github.com/mjrusso/nixos-config.git ~/nixos-config
+> cd ~/nixos-config
+> sudo nix run .#build-switch
+> ```
+>
+> _(Inside a VM guest, `build-switch` detects the VM image and selects the matching
+> `vm-<system>-<format>` NixOS configuration automatically.)_
 
 The `vm` command drives two back-ends: qemu + KVM on Linux hosts, and
 [vfkit](https://github.com/crc-org/vfkit) (Apple's `Virtualization.framework`)
@@ -522,11 +544,20 @@ dispatcher. The dispatcher maps `build` to a build-only action and
 current platform.
 
 On NixOS, it detects `/etc/NIXOS` and calls `nixos-rebuild` for the current
-architecture. On x86_64 NixOS, the direct equivalents are:
+architecture. In one of this repo's VM guests, it selects the matching
+`vm-<system>-<format>` configuration instead. On x86_64 NixOS, the direct
+equivalents are:
 
 ``` bash
 sudo nixos-rebuild build --flake .#x86_64-linux
 sudo nixos-rebuild switch --flake .#x86_64-linux
+```
+
+Inside an x86_64 qcow VM guest, the direct equivalents are:
+
+``` bash
+sudo nixos-rebuild build --flake .#vm-x86_64-linux-qcow
+sudo nixos-rebuild switch --flake .#vm-x86_64-linux-qcow
 ```
 
 On non-NixOS Linux, the dispatcher calls standalone `home-manager` instead:
