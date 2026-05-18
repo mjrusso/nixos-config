@@ -6,31 +6,32 @@ usage() {
 Usage: vm <subcommand> [args]
 
 Subcommands:
-  up <name> [--rebuild]
-        Boot a VM from the host's golden image.
-        --rebuild         wipe the VM's disk and reinstall from the
-                          current golden image (destroys VM state)
-  down <name>             Stop the VM (graceful kill, then SIGKILL).
-  rm <name>               Stop and delete the VM and all its state.
+  start <name>            Start a VM, creating its disk from the golden
+                          image if needed. Alias: up.
+  stop <name>             Stop the VM, preserving disk/state. Alias: halt.
+  restart <name>          Stop and start the VM.
+  wipe <name>             Stop the VM and remove disk/boot state, preserving
+                          its name and allocated SSH port.
+  destroy <name>          Stop and delete the VM and all its state. Alias: rm.
   ssh <name> [args...]    SSH into the VM.
   switch <name> [nixos-rebuild args...]
         Apply this repo's switchable VM NixOS config to the running VM
         over root SSH. Supported on Linux hosts only.
   console <name>          Stream the VM's serial log (follows live boot
                           output; Ctrl-C detaches without touching the VM).
-  info <name>             Print connection info (ssh/console/forwards)
+  info <name>             Print connection info (ssh/console/ports)
                           for an existing VM.
-  list                    List known VMs and their status.
+  list                    List known VMs and their status. Alias: ls.
 
-  expose <name> <guest-port> [<host-port>] [--bind <addr>] [--auto]
+  publish <name> <guest-port> [<host-port>] [--bind <addr>] [--auto]
         Forward a guest port to the host. Defaults: host-port = guest-port,
         bind = 0.0.0.0 (reachable from other hosts on the LAN). Pass
         --bind 127.0.0.1 for loopback-only. Pass --auto to let the host
         pick a free port (30000-60000); the picked port is printed on
-        stdout so `port=$(vm expose ...)` works for scripting.
-  unexpose <name> <host-port> [--bind <addr>]
+        stdout so `port=$(vm publish ...)` works for scripting.
+  unpublish <name> <host-port> [--bind <addr>]
         Remove a previously-added forward.
-  forwards <name>         List all active forwards for a VM.
+  ports <name>            List all active port forwards for a VM.
 
 State directory: $VMS_DIR (default: ~/vms). Golden images and their
 `.meta.json` sidecars are expected there — bake them from the
@@ -43,8 +44,8 @@ Networking:
   qemu (Linux) and vfkit (Darwin), unifying the two drivers. SSH is
   exposed on the allocated port (2222-2299), bound 0.0.0.0 so the
   VM is reachable from other hosts. Additional forwards are managed
-  through gvproxy's HTTP API from the host via `vm expose`/`vm
-  unexpose`.
+  through gvproxy's HTTP API from the host via `vm publish`/`vm
+  unpublish`.
 USAGE
 }
 
@@ -55,7 +56,7 @@ if [ -z "$VMS_DIR" ] || [ "$VMS_DIR" = "/" ]; then
   exit 1
 fi
 # Reject whitespace and shell metacharacters in VMS_DIR. The only
-# *load-bearing* character is "'" — acquire_up_lock installs an EXIT
+# *load-bearing* character is "'" — acquire_launch_lock installs an EXIT
 # trap whose body embeds $d (= $VMS_DIR/$name) inside single quotes,
 # and a stray "'" there would break out of the quoting and inject
 # shell. The rest are hygiene (whitespace breaks unquoted expansions
@@ -76,6 +77,12 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
 }
 
+require_arg_count() {
+  local usage="$1" expected="$2"
+  shift 2
+  [ "$#" -eq "$expected" ] || { echo "Usage: $usage" >&2; exit 1; }
+}
+
 external_host_hint() {
   local host=""
   host="$(hostname -f 2>/dev/null || true)"
@@ -91,7 +98,7 @@ external_host_hint() {
 
 # Copy an image file preserving sparseness. Darwin's BSD cp has no
 # sparse detection, so a cp of a (potentially sparse) raw image fully
-# allocates the destination — which means every `vm up` would balloon
+# allocates the destination — which means every `vm start` would balloon
 # ~/vms by the full logical disk size. `cp -c` uses clonefile(2) for
 # an instant CoW clone when source and destination are on the same
 # APFS volume, which is both faster and disk-space-free. Fall back to
@@ -111,7 +118,7 @@ meta_for_golden() {
 
 ssh_user() {
   # $1: a VM's state directory. Read the username from its meta.json
-  # sidecar, snapshotted at `up` time and pinned to the golden the VM
+  # sidecar, snapshotted at `start` time and pinned to the golden the VM
   # was actually installed from, so later rebakes don't produce
   # mismatches.
   #
@@ -188,6 +195,16 @@ ensure_golden() {
   if [ ! -f "$golden" ]; then
     cat >&2 <<EOF
 Golden image not found: $golden
+
+Bake it from the nixos-config repo:
+  ./scripts/bake-golden
+
+EOF
+    exit 1
+  fi
+  if [ ! -f "$(meta_for_golden "$golden")" ]; then
+    cat >&2 <<EOF
+Golden image metadata not found: $(meta_for_golden "$golden")
 
 Bake it from the nixos-config repo:
   ./scripts/bake-golden
@@ -313,7 +330,7 @@ allocate_port() {
 }
 
 # Like allocate_port but scans a wider ephemeral-friendly range. Used
-# by `vm expose --auto` when the caller doesn't care which host port
+# by `vm publish --auto` when the caller doesn't care which host port
 # they get. Starts at a random offset so concurrent --auto callers
 # don't all collide on the same first candidate.
 allocate_free_port() {
@@ -366,18 +383,18 @@ try_graceful_shutdown() {
 # unix socket, unifying what were previously two divergent NAT paths
 # (hostfwd vs. vmnet+dhcpd_leases). Each VM runs its own gvproxy
 # process with its own socket triple:
-#   - $d/network.sock     host-side HTTP forwarder API (`vm expose` etc.)
+#   - $d/network.sock     host-side HTTP forwarder API (`vm publish` etc.)
 #   - $d/qemu-net.sock    qemu's -netdev stream endpoint (Linux)
 #   - $d/vfkit-net.sock   vfkit's virtio-net unixSocketPath (Darwin)
 # The forwarder API is host-side only (on $d/network.sock). gvproxy's
 # -services flag creates another host listener, not a virtual-network
 # one, so guest-initiated forwarding via that path is not available —
-# use `vm expose` from the host.
+# use `vm publish` from the host.
 
 # gvproxy's default virtual network reserves .1 (gateway) and .2
 # (host.containers.internal). The first DHCP client gets .3, and
 # since each VM runs its own gvproxy instance with its own fresh
-# network, the sole guest always lands at .3. `vm expose` hard-codes
+# network, the sole guest always lands at .3. `vm publish` hard-codes
 # it as the forward target.
 GVPROXY_GUEST=192.168.127.3
 
@@ -580,18 +597,18 @@ record_switch_meta() {
 # which makes the create-and-record-holder step a single syscall — no
 # window where a reader can see the lock without a holder. Auto-recovers
 # if the holder pid is dead.
-acquire_up_lock() {
+acquire_launch_lock() {
   local d="$1"
   while ! ln -s "$$" "$d/.lock" 2>/dev/null; do
     # Bail out if the state dir itself has vanished — a concurrent
-    # `vm rm` already inside its own lock can `rm -rf "$d"` out from
+    # `vm destroy` already inside its own lock can `rm -rf "$d"` out from
     # under us, at which point `ln -s` fails with ENOENT forever and
     # the loop would spin.
     [ -d "$d" ] || return 1
     local holder=""
     holder="$(readlink "$d/.lock" 2>/dev/null || true)"
     if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
-      echo "vm up already in progress for $(basename "$d") (pid $holder)." >&2
+      echo "vm start already in progress for $(basename "$d") (pid $holder)." >&2
       return 1
     fi
     # Re-check the target before unlinking, so a concurrent acquirer's
@@ -620,8 +637,8 @@ print_endpoints() {
   echo "  ssh (from this host):     vm ssh $name   (or: ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$host)"
   echo "  ssh (from another host):  ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$external_host"
   echo "  console:                  vm console $name   (tails $d/serial.log)"
-  echo "  forwards (list):          vm forwards $name"
-  echo "  expose a port externally: vm expose $name <guest-port> [<host-port>]"
+  echo "  ports (list):             vm ports $name"
+  echo "  publish a port:           vm publish $name <guest-port> [<host-port>]"
   echo "  gvproxy API:              curl --unix-socket $d/network.sock http://_/services/forwarder/all"
   case "$(uname -s)" in
     Linux)  echo "  qemu monitor:             socat - UNIX-CONNECT:$d/qemu.mon" ;;
@@ -629,16 +646,18 @@ print_endpoints() {
   esac
 }
 
-cmd_up() {
-  local name="" rebuild=0
+cmd_start() {
+  local name=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --rebuild) rebuild=1; shift ;;
       -*) echo "Unknown flag: $1" >&2; exit 1 ;;
-      *) name="$1"; shift ;;
+      *)
+        [ -z "$name" ] || { echo "Usage: vm start <name>" >&2; exit 1; }
+        name="$1"; shift
+        ;;
     esac
   done
-  [ -n "$name" ] || { echo "Usage: vm up <name> [--rebuild]" >&2; exit 1; }
+  [ -n "$name" ] || { echo "Usage: vm start <name>" >&2; exit 1; }
   validate_name "$name"
 
   require_cmd jq
@@ -680,23 +699,19 @@ cmd_up() {
   mkdir -p "$d"
   # Hold the launch lock across is_running → gvproxy launch → driver
   # launch → pidfile writes. Released by the EXIT trap installed
-  # inside acquire_up_lock. Ordering is load-bearing: is_running must
-  # run *inside* the lock so two concurrent `vm up`s can't both
+  # inside acquire_launch_lock. Ordering is load-bearing: is_running must
+  # run *inside* the lock so two concurrent `vm start`s can't both
   # observe "not running" and both proceed to launch.
-  acquire_up_lock "$d" || exit 1
+  acquire_launch_lock "$d" || exit 1
   disk="$(disk_path_for "$d")"
   metadata="$(metadata_disk_path_for "$d")"
 
   if is_running "$d/vm.pid"; then
-    if [ "$rebuild" -eq 1 ]; then
-      echo "VM '$name' is running — stop it with 'vm down $name' before rebuilding." >&2
-      exit 1
-    fi
     local host port
     host="$(ssh_host_for "$d")"
     port="$(cat "$d/port")"
     echo "VM '$name' is already running (pid $(cat "$d/vm.pid"), $host:$port)."
-    echo "Nothing to do. Run 'vm down $name' first to reboot."
+    echo "Nothing to do. Run 'vm restart $name' to restart it."
     return 0
   fi
 
@@ -704,12 +719,6 @@ cmd_up() {
   # that was SIGKILL'd between gvproxy start and driver start. Safe
   # to call when there's nothing to stop.
   stop_gvproxy "$d"
-
-  if [ "$rebuild" -eq 1 ]; then
-    # Full reset. Wipe either disk format (in case the host driver
-    # changed since last boot) and EFI vars.
-    rm -f "$d/disk.qcow2" "$d/disk.raw" "$d/efi-vars.fd" "$metadata"
-  fi
 
   if [ ! -f "$disk" ]; then
     local golden; golden="$(ensure_golden)"
@@ -729,7 +738,7 @@ cmd_up() {
   # Allocate or reuse the host SSH port. gvproxy's -ssh-port flag
   # binds 127.0.0.1:$port → guest:22 as a built-in forward; additional
   # forwards (including 0.0.0.0 binds for external access) go through
-  # the forwarder API later via `vm expose`.
+  # the forwarder API later via `vm publish`.
   local port
   if [ -f "$d/port" ]; then
     port="$(cat "$d/port")"
@@ -748,9 +757,9 @@ cmd_up() {
   # running and sockets bound. Install the trap *before* any launch
   # so it covers the whole dance. The explicit `exit 130` is
   # load-bearing: it guarantees the EXIT trap (installed by
-  # acquire_up_lock) fires and removes $d/.lock. Do not replace with
+  # acquire_launch_lock) fires and removes $d/.lock. Do not replace with
   # a bare return.
-  trap 'echo >&2; echo "Interrupted — tearing down VM '"'"'$name'"'"'." >&2; cmd_down "$name" || true; exit 130' INT TERM
+  trap 'echo >&2; echo "Interrupted - stopping VM." >&2; cmd_stop "$name" || true; exit 130' INT TERM
 
   : > "$d/serial.log"
 
@@ -872,8 +881,9 @@ boot_vfkit() {
   fi
 }
 
-cmd_down() {
-  local name="${1:?Usage: vm down <name>}"
+cmd_stop() {
+  require_arg_count "vm stop <name>" 1 "$@"
+  local name="$1"
   validate_name "$name"
   local d; d="$(vm_dir "$name")"
 
@@ -910,18 +920,42 @@ cmd_down() {
   stop_gvproxy "$d"
 }
 
-cmd_rm() {
-  local name="${1:?Usage: vm rm <name>}"
+cmd_restart() {
+  require_arg_count "vm restart <name>" 1 "$@"
+  local name="$1"
+  validate_name "$name"
+  cmd_stop "$name"
+  cmd_start "$name"
+}
+
+cmd_wipe() {
+  require_arg_count "vm wipe <name>" 1 "$@"
+  local name="$1"
   validate_name "$name"
   local d; d="$(vm_dir "$name")"
-  # Hold the launch lock so a concurrent `vm up <same name>` can't tear
+  [ -d "$d" ] || { echo "No such VM '$name'." >&2; exit 1; }
+
+  # Hold the launch lock so a concurrent `vm start <same name>` cannot
+  # recreate state while this command is removing it.
+  acquire_launch_lock "$d" || exit 1
+  cmd_stop "$name" || true
+  rm -f "$d/disk.qcow2" "$d/disk.raw" "$d/efi-vars.fd" "$d/metadata.raw" "$d/meta.json"
+  echo "Wiped VM '$name' disk/boot state. Run 'vm start $name' to recreate it from the current golden image."
+}
+
+cmd_destroy() {
+  require_arg_count "vm destroy <name>" 1 "$@"
+  local name="$1"
+  validate_name "$name"
+  local d; d="$(vm_dir "$name")"
+  # Hold the launch lock so a concurrent `vm start <same name>` can't tear
   # in mid-removal. Skip the lock if the state dir is already gone —
   # `ln -s` into a nonexistent directory would fail forever. The EXIT
   # trap's rm -f is a harmless no-op after `rm -rf "$d"` completes.
   if [ -d "$d" ]; then
-    acquire_up_lock "$d" || exit 1
+    acquire_launch_lock "$d" || exit 1
   fi
-  cmd_down "$name" || true
+  cmd_stop "$name" || true
   rm -rf "$d"
   echo "Removed VM '$name'."
 }
@@ -975,21 +1009,23 @@ cmd_switch() {
 }
 
 cmd_console() {
-  local name="${1:?Usage: vm console <name>}"
+  require_arg_count "vm console <name>" 1 "$@"
+  local name="$1"
   validate_name "$name"
   local d; d="$(vm_dir "$name")"
-  [ -d "$d" ] || { echo "No such VM '$name' — did you mean 'vm up $name'?" >&2; exit 1; }
+  [ -d "$d" ] || { echo "No such VM '$name' — did you mean 'vm start $name'?" >&2; exit 1; }
   # `tail -F` = `tail -f --retry`: waits for the file to appear if it's
   # not yet created (driver still starting) and follows across rotation.
   # `-n +1` starts from the top so a late-attaching console sees the
   # full boot log. This pairs with the `: > serial.log` truncation in
-  # cmd_up — without it, -n +1 would dump the concatenated history of
+  # cmd_start — without it, -n +1 would dump the concatenated history of
   # every prior boot.
   exec tail -n +1 -F "$d/serial.log"
 }
 
 cmd_info() {
-  local name="${1:?Usage: vm info <name>}"
+  require_arg_count "vm info <name>" 1 "$@"
+  local name="$1"
   validate_name "$name"
   local d; d="$(vm_dir "$name")"
   [ -d "$d" ] || { echo "No such VM '$name'." >&2; exit 1; }
@@ -1001,7 +1037,7 @@ cmd_info() {
   print_endpoints "$d" "$name"
 }
 
-# Parse expose/unexpose positional args + flags. Populates globals
+# Parse publish/unpublish positional args + flags. Populates globals
 # _PARSE_NAME / _PARSE_PORTS (array) / _PARSE_BIND (empty = 0.0.0.0) /
 # _PARSE_AUTO (0/1). Avoids subshell gymnastics around arrays.
 _parse_forward_args() {
@@ -1011,7 +1047,10 @@ _parse_forward_args() {
   _PARSE_PORTS=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --bind)   _PARSE_BIND="$2"; shift 2 ;;
+      --bind)
+        [ "$#" -ge 2 ] || { echo "--bind requires an address." >&2; return 1; }
+        _PARSE_BIND="$2"; shift 2
+        ;;
       --bind=*) _PARSE_BIND="${1#--bind=}"; shift ;;
       --auto)   _PARSE_AUTO=1; shift ;;
       -*)       echo "Unknown flag: $1" >&2; return 1 ;;
@@ -1027,14 +1066,14 @@ _parse_forward_args() {
   done
 }
 
-cmd_expose() {
+cmd_publish() {
   _parse_forward_args "$@" || exit 1
   [ -n "$_PARSE_NAME" ] && [ "${#_PARSE_PORTS[@]}" -ge 1 ] || {
-    echo "Usage: vm expose <name> <guest-port> [<host-port>] [--bind <addr>] [--auto]" >&2
+    echo "Usage: vm publish <name> <guest-port> [<host-port>] [--bind <addr>] [--auto]" >&2
     exit 1
   }
   [ "${#_PARSE_PORTS[@]}" -le 2 ] || {
-    echo "Too many port arguments to 'vm expose'." >&2; exit 1
+    echo "Too many port arguments to 'vm publish'." >&2; exit 1
   }
   validate_name "$_PARSE_NAME"
   local guest_port="${_PARSE_PORTS[0]}"
@@ -1053,21 +1092,21 @@ cmd_expose() {
   local local_addr="$_PARSE_BIND:$host_port"
   if forwarder_expose "$d" "$local_addr" "$GVPROXY_GUEST:$guest_port" >/dev/null; then
     if [ "$_PARSE_AUTO" = "1" ]; then
-      # stdout is just the port so `port=$(vm expose $name P --auto)` works.
-      echo "Exposed $local_addr → $GVPROXY_GUEST:$guest_port" >&2
+      # stdout is just the port so `port=$(vm publish $name P --auto)` works.
+      echo "Published $local_addr → $GVPROXY_GUEST:$guest_port" >&2
       echo "$host_port"
     else
-      echo "Exposed $local_addr → $GVPROXY_GUEST:$guest_port"
+      echo "Published $local_addr → $GVPROXY_GUEST:$guest_port"
     fi
   else
     exit 1
   fi
 }
 
-cmd_unexpose() {
+cmd_unpublish() {
   _parse_forward_args "$@" || exit 1
   [ -n "$_PARSE_NAME" ] && [ "${#_PARSE_PORTS[@]}" -eq 1 ] && [ "$_PARSE_AUTO" = "0" ] || {
-    echo "Usage: vm unexpose <name> <host-port> [--bind <addr>]" >&2
+    echo "Usage: vm unpublish <name> <host-port> [--bind <addr>]" >&2
     exit 1
   }
   validate_name "$_PARSE_NAME"
@@ -1076,14 +1115,15 @@ cmd_unexpose() {
   is_running "$d/vm.pid" || { echo "VM '$_PARSE_NAME' is not running." >&2; exit 1; }
   local local_addr="$_PARSE_BIND:$host_port"
   if forwarder_unexpose "$d" "$local_addr" >/dev/null; then
-    echo "Unexposed $local_addr"
+    echo "Unpublished $local_addr"
   else
     exit 1
   fi
 }
 
-cmd_forwards() {
-  local name="${1:?Usage: vm forwards <name>}"
+cmd_ports() {
+  require_arg_count "vm ports <name>" 1 "$@"
+  local name="$1"
   validate_name "$name"
   local d; d="$(vm_dir "$name")"
   is_running "$d/vm.pid" || { echo "VM '$name' is not running." >&2; exit 1; }
@@ -1099,6 +1139,7 @@ cmd_forwards() {
 }
 
 cmd_list() {
+  require_arg_count "vm list" 0 "$@"
   local any=0
   local fmt="%-18s %-9s %-22s %-7s %-11s %-10s %s\n"
   for d in "$VMS_DIR"/*/; do
@@ -1145,17 +1186,19 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  up) shift; cmd_up "$@" ;;
-  down) shift; cmd_down "$@" ;;
-  rm) shift; cmd_rm "$@" ;;
+  start|up) shift; cmd_start "$@" ;;
+  stop|halt) shift; cmd_stop "$@" ;;
+  restart) shift; cmd_restart "$@" ;;
+  wipe) shift; cmd_wipe "$@" ;;
+  destroy|rm) shift; cmd_destroy "$@" ;;
   ssh) shift; cmd_ssh "$@" ;;
   switch) shift; cmd_switch "$@" ;;
   console) shift; cmd_console "$@" ;;
   info) shift; cmd_info "$@" ;;
-  list|ls) cmd_list ;;
-  expose) shift; cmd_expose "$@" ;;
-  unexpose) shift; cmd_unexpose "$@" ;;
-  forwards) shift; cmd_forwards "$@" ;;
+  list|ls) shift; cmd_list "$@" ;;
+  publish) shift; cmd_publish "$@" ;;
+  unpublish) shift; cmd_unpublish "$@" ;;
+  ports) shift; cmd_ports "$@" ;;
   -h|--help|help|"") usage ;;
   *) echo "Unknown subcommand: $1" >&2; usage >&2; exit 1 ;;
 esac

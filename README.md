@@ -345,9 +345,9 @@ Additional tooling is provided that makes it easy to build and run VM images:
   virtual machine output and copies it to `$VMS_DIR` (default `~/vms`) as
   `golden-<system>.<ext>`, with a per-image `.meta.json` sidecar that records
   relevant image metadata.
-- [`vm`](./scripts/vm) orchestrates the VM lifecycle (boot, SSH, teardown,
-  etc.), reading the appropriate pre-baked golden image and its sidecar from
-  `$VMS_DIR` as necessary.
+- [`vm`](./scripts/vm) orchestrates the VM lifecycle (start, stop, SSH,
+  deletion, etc.), reading the appropriate pre-baked golden image and its
+  sidecar from `$VMS_DIR` as necessary.
 
 To start, from the root of this repository, bake (produce) a golden image:
 
@@ -358,31 +358,45 @@ To start, from the root of this repository, bake (produce) a golden image:
 Then, to run and manage virtual machines:
 
 ``` bash
-vm up scratch            # boot a VM named "scratch"
-vm up emacs-test         # boot another VM
-vm list                  # show state
-vm ssh scratch           # SSH in
-vm switch scratch        # apply this repo's current VM config (only supported on Linux hosts)
-vm console scratch       # stream the serial log (live boot output)
-vm info scratch          # reprint connection details (ssh/forwards/console)
-vm up scratch --rebuild  # wipe disk, reinstall from current golden
-vm down scratch          # graceful shutdown
-vm rm scratch            # delete VM and all its state
+vm start scratch       # start a VM named "scratch"
+vm start emacs-test    # start another VM
+vm list                # show state
+vm ssh scratch         # SSH in
+vm switch scratch      # apply this repo's current VM config (only supported on Linux hosts)
+vm console scratch     # stream the serial log (live boot output)
+vm info scratch        # reprint connection details (ssh/ports/console)
+vm restart scratch     # graceful stop, then start again
+vm wipe scratch        # remove disk/boot state, preserving name and SSH port
+vm stop scratch        # graceful shutdown, preserving disk/state
+vm destroy scratch     # delete VM and all its state
 ```
 
-`vm up` launches the VM and returns after the hypervisor process starts. It
+Aliases:
+
+| Alias  | Equivalent |
+|--------|------------|
+| `up`   | `start`    |
+| `halt` | `stop`     |
+| `rm`   | `destroy`  |
+| `ls`   | `list`     |
+
+`vm start` launches the VM and returns after the hypervisor process starts. It
 does not wait for SSH to become reachable; use `vm console <name>` to watch
 boot output and `vm ssh <name>` to connect when the guest is ready.
 
-`vm up` flags:
+`vm wipe <name>` stops the VM and removes its disk/boot state (`disk.*`,
+`efi-vars.fd`, `metadata.raw`, and `meta.json`) while preserving its state
+directory and allocated SSH port. The next `vm start <name>` recreates the disk
+from the current golden image.
 
-- `--rebuild` — wipe the VM disk and reinstall from the current golden image.
+Use `vm destroy <name>` instead when you want to remove the entire VM state
+directory, including its persisted SSH port.
 
 `vm switch <name>` is supported exclusively on Linux hosts. This command builds
 the NixOS configuration locally, copies the closure to the running guest over
 SSH, and activates it with `nixos-rebuild switch`. On Darwin hosts, rebuild the
-golden image and recreate the VM with `vm up <name> --rebuild`, or update
-manually from inside the guest.
+golden image and refresh the VM with `vm wipe <name>; vm start <name>`, or
+update manually from inside the guest.
 
 > [!TIP]
 >
@@ -422,30 +436,30 @@ Additional notes:
 
 ##### Publishing ports
 
-By default each VM is reachable on its SSH port, with no other ports exposed.
-To expose additional ports (web servers, databases, whatever else is listening
-inside the guest), use the `vm expose` / `vm unexpose` / `vm forwards`
+By default each VM is reachable on its SSH port, with no other ports published.
+To publish additional ports (web servers, databases, whatever else is listening
+inside the guest), use the `vm publish` / `vm unpublish` / `vm ports`
 subcommands, which manage forwards on a running VM (via gvproxy's HTTP API)
 without restarting it:
 
 ``` bash
-vm expose scratch 8080                   # 0.0.0.0:8080 on the host → guest:8080
-vm expose scratch 5432 15432             # remap: host 15432 → guest 5432
-vm expose scratch 3000 --bind 127.0.0.1  # loopback-only on the host
-vm expose scratch 8080 --auto            # pick a free host port; prints it on stdout
-vm forwards scratch                      # list all active forwards
-vm unexpose scratch 8080                 # remove the forward
+vm publish scratch 8080                   # 0.0.0.0:8080 on the host → guest:8080
+vm publish scratch 5432 15432             # remap: host 15432 → guest 5432
+vm publish scratch 3000 --bind 127.0.0.1  # loopback-only on the host
+vm publish scratch 8080 --auto            # pick a free host port; prints it on stdout
+vm ports scratch                          # list all active forwards
+vm unpublish scratch 8080                 # remove the forward
 ```
 
 Note that `--auto` picks a port in the range 30000–60000 and prints just the
-port number on stdout, so `port=$(vm expose scratch 8080 --auto)` works for
+port number on stdout, so `port=$(vm publish scratch 8080 --auto)` works for
 scripting purposes.
 
 Forwards are identified by their full `<bind>:<host-port>` tuple, so
-`vm unexpose` must be given the same `--bind` that was used at expose time
-(e.g., `vm unexpose scratch 3000 --bind 127.0.0.1` to undo the loopback
-forward above). `vm forwards <name>` prints the exact local addresses, which
-can be copy-pasted back into `vm unexpose`.
+`vm unpublish` must be given the same `--bind` that was used at publish time
+(e.g., `vm unpublish scratch 3000 --bind 127.0.0.1` to undo the loopback
+forward above). `vm ports <name>` prints the exact local addresses, which
+can be copy-pasted back into `vm unpublish`.
 
 Forwards are only managed from the host. The gvproxy forwarder API is exposed
 on a unix socket under `$VMS_DIR/<name>/network.sock` (host-side only); there
