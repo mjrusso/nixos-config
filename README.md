@@ -366,6 +366,8 @@ vm switch scratch      # apply this repo's current VM config (only supported on 
 vm console scratch     # stream the serial log (live boot output)
 vm info scratch        # reprint connection details (ssh/ports/console)
 vm restart scratch     # graceful stop, then start again
+vm grow scratch        # add 10G to the VM disk (VM must be stopped)
+vm grow scratch 25G    # add a specific amount
 vm wipe scratch        # remove disk/boot state, preserving name and SSH port
 vm stop scratch        # graceful shutdown, preserving disk/state
 vm destroy scratch     # delete VM and all its state
@@ -383,6 +385,12 @@ Aliases:
 `vm start` launches the VM and returns after the hypervisor process starts. It
 does not wait for SSH to become reachable; use `vm console <name>` to watch
 boot output and `vm ssh <name>` to connect when the guest is ready.
+
+`vm grow <name> [amount]` increases an existing VM disk by a positive amount
+(`10G` by default). The VM must be stopped. Amounts accept suffixes like `G`,
+`GB`, `GiB`, and `T`; a bare number is treated as GiB. On the next boot, the
+VM's NixOS config grows the partition and filesystem to use the additional
+space.
 
 `vm wipe <name>` stops the VM and removes its disk/boot state (`disk.*`,
 `efi-vars.fd`, `metadata.raw`, and `meta.json`) while preserving its state

@@ -10,6 +10,8 @@ Subcommands:
                           image if needed. Alias: up.
   stop <name>             Stop the VM, preserving disk/state. Alias: halt.
   restart <name>          Stop and start the VM.
+  grow <name> [amount]    Increase the VM disk by amount, default 10G.
+                          The VM must be stopped.
   wipe <name>             Stop the VM and remove disk/boot state, preserving
                           its name and allocated SSH port.
   destroy <name>          Stop and delete the VM and all its state. Alias: rm.
@@ -217,6 +219,33 @@ EOF
 
 disk_path_for() {
   echo "$1/disk.$(host_image_format)"
+}
+
+existing_disk_path_for() {
+  local d="$1"
+  local expected; expected="$(disk_path_for "$d")"
+  if [ -f "$expected" ]; then
+    echo "$expected"
+    return 0
+  fi
+
+  local found="" p
+  for p in "$d/disk.qcow2" "$d/disk.raw"; do
+    [ -f "$p" ] || continue
+    if [ -n "$found" ]; then
+      echo "Multiple VM disks found under $d; refusing to choose one." >&2
+      return 1
+    fi
+    found="$p"
+  done
+
+  if [ -n "$found" ]; then
+    echo "$found"
+    return 0
+  fi
+
+  echo "No VM disk found under $d. Run 'vm start $(basename "$d")' first." >&2
+  return 1
 }
 
 metadata_disk_path_for() {
@@ -608,7 +637,7 @@ acquire_launch_lock() {
     local holder=""
     holder="$(readlink "$d/.lock" 2>/dev/null || true)"
     if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
-      echo "vm start already in progress for $(basename "$d") (pid $holder)." >&2
+      echo "VM operation already in progress for $(basename "$d") (pid $holder)." >&2
       return 1
     fi
     # Re-check the target before unlinking, so a concurrent acquirer's
@@ -928,6 +957,83 @@ cmd_restart() {
   cmd_start "$name"
 }
 
+normalize_grow_amount() {
+  local raw="${1:-10G}"
+  raw="${raw^^}"
+
+  if [[ "$raw" =~ ^([1-9][0-9]*)([KMGTPE]?I?B?)?$ ]]; then
+    local n="${BASH_REMATCH[1]}"
+    local unit="${BASH_REMATCH[2]}"
+    if [[ "$unit" =~ ^I?B$ ]]; then
+      echo "Invalid grow amount: $raw (examples: 10G, 25GB, 1T)." >&2
+      return 1
+    fi
+    unit="${unit%B}"
+    unit="${unit%I}"
+    [ -n "$unit" ] || unit="G"
+    echo "${n}${unit}"
+    return 0
+  fi
+
+  echo "Invalid grow amount: $raw (examples: 10G, 25GB, 1T)." >&2
+  return 1
+}
+
+disk_virtual_size() {
+  local disk="$1"
+  if command -v qemu-img >/dev/null 2>&1; then
+    qemu-img info "$disk" | awk -F': ' '/virtual size:/ { print $2; exit }'
+  else
+    printf '%s bytes\n' "$(wc -c < "$disk" | tr -d ' ')"
+  fi
+}
+
+cmd_grow() {
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || { echo "Usage: vm grow <name> [amount]" >&2; exit 1; }
+  local name="$1"
+  local amount; amount="$(normalize_grow_amount "${2:-10G}")" || exit 1
+  validate_name "$name"
+
+  local d; d="$(vm_dir "$name")"
+  [ -d "$d" ] || { echo "No such VM '$name'." >&2; exit 1; }
+
+  acquire_launch_lock "$d" || exit 1
+  if is_running "$d/vm.pid"; then
+    echo "VM '$name' is running. Stop it before growing its disk." >&2
+    exit 1
+  fi
+
+  local disk; disk="$(existing_disk_path_for "$d")" || exit 1
+  local before after
+  before="$(disk_virtual_size "$disk")"
+
+  case "$disk" in
+    *.qcow2)
+      require_cmd qemu-img
+      qemu-img resize "$disk" "+$amount" >/dev/null
+      ;;
+    *.raw)
+      if command -v qemu-img >/dev/null 2>&1; then
+        qemu-img resize "$disk" "+$amount" >/dev/null
+      else
+        require_cmd truncate
+        truncate -s "+$amount" "$disk"
+      fi
+      ;;
+    *)
+      echo "Unsupported VM disk format: $disk" >&2
+      exit 1
+      ;;
+  esac
+
+  after="$(disk_virtual_size "$disk")"
+  echo "Grew VM '$name' disk by $amount."
+  echo "  disk:   $disk"
+  echo "  before: $before"
+  echo "  after:  $after"
+  echo "Start the VM for NixOS to grow the partition and filesystem."
+}
+
 cmd_wipe() {
   require_arg_count "vm wipe <name>" 1 "$@"
   local name="$1"
@@ -1189,6 +1295,7 @@ case "${1:-}" in
   start|up) shift; cmd_start "$@" ;;
   stop|halt) shift; cmd_stop "$@" ;;
   restart) shift; cmd_restart "$@" ;;
+  grow) shift; cmd_grow "$@" ;;
   wipe) shift; cmd_wipe "$@" ;;
   destroy|rm) shift; cmd_destroy "$@" ;;
   ssh) shift; cmd_ssh "$@" ;;
