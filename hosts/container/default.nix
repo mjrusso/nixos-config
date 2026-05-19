@@ -10,7 +10,7 @@ let
     for dev in /dev/vd? /dev/sd? /dev/xvd? /dev/nvme?n?; do
       [ -b "$dev" ] || continue
 
-      data="$(${pkgs.coreutils}/bin/dd if="$dev" bs=4096 count=1 2>/dev/null | ${pkgs.coreutils}/bin/tr -d '\000' || true)"
+      data="$(${pkgs.coreutils}/bin/dd if="$dev" bs=1048576 count=1 2>/dev/null | ${pkgs.coreutils}/bin/tr -d '\000' || true)"
       case "$data" in
         "$marker"*)
           hostname="$(printf '%s\n' "$data" | ${pkgs.gnused}/bin/sed -n 's/^hostname=//p' | ${pkgs.coreutils}/bin/head -n1)"
@@ -34,6 +34,8 @@ in
   ];
 
   networking.hostName = lib.mkDefault "nixos-container";
+
+  boot.kernelModules = [ "virtiofs" ];
 
   systemd.services.vm-hostname-from-metadata = {
     description = "Set hostname from VM metadata disk";

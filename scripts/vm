@@ -35,6 +35,12 @@ Subcommands:
         Remove a previously-added forward.
   ports <name>            List all active port forwards for a VM.
 
+  share <name> <tag> <host-path> <guest-path> [--readonly]
+        Persistently expose a host directory to the guest via virtiofs.
+        The VM must be restarted before new share declarations take effect.
+  unshare <name> <tag>    Remove a persisted virtiofs share declaration.
+  shares <name>           List persisted virtiofs share declarations.
+
 State directory: $VMS_DIR (default: ~/vms). Golden images and their
 `.meta.json` sidecars are expected there — bake them from the
 nixos-config repo:
@@ -48,6 +54,11 @@ Networking:
   VM is reachable from other hosts. Additional forwards are managed
   through gvproxy's HTTP API from the host via `vm publish`/`vm
   unpublish`.
+
+Host directory sharing:
+  Host directories are declared with `vm share` and persisted in the
+  VM state directory. Shares are attached at VM start, so adding or
+  removing shares for a running VM requires a restart.
 USAGE
 }
 
@@ -252,6 +263,118 @@ metadata_disk_path_for() {
   echo "$1/metadata.raw"
 }
 
+shares_path_for() {
+  echo "$1/shares.json"
+}
+
+validate_share_tag() {
+  local tag="$1"
+  [[ "$tag" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+    echo "Invalid share tag '$tag' (allowed: alphanumeric, '.', '_', '-'; must start with alphanumeric)." >&2
+    return 1
+  }
+}
+
+validate_guest_path() {
+  local path="$1"
+  case "$path" in
+    /*) ;;
+    *) echo "Guest path must be absolute: $path" >&2; return 1 ;;
+  esac
+  case "$path" in
+    *"'"*|*$'\t'*|*$'\n'*|*$'\r'*)
+      echo "Guest path must not contain single quotes, tabs, or newlines: $path" >&2
+      return 1
+      ;;
+  esac
+}
+
+validate_host_path() {
+  local path="$1"
+  [ -d "$path" ] || {
+    echo "Host path is not a directory: $path" >&2
+    return 1
+  }
+  case "$path" in
+    *,*|*$'\t'*|*$'\n'*|*$'\r'*)
+      echo "Host path must not contain commas, tabs, or newlines: $path" >&2
+      return 1
+      ;;
+  esac
+}
+
+canonical_host_path() {
+  local path="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$path"
+  else
+    local dir base
+    dir="$(cd "$(dirname "$path")" && pwd -P)"
+    base="$(basename "$path")"
+    printf '%s/%s\n' "$dir" "$base"
+  fi
+}
+
+ensure_shares_file() {
+  local d="$1" shares
+  shares="$(shares_path_for "$d")"
+  if [ ! -f "$shares" ]; then
+    printf '[]\n' > "$shares"
+  fi
+}
+
+validate_shares_file() {
+  local d="$1" shares
+  shares="$(shares_path_for "$d")"
+  [ -f "$shares" ] || return 0
+  command -v jq >/dev/null 2>&1 || { echo "Missing required command: jq" >&2; return 1; }
+  jq -e '
+    type == "array"
+    and all(.[]; (
+      type == "object"
+      and (.tag | type == "string")
+      and (.hostPath | type == "string")
+      and (.guestPath | type == "string")
+      and (.readonly | type == "boolean")
+    ))
+    and ((map(.tag) | unique | length) == length)
+  ' "$shares" >/dev/null || {
+    echo "Invalid shares file: $shares" >&2
+    return 1
+  }
+
+  local tag host_path guest_path
+  while IFS=$'\t' read -r tag host_path guest_path; do
+    [ -n "$tag" ] || continue
+    validate_share_tag "$tag" || return 1
+    case "$host_path" in
+      *,*|*$'\t'*|*$'\n'*|*$'\r'*)
+        echo "Host path must not contain commas, tabs, or newlines: $host_path" >&2
+        return 1
+        ;;
+    esac
+    validate_guest_path "$guest_path" || return 1
+  done < <(jq -r '.[] | [.tag, .hostPath, .guestPath] | @tsv' "$shares")
+}
+
+validate_share_paths_for_start() {
+  local d="$1" shares
+  shares="$(shares_path_for "$d")"
+  [ -f "$shares" ] || return 0
+  local tag host_path
+  while IFS=$'\t' read -r tag host_path; do
+    [ -n "$tag" ] || continue
+    validate_host_path "$host_path" || return 1
+  done < <(jq -r '.[] | [.tag, .hostPath] | @tsv' "$shares")
+}
+
+shares_count() {
+  local d="$1" shares
+  shares="$(shares_path_for "$d")"
+  [ -f "$shares" ] || { echo 0; return 0; }
+  jq 'length' "$shares"
+}
+
 hostname_for_vm() {
   local name="$1"
   local vm_host host
@@ -288,10 +411,14 @@ write_metadata_disk() {
     echo "MJRVMMETA1"
     echo "hostname=$hostname"
     echo "name=$name"
+    local shares; shares="$(shares_path_for "$d")"
+    if [ -f "$shares" ]; then
+      jq -r '.[] | "share=\(.tag)\t\(.guestPath)\t\(.readonly)"' "$shares"
+    fi
   } > "$payload"
 
   rm -f "$metadata.partial"
-  dd if=/dev/zero of="$metadata.partial" bs=4096 count=1 2>/dev/null
+  dd if=/dev/zero of="$metadata.partial" bs=1048576 count=1 2>/dev/null
   dd if="$payload" of="$metadata.partial" conv=notrunc 2>/dev/null
   mv "$metadata.partial" "$metadata"
 }
@@ -342,6 +469,12 @@ ssh_opts() {
 -o UserKnownHostsFile=/dev/null \
 -o GlobalKnownHostsFile=/dev/null \
 -o LogLevel=ERROR"
+}
+
+ssh_quick_opts() {
+  echo "$(ssh_opts) \
+-o ConnectTimeout=1 \
+-o ConnectionAttempts=1"
 }
 
 port_in_use() {
@@ -553,6 +686,168 @@ stop_gvproxy() {
   rm -f "$d/gvproxy.pid" "$d/network.sock" "$d/qemu-net.sock" "$d/vfkit-net.sock"
 }
 
+virtiofsd_bin() {
+  if [ -n "${VM_VIRTIOFSD:-}" ] && [ -x "$VM_VIRTIOFSD" ]; then
+    echo "$VM_VIRTIOFSD"
+    return 0
+  fi
+  command -v virtiofsd 2>/dev/null && return 0
+  echo "Missing required command: virtiofsd (pin via VM_VIRTIOFSD or add to PATH)" >&2
+  return 1
+}
+
+start_virtiofsd() {
+  local d="$1" tag="$2" host_path="$3" readonly="$4"
+  local bin; bin="$(virtiofsd_bin)" || return 1
+  local sock="$d/virtiofs-$tag.sock"
+  local pidfile="$d/virtiofs-$tag.pid"
+  local log="$d/virtiofs-$tag.log"
+  local args=(
+    --shared-dir "$host_path"
+    --socket-path "$sock"
+    --cache auto
+    # Running as a regular user in this script's launch model needs the
+    # relaxed sandbox/seccomp mode; otherwise file operations can hang on
+    # the tested NixOS/QEMU stack.
+    --sandbox none
+    --seccomp none
+    --inode-file-handles=never
+  )
+  if [ "$readonly" = "true" ]; then
+    args+=(--readonly)
+  fi
+
+  rm -f "$sock" "$pidfile"
+  nohup "$bin" "${args[@]}" > "$log" 2>&1 < /dev/null &
+  local pid=$!
+  disown "$pid" 2>/dev/null || true
+  echo "$pid" > "$pidfile"
+
+  local ready=0
+  for _ in $(seq 1 50); do
+    if [ -S "$sock" ]; then
+      ready=1
+      break
+    fi
+    if [ -s "$pidfile" ]; then
+      local pid; pid="$(cat "$pidfile")"
+      if ! kill -0 "$pid" 2>/dev/null; then
+        echo "virtiofsd for share '$tag' exited before its socket appeared. See $log." >&2
+        rm -f "$pidfile"
+        return 1
+      fi
+    fi
+    sleep 0.1
+  done
+
+  if [ "$ready" -ne 1 ]; then
+    echo "Timed out waiting for virtiofsd socket at $sock." >&2
+    [ -s "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
+    rm -f "$pidfile"
+    return 1
+  fi
+}
+
+stop_virtiofsd() {
+  local d="$1" pidfile pid
+  for pidfile in "$d"/virtiofs-*.pid; do
+    [ -f "$pidfile" ] || continue
+    pid="$(cat "$pidfile")"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      for _ in $(seq 1 20); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.2
+      done
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
+  rm -f "$d"/virtiofs-*.pid "$d"/virtiofs-*.sock
+}
+
+stop_guest_share_mounter() {
+  local d="$1"
+  if [ -f "$d/share-mount.pid" ]; then
+    kill "$(cat "$d/share-mount.pid")" 2>/dev/null || true
+    rm -f "$d/share-mount.pid"
+  fi
+}
+
+start_guest_share_mounter() {
+  local d="$1" port="$2"
+  local shares; shares="$(shares_path_for "$d")"
+  [ -f "$shares" ] || return 0
+  [ "$(jq 'length' "$shares")" = "0" ] && return 0
+
+  local opts; opts="$(ssh_quick_opts)"
+  (
+    while [ ! -f "$d/share-mount.pid" ]; do
+      sleep 0.05
+    done
+    trap 'rm -f "$d/share-mount.pid"' EXIT
+
+    echo "Waiting for guest SSH on port $port..."
+    local ready=0
+    # shellcheck disable=SC2086
+    for _ in $(seq 1 90); do
+      if ssh -p "$port" $opts root@localhost true >/dev/null 2>&1; then
+        echo "Guest SSH is ready; mounting shares..."
+        ready=1
+        break
+      fi
+      sleep 2
+    done
+    if [ "$ready" -ne 1 ]; then
+      echo "Timed out waiting for guest SSH; shares were not mounted." >&2
+      exit 1
+    fi
+
+    local tag guest_path share_readonly mount_opts script
+    script="set -eu"
+    while IFS=$'\t' read -r tag guest_path share_readonly; do
+      [ -n "$tag" ] || continue
+      mount_opts=""
+      [ "$share_readonly" = "true" ] && mount_opts="-o ro"
+      script="$script
+mkdir -p '$guest_path'
+nsenter --mount=/proc/1/ns/mnt -- mountpoint -q '$guest_path' || nsenter --mount=/proc/1/ns/mnt -- mount -t virtiofs $mount_opts '$tag' '$guest_path'"
+    done < <(jq -r '.[] | [.tag, .guestPath, .readonly] | @tsv' "$shares")
+
+    # Enter PID 1's mount namespace so the mount is usable from later SSH
+    # sessions and normal system services, not only from this SSH session.
+    # shellcheck disable=SC2086
+    if ssh -p "$port" $opts root@localhost "$script"; then
+      echo "Share mounting complete."
+    else
+      echo "Share mounting failed." >&2
+      exit 1
+    fi
+  ) > "$d/share-mount.log" 2>&1 &
+  local pid=$!
+  disown "$pid" 2>/dev/null || true
+  echo "$pid" > "$d/share-mount.pid"
+}
+
+try_guest_unmount_shares() {
+  local d="$1" port="$2"
+  local shares; shares="$(shares_path_for "$d")"
+  [ -f "$shares" ] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  [ "$(jq 'length' "$shares")" = "0" ] && return 1
+
+  local opts; opts="$(ssh_quick_opts)"
+  local guest_path script
+  script="set +e"
+  while IFS= read -r guest_path; do
+    [ -n "$guest_path" ] || continue
+    script="$script
+nsenter --mount=/proc/1/ns/mnt -- mountpoint -q '$guest_path' && nsenter --mount=/proc/1/ns/mnt -- umount '$guest_path' || true"
+  done < <(jq -r 'sort_by(.guestPath) | reverse | .[] | .guestPath' "$shares")
+
+  # shellcheck disable=SC2086
+  ssh -p "$port" $opts root@localhost "$script" >/dev/null 2>&1
+}
+
 # Thin wrappers over curl against gvproxy's HTTP forwarder API on
 # $d/network.sock. The "http://_" host is a placeholder required by
 # curl; the unix-socket carries the real connection.
@@ -668,6 +963,8 @@ print_endpoints() {
   echo "  console:                  vm console $name   (tails $d/serial.log)"
   echo "  ports (list):             vm ports $name"
   echo "  publish a port:           vm publish $name <guest-port> [<host-port>]"
+  echo "  shares (list):            vm shares $name"
+  echo "  share a directory:        vm share $name <tag> <host-path> <guest-path>"
   echo "  gvproxy API:              curl --unix-socket $d/network.sock http://_/services/forwarder/all"
   case "$(uname -s)" in
     Linux)  echo "  qemu monitor:             socat - UNIX-CONNECT:$d/qemu.mon" ;;
@@ -748,6 +1045,8 @@ cmd_start() {
   # that was SIGKILL'd between gvproxy start and driver start. Safe
   # to call when there's nothing to stop.
   stop_gvproxy "$d"
+  stop_virtiofsd "$d"
+  stop_guest_share_mounter "$d"
 
   if [ ! -f "$disk" ]; then
     local golden; golden="$(ensure_golden)"
@@ -762,6 +1061,8 @@ cmd_start() {
   fi
 
   ssh_user "$d" >/dev/null || exit 1
+  validate_shares_file "$d" || exit 1
+  validate_share_paths_for_start "$d" || exit 1
   write_metadata_disk "$d" "$name"
 
   # Allocate or reuse the host SSH port. gvproxy's -ssh-port flag
@@ -799,12 +1100,19 @@ cmd_start() {
     exit 1
   fi
 
-  case "$driver" in
+  if ! case "$driver" in
     qemu)  boot_qemu  "$d" "$name" "$image_arch" "$disk" "$metadata" ;;
     vfkit) boot_vfkit "$d" "$name" "$disk" "$metadata" ;;
-  esac
+  esac; then
+    stop_virtiofsd "$d"
+    stop_gvproxy "$d"
+    trap - INT TERM
+    exit 1
+  fi
 
   trap - INT TERM
+
+  start_guest_share_mounter "$d" "$port"
 
   echo ""
   echo "VM '$name' launched (pid $(cat "$d/vm.pid"))."
@@ -830,6 +1138,16 @@ boot_qemu() {
   # gvproxy.
   local qemu_args=(
     -enable-kvm -cpu host -smp 4 -m 4096
+  )
+
+  local share_count; share_count="$(shares_count "$d")"
+  if [ "$share_count" -gt 0 ]; then
+    qemu_args+=(
+      -object "memory-backend-memfd,id=mem,size=4096M,share=on"
+    )
+  fi
+
+  qemu_args+=(
     -drive "file=$disk,if=virtio"
     -drive "file=$metadata,if=virtio,format=raw,readonly=on"
     -netdev "stream,id=net0,server=off,addr.type=unix,addr.path=$d/qemu-net.sock"
@@ -840,13 +1158,33 @@ boot_qemu() {
     -pidfile "$d/vm.pid"
   )
 
+  if [ "$share_count" -gt 0 ]; then
+    local shares; shares="$(shares_path_for "$d")"
+    local idx=0 tag host_path share_readonly
+    while IFS=$'\t' read -r tag host_path share_readonly; do
+      [ -n "$tag" ] || continue
+      start_virtiofsd "$d" "$tag" "$host_path" "$share_readonly" || return 1
+      qemu_args+=(
+        -chardev "socket,id=chrfs$idx,path=$d/virtiofs-$tag.sock"
+        -device "vhost-user-fs-pci,chardev=chrfs$idx,tag=$tag,queue-size=1024"
+      )
+      idx=$((idx + 1))
+    done < <(jq -r '.[] | [.tag, .hostPath, .readonly] | @tsv' "$shares")
+  fi
+
   if [ "$image_arch" = "aarch64" ]; then
     local uefi
     uefi="$(find_aarch64_uefi)" || {
       echo "aarch64 UEFI firmware not found. Install qemu or set VM_QEMU_AARCH64_UEFI." >&2
       exit 1
     }
-    qemu_args=(-machine virt "${qemu_args[@]}" -bios "$uefi")
+    if [ "$share_count" -gt 0 ]; then
+      qemu_args=(-machine "virt,memory-backend=mem" "${qemu_args[@]}" -bios "$uefi")
+    else
+      qemu_args=(-machine virt "${qemu_args[@]}" -bios "$uefi")
+    fi
+  elif [ "$share_count" -gt 0 ]; then
+    qemu_args=(-machine "memory-backend=mem" "${qemu_args[@]}")
   fi
 
   rm -f "$d/vm.pid"
@@ -887,17 +1225,31 @@ boot_vfkit() {
   # virtio-net,unixSocketPath: vfkit connects to gvproxy's
   # -listen-vfkit unixgram socket. Replaces the former vmnet NAT
   # plus /var/db/dhcpd_leases IP discovery dance.
-  nohup vfkit \
-    --cpus 4 \
-    --memory 4096 \
-    --bootloader "$bootloader" \
-    --device "virtio-blk,path=$disk" \
-    --device "virtio-blk,path=$metadata" \
-    --device "virtio-net,unixSocketPath=$d/vfkit-net.sock,mac=$mac" \
-    --device virtio-rng \
-    --device "virtio-serial,logFilePath=$d/serial.log" \
-    --restful-uri "unix://$sock" \
-    > "$d/vfkit.log" 2>&1 &
+  local vfkit_args=(
+    --cpus 4
+    --memory 4096
+    --bootloader "$bootloader"
+    --device "virtio-blk,path=$disk"
+    --device "virtio-blk,path=$metadata"
+    --device "virtio-net,unixSocketPath=$d/vfkit-net.sock,mac=$mac"
+    --device virtio-rng
+    --device "virtio-serial,logFilePath=$d/serial.log"
+    --restful-uri "unix://$sock"
+  )
+
+  local shares; shares="$(shares_path_for "$d")"
+  if [ -f "$shares" ]; then
+    local tag host_path share_readonly
+    while IFS=$'\t' read -r tag host_path share_readonly; do
+      [ -n "$tag" ] || continue
+      if [ "$share_readonly" = "true" ]; then
+        echo "Warning: vfkit has no documented host-side readonly flag for virtio-fs; share '$tag' will be mounted read-only in the guest." >&2
+      fi
+      vfkit_args+=(--device "virtio-fs,sharedDir=$host_path,mountTag=$tag")
+    done < <(jq -r '.[] | [.tag, .hostPath, .readonly] | @tsv' "$shares")
+  fi
+
+  nohup vfkit "${vfkit_args[@]}" > "$d/vfkit.log" 2>&1 &
   local pid=$!
   echo "$pid" > "$d/vm.pid"
   disown "$pid" 2>/dev/null || true
@@ -918,6 +1270,12 @@ cmd_stop() {
 
   if is_running "$d/vm.pid"; then
     local pid; pid="$(cat "$d/vm.pid")"
+    local port=""
+    [ -f "$d/port" ] && port="$(cat "$d/port")"
+
+    if [ -n "$port" ] && try_guest_unmount_shares "$d" "$port"; then
+      echo "Unmounted guest shares for VM '$name'."
+    fi
 
     if try_graceful_shutdown "$d/qemu.mon"; then
       echo "Sent ACPI power-down to VM '$name' (pid $pid); waiting up to 20s..."
@@ -942,11 +1300,13 @@ cmd_stop() {
   fi
 
   rm -f "$d/vm.pid" "$d/qemu.mon" "$d/vfkit.sock"
+  stop_guest_share_mounter "$d"
 
   # gvproxy teardown is unconditional: even if the driver was already
   # stopped, stop_gvproxy cleans up stale pid/sockets and is a no-op
   # when nothing is running.
   stop_gvproxy "$d"
+  stop_virtiofsd "$d"
 }
 
 cmd_restart() {
@@ -1143,6 +1503,103 @@ cmd_info() {
   print_endpoints "$d" "$name"
 }
 
+cmd_share() {
+  local readonly=false
+  [ "$#" -ge 4 ] || { echo "Usage: vm share <name> <tag> <host-path> <guest-path> [--readonly]" >&2; exit 1; }
+  local name="$1" tag="$2" host_path="$3" guest_path="$4"
+  shift 4
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --readonly) readonly=true; shift ;;
+      -*) echo "Unknown flag: $1" >&2; exit 1 ;;
+      *) echo "Unexpected argument: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  validate_name "$name"
+  validate_share_tag "$tag" || exit 1
+  validate_host_path "$host_path" || exit 1
+  validate_guest_path "$guest_path" || exit 1
+  require_cmd jq
+
+  host_path="$(canonical_host_path "$host_path")"
+
+  local d; d="$(vm_dir "$name")"
+  mkdir -p "$d"
+  acquire_launch_lock "$d" || exit 1
+  ensure_shares_file "$d"
+  validate_shares_file "$d" || exit 1
+
+  local shares; shares="$(shares_path_for "$d")"
+  if jq -e --arg tag "$tag" 'any(.[]; .tag == $tag)' "$shares" >/dev/null; then
+    echo "Share '$tag' already exists for VM '$name'. Run 'vm unshare $name $tag' first to replace it." >&2
+    exit 1
+  fi
+
+  jq \
+    --arg tag "$tag" \
+    --arg host_path "$host_path" \
+    --arg guest_path "$guest_path" \
+    --argjson readonly "$readonly" \
+    '. + [{tag: $tag, hostPath: $host_path, guestPath: $guest_path, readonly: $readonly}]' \
+    "$shares" > "$shares.partial"
+  mv "$shares.partial" "$shares"
+
+  echo "Shared $host_path as '$tag' at $guest_path for VM '$name'."
+  if is_running "$d/vm.pid"; then
+    echo "Restart VM '$name' for the new share to take effect."
+  fi
+}
+
+cmd_unshare() {
+  require_arg_count "vm unshare <name> <tag>" 2 "$@"
+  local name="$1" tag="$2"
+  validate_name "$name"
+  validate_share_tag "$tag" || exit 1
+  require_cmd jq
+
+  local d; d="$(vm_dir "$name")"
+  [ -d "$d" ] || { echo "No such VM '$name'." >&2; exit 1; }
+  acquire_launch_lock "$d" || exit 1
+  ensure_shares_file "$d"
+  validate_shares_file "$d" || exit 1
+
+  local shares; shares="$(shares_path_for "$d")"
+  if ! jq -e --arg tag "$tag" 'any(.[]; .tag == $tag)' "$shares" >/dev/null; then
+    echo "No share '$tag' for VM '$name'." >&2
+    exit 1
+  fi
+
+  jq --arg tag "$tag" 'map(select(.tag != $tag))' "$shares" > "$shares.partial"
+  mv "$shares.partial" "$shares"
+
+  echo "Removed share '$tag' from VM '$name'."
+  if is_running "$d/vm.pid"; then
+    echo "Restart VM '$name' for the removal to take effect."
+  fi
+}
+
+cmd_shares() {
+  require_arg_count "vm shares <name>" 1 "$@"
+  local name="$1"
+  validate_name "$name"
+  require_cmd jq
+
+  local d; d="$(vm_dir "$name")"
+  [ -d "$d" ] || { echo "No such VM '$name'." >&2; exit 1; }
+  local shares; shares="$(shares_path_for "$d")"
+  if [ ! -f "$shares" ] || [ "$(jq 'length' "$shares")" = "0" ]; then
+    echo "No shares for VM '$name'."
+    return 0
+  fi
+  validate_shares_file "$d" || exit 1
+  printf "%-16s %-36s %-28s %s\n" TAG HOST-PATH GUEST-PATH MODE
+  jq -r '.[] | [.tag, .hostPath, .guestPath, (if .readonly then "ro" else "rw" end)] | @tsv' "$shares" |
+    while IFS=$'\t' read -r tag host_path guest_path mode; do
+      printf "%-16s %-36s %-28s %s\n" "$tag" "$host_path" "$guest_path" "$mode"
+    done
+}
+
 # Parse publish/unpublish positional args + flags. Populates globals
 # _PARSE_NAME / _PARSE_PORTS (array) / _PARSE_BIND (empty = 0.0.0.0) /
 # _PARSE_AUTO (0/1). Avoids subshell gymnastics around arrays.
@@ -1306,6 +1763,9 @@ case "${1:-}" in
   publish) shift; cmd_publish "$@" ;;
   unpublish) shift; cmd_unpublish "$@" ;;
   ports) shift; cmd_ports "$@" ;;
+  share) shift; cmd_share "$@" ;;
+  unshare) shift; cmd_unshare "$@" ;;
+  shares) shift; cmd_shares "$@" ;;
   -h|--help|help|"") usage ;;
   *) echo "Unknown subcommand: $1" >&2; usage >&2; exit 1 ;;
 esac

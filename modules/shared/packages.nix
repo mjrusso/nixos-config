@@ -163,6 +163,7 @@ with pkgs; [
   # Custom virtual machine management script
   (pkgs.writeShellScriptBin "vm" ''
     export VM_GVPROXY=${pkgs.gvproxy}/bin/gvproxy
+    ${pkgs.lib.optionalString pkgs.stdenv.isLinux "export VM_VIRTIOFSD=${pkgs.virtiofsd}/bin/virtiofsd"}
     ${pkgs.lib.optionalString pkgs.stdenv.isLinux "export VM_QEMU_AARCH64_UEFI=${pkgs.qemu}/share/qemu/edk2-aarch64-code.fd"}
     exec ${pkgs.bash}/bin/bash ${../../scripts/vm} "$@"
   '')
@@ -241,4 +242,6 @@ with pkgs; [
         fi
     done
   '')
+] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+  pkgs.virtiofsd
 ]

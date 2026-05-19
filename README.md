@@ -369,6 +369,9 @@ vm restart scratch     # graceful stop, then start again
 vm grow scratch        # add 10G to the VM disk (VM must be stopped)
 vm grow scratch 25G    # add a specific amount
 vm wipe scratch        # remove disk/boot state, preserving name and SSH port
+vm share scratch <...> # declare a host-directory share
+vm shares scratch      # list declared host-directory shares
+vm unshare scratch src # remove a declared host-directory share
 vm stop scratch        # graceful shutdown, preserving disk/state
 vm destroy scratch     # delete VM and all its state
 ```
@@ -473,6 +476,45 @@ Forwards are only managed from the host. The gvproxy forwarder API is exposed
 on a unix socket under `$VMS_DIR/<name>/network.sock` (host-side only); there
 is no built-in path for processes inside the guest to register their own
 forwards.
+
+##### Sharing host directories
+
+Host directories can be shared into a VM with virtiofs:
+
+``` bash
+vm share scratch src ~/src /mnt/host/src
+vm share scratch repo ~/git/nixos-config /work/nixos-config --readonly
+vm shares scratch
+vm unshare scratch src
+```
+
+The `<tag>` is the virtiofs mount tag: a short device name exposed to the
+guest. It is not a path. For example, `vm share scratch repo ~/repo /work/repo`
+attaches a virtiofs device named `repo`, which the guest mounts as
+`mount -t virtiofs repo /work/repo`. The same tag is also the handle used by
+`vm unshare`.
+
+Shares are persisted per VM under `$VMS_DIR/<name>/shares.json`. Virtiofs
+devices are attached when the VM starts, so adding or removing a share while
+the VM is running requires `vm restart <name>` before the change takes effect.
+Tags may contain letters, numbers, `.`, `_`, and `-`; host paths must be
+directories and cannot contain commas, tabs, or newlines.
+`vm start` still returns after the hypervisor launches; if shares are declared,
+it also starts a background helper that waits for guest SSH and mounts the
+shares inside the guest. The mount may appear a few seconds after `vm start`
+returns. The helper log is written to `$VMS_DIR/<name>/share-mount.log`. Once a
+share has been attached, the guest can also mount and unmount that virtiofs tag
+manually at runtime.
+
+`vm wipe <name>` preserves share declarations along with the VM name and SSH
+port. `vm destroy <name>` removes them because it deletes the full VM state
+directory.
+
+Read-only shares are exported read-only by `virtiofsd` on Linux/QEMU hosts and
+mounted read-only in the guest on all hosts. On Darwin/vfkit hosts, the current
+launcher does not pass a host-side read-only flag because vfkit's documented
+`virtio-fs` device syntax exposes `sharedDir` and `mountTag`; guest-side
+read-only mounting still applies.
 
 ### Additional Setup
 
