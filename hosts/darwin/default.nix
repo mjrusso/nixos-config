@@ -1,6 +1,7 @@
 { config, osConfig, pkgs, userInfo, ... }:
 
-let user = userInfo.user; in
+let user = userInfo.user;
+    keys = userInfo.sshKeys; in
 
 {
 
@@ -37,6 +38,8 @@ let user = userInfo.user; in
 
   # Set fish as the default shell
   programs.fish.enable = true;
+
+  users.users.${user}.openssh.authorizedKeys.keys = keys;
 
   system = {
     stateVersion = 4;
