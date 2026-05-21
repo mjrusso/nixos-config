@@ -12,6 +12,7 @@ in {
   fish = import ./config/fish.nix commonArgs;
   gh = import ./config/gh.nix commonArgs;
   git = import ./config/git.nix commonArgs;
+  jujutsu = import ./config/jujutsu.nix commonArgs;
   npm = import ./config/npm.nix commonArgs;
   zoxide = import ./config/zoxide.nix commonArgs;
   tmux = import ./config/tmux.nix commonArgs;
