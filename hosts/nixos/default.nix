@@ -83,6 +83,7 @@ let user = userInfo.user;
   nix = {
     nixPath = [ "nixos-config=/home/${user}/.local/share/src/nixos-config:/etc/nixos" ];
     settings.allowed-users = [ "${user}" ];
+    settings.trusted-users = [ "@wheel" "${user}" ];
     package = pkgs.nixVersions.latest;
     extraOptions = ''
       experimental-features = nix-command flakes
