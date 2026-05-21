@@ -196,6 +196,27 @@
           -V fontsize=10pt
     '';
 
+    # Run an AI coding agent or development tool from numtide/llm-agents.nix.
+    #
+    # This is intentionally unpinned: the upstream programs update frequently
+    # (~daily), so `nix run github:...` is generally preferable to a pinned
+    # flake input that would need a manual `nix flake update` to stay current.
+    # Note that numtide's binary cache is trusted in `modules/shared/caches`,
+    # so programs are substituted, not built from source.
+    #
+    # To bypass the `tarball-ttl` cache (1h by default) and force a fresh
+    # fetch, run the underlying command directly with `--refresh`, for example:
+    # `nix run  --refresh github:numtide/llm-agents.nix#claude-code`.
+    #
+    # See: <https://github.com/numtide/llm-agents.nix>
+    llm-agents = ''
+      if test (count $argv) -eq 0
+        nix run github:numtide/llm-agents.nix
+      else
+        nix run "github:numtide/llm-agents.nix#$argv[1]" -- $argv[2..-1]
+      end
+    '';
+
     # https://fishshell.com/docs/current/cmds/fish_git_prompt.html
     # https://mariuszs.github.io/blog/2013/informative_git_prompt.html
     fish_prompt = ''
