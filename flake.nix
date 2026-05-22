@@ -31,13 +31,9 @@
       url = "github:nix-community/nixos-generators";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    workmux = {
-      url = "github:raine/workmux";
-    };
   };
 
-  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, nixos-generators, workmux } @inputs:
+  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, nixos-generators } @inputs:
     let
       userInfo = import ./user-info.nix;
       hostInfo = import ./host-info.nix;

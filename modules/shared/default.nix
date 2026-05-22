@@ -1,4 +1,4 @@
-{ config, osConfig, pkgs, emacs-flake, workmux, ... }:
+{ config, osConfig, pkgs, emacs-flake, ... }:
 
 {
 
@@ -14,7 +14,6 @@
       [
         (final: prev: {
           my-emacs-with-packages = emacs-flake.packages.${prev.stdenv.hostPlatform.system}.default;
-          workmux = workmux.packages.${prev.stdenv.hostPlatform.system}.default;
         })
       ] ++
       # Apply each overlay found in the /overlays directory
