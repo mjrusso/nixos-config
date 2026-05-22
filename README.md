@@ -309,6 +309,50 @@ To follow Tailscale logs:
 sudo journalctl -u tailscaled -f
 ```
 
+#### Syncthing
+
+Physical NixOS hosts enable [Syncthing](https://syncthing.net/) via
+[`hosts/nixos/default.nix`](./hosts/nixos/default.nix).
+
+Devices and folders are managed imperatively through Syncthing's web UI.
+(`overrideDevices` and `overrideFolders` are set to `false`, so device pairings
+and shared folders added through the UI survive a rebuild/switch. Only the
+connection options are declarative, per `settings.options`. Note that global
+discovery and relays are disabled, so this host syncs only with peers on the
+local network.)
+
+The web UI is bound to `127.0.0.1:8384` and is not reachable from other
+machines. To access the web UI, forward it over SSH from a machine that has an
+accessible browser:
+
+``` bash
+ssh -L 8385:localhost:8384 <user>@<host>
+```
+
+Then open <http://localhost:8385> in a browser. Substitute the host's Tailscale
+name or LAN address for `<host>`; the SSH connection itself can run over
+Tailscale.
+
+The forward's local port (`8385` above) must be free on the local machine.
+Another host already running Syncthing binds `8384` for its own web UI, so the
+tunnel uses a different local port.
+
+To pair this host with another device:
+
+1. In the web UI, note this host's device ID under **Actions → Show ID**
+   (or run `journalctl -u syncthing -b | grep "My ID"`).
+2. On the other device (via that device's web UI), add this host as a remote
+   device using that ID.
+3. Back in the web UI, accept the incoming device, then accept or share the
+   folders to sync.
+
+Useful checks:
+
+``` bash
+systemctl status syncthing
+journalctl -u syncthing -b
+```
+
 ### Container and VM Images
 
 Container and VM images can be built using

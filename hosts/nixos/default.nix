@@ -151,7 +151,12 @@ let user = userInfo.user;
     # Let's be able to SSH into this machine
     openssh.enable = true;
 
-    # Sync state between machines
+    # Sync state between machines.
+    #
+    # Devices and folders are managed imperatively through the web UI (see
+    # README). `overrideDevices`/`overrideFolders = false` prevents changes
+    # made in the web UI from being clobbered on rebuild. Connection options
+    # stay declarative so the LAN-only policy survives a Syncthing state wipe.
     syncthing = {
       enable = true;
       openDefaultPorts = true;
@@ -160,17 +165,14 @@ let user = userInfo.user;
       user = "${user}";
       group = "users";
       guiAddress = "127.0.0.1:8384";
-      overrideFolders = true;
-      overrideDevices = true;
+      overrideFolders = false;
+      overrideDevices = false;
 
-      settings = {
-        devices = {};
-        options = {
-          globalAnnounceEnabled = false;
-          localAnnounceEnabled = true;
-          relaysEnabled = false;
-          natEnabled = true;
-        };
+      settings.options = {
+        globalAnnounceEnabled = false;
+        localAnnounceEnabled = true;
+        relaysEnabled = false;
+        natEnabled = true;
       };
     };
 
