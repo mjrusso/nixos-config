@@ -61,6 +61,9 @@ let user = userInfo.user;
     kernelModules = [ "uinput" ];
     tmp.useTmpfs = true;
     zfs.requestEncryptionCredentials = true;
+    # qemu-user-static via binfmt_misc, so x86_64-linux hosts can build
+    # aarch64-linux derivations. This is a no-op on aarch64-linux hosts.
+    binfmt.emulatedSystems = [ "aarch64-linux" ];
   };
 
   # Set your time zone.
