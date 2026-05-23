@@ -399,6 +399,35 @@ To start, from the root of this repository, bake (produce) a golden image:
 ./scripts/bake-golden    # (flags: --system x86_64-linux|aarch64-linux, --format qcow|raw)
 ```
 
+> [!NOTE]
+>
+> vfkit on Darwin requires a `raw` image; baking one directly on Darwin
+> requires a Linux builder. The `aarch64-darwin@desktop` host enables
+> `nix.linux-builder` (see
+> [`hosts/darwin/default.nix`](./hosts/darwin/default.nix)), which spins up a
+> small aarch64-linux NixOS VM under vfkit and registers it as a remote
+> builder. If the builder is not available on a given host, bake on a host that
+> does have an available Linux builder, and rsync the result over:
+>
+> ``` bash
+> # On the host with Linux builder:
+> ./scripts/bake-golden --format raw --system aarch64-linux
+>
+> # From the other host:
+> rsync -aS --info=progress2 \
+>   <host-with-linux-builder>:~/vms/golden-aarch64-linux.raw{,.meta.json} \
+>   ~/vms/
+> ```
+>
+> `rsync -S` preserves sparseness so the copy doesn't allocate the full
+> virtual size on the destination.
+>
+> `--system aarch64-linux` is redundant on aarch64 Linux hosts (bake-golden
+> defaults to the host arch). On x86_64 Linux hosts it triggers a cross-arch
+> build, which works because
+> [`hosts/nixos/default.nix`](./hosts/nixos/default.nix) sets
+> `boot.binfmt.emulatedSystems = [ "aarch64-linux" ]`.
+
 Then, to run and manage virtual machines:
 
 ``` bash
