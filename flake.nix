@@ -218,7 +218,13 @@
             specialArgs = inputs // { inherit userInfo; };
             modules = (mkVmModules system) ++ nixpkgs.lib.optionals
               (format == "qcow" || format == "raw")
-              [ (mkVmImageMarkerModule format) ];
+              [
+                (mkVmImageMarkerModule format)
+                # `virtualisation.diskSize = "auto"` undersizes the image for
+                # our closure. Instead, pin an explicit size with headroom.
+                # (Images are sparse, so the on-disk cost tracks actual usage.)
+                { virtualisation.diskSize = 12288; }
+              ];
             inherit format;
           };
         in {
