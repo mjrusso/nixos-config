@@ -1,4 +1,4 @@
-{ config, osConfig, pkgs, userInfo, ... }:
+{ config, osConfig, pkgs, userInfo, systemType, ... }:
 
 let user = userInfo.user;
     keys = userInfo.sshKeys; in
@@ -15,6 +15,27 @@ let user = userInfo.user;
   nix = {
     package = pkgs.nixVersions.latest;
     settings.trusted-users = [ "@admin" "${user}" ];
+
+    # Run a small aarch64-linux NixOS VM under vfkit so this Mac can build
+    # Linux derivations without a remote builder. The first activation
+    # substitutes the prebuilt VM image from the Nix binary cache. Small
+    # `config` overrides (like the disk size below) don't trigger any
+    # aarch64-linux builds, so fresh activation works in one shot; heavier
+    # customizations may need the builder enabled first, then the override
+    # layered on a subsequent switch.
+    #
+    # Desktop only: the daemon runs persistently (launchd KeepAlive,
+    # no on-demand activation) and the vfkit process holds its allocated
+    # guest RAM (default 3 GiB) continuously.
+    linux-builder = {
+      enable = systemType == "desktop";
+      # Override the default 20 GiB virtual disk. The base NixOS system,
+      # closure substituted from cache, `/build/root` rsync staging copy,
+      # and the inner `nixos-disk-image` vda1 file all share this volume
+      # during a bake, which easily exceeds 20 GiB for non-trivial
+      # closures. Sparse on the Mac side, so unused space is free.
+      config.virtualisation.darwin-builder.diskSize = 100 * 1024;
+    };
 
     gc = {
       automatic = true;
