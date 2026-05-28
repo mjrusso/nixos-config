@@ -99,20 +99,20 @@
 
           boot = {
             growPartition = true;
-            kernelParams = [ "console=ttyS0" ];
+            kernelParams = [ "console=ttyS0" "console=hvc0" ];
             initrd.availableKernelModules = lib.optionals (format == "raw") [ "uas" ];
             loader = {
               grub = {
                 device =
-                  if format == "raw" || pkgs.stdenv.system == "x86_64-linux"
+                  if pkgs.stdenv.system == "x86_64-linux"
                   then lib.mkDefault "/dev/vda"
                   else lib.mkDefault "nodev";
                 efiSupport =
-                  if format == "qcow" && pkgs.stdenv.system != "x86_64-linux"
+                  if pkgs.stdenv.system != "x86_64-linux"
                   then lib.mkDefault true
                   else lib.mkDefault false;
                 efiInstallAsRemovable =
-                  if format == "qcow" && pkgs.stdenv.system != "x86_64-linux"
+                  if pkgs.stdenv.system != "x86_64-linux"
                   then lib.mkDefault true
                   else lib.mkDefault false;
               };
@@ -133,12 +133,6 @@
           (nixpkgs.lib.nameValuePair "vm-${system}-raw" (mkSwitchableVmSystem { inherit system; format = "raw"; }))
         ]
       ) linuxSystems));
-      /*
-      Keep the generated image modules separate from the switchable NixOS
-      configurations. nixos-generators' format modules also define image output
-      options; the switchable configs only need the matching runtime disk/boot
-      assumptions.
-      */
     in
     {
       devShells = forAllSystems devShell;
@@ -213,10 +207,16 @@
 
       images = nixpkgs.lib.genAttrs linuxSystems (system:
         let
-          generate = format: nixos-generators.nixosGenerate {
+          generate = format:
+            let
+              imageFormat =
+                if format == "raw" && system != "x86_64-linux"
+                then "raw-efi"
+                else format;
+            in nixos-generators.nixosGenerate {
             inherit system;
             specialArgs = inputs // { inherit userInfo; };
-            modules = (mkVmModules system) ++ nixpkgs.lib.optionals
+            modules = (mkSwitchableVmModules system format) ++ nixpkgs.lib.optionals
               (format == "qcow" || format == "raw")
               [
                 (mkVmImageMarkerModule format)
@@ -225,7 +225,7 @@
                 # (Images are sparse, so the on-disk cost tracks actual usage.)
                 { virtualisation.diskSize = 12288; }
               ];
-            inherit format;
+            format = imageFormat;
           };
         in {
           lxc = generate "lxc";

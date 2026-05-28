@@ -378,8 +378,11 @@ nix build .#images.aarch64-linux.qcow
 
 The resulting image will be written to `./result`.
 
-These images use a minimal NixOS configuration with SSH (key-only auth), Fish
-shell, and CLI development tools — no GUI, no desktop services.
+Note that these images use a minimal NixOS configuration with SSH (key-only
+auth), Fish shell, and CLI development tools (and explicitly no GUI or desktop
+services). Images are [voom](https://github.com/mjrusso/voom)-compatible
+(`cloud-init` with a `NoCloud` datasource for bootstrap metadata; runtime
+coordination via the `voom-control` virtiofs share mounted at `/run/voom`).
 
 #### Running VM Images
 
@@ -388,7 +391,8 @@ Additional tooling is provided that makes it easy to build and run VM images:
 - [`bake-golden`](./scripts/bake-golden) builds an `.#images.<system>.<format>`
   virtual machine output and copies it to `$VMS_DIR` (default `~/vms`) as
   `golden-<system>.<ext>`, with a per-image `.meta.json` sidecar that records
-  relevant image metadata.
+  relevant image metadata, including guest capabilities for runtime
+  coordination over the `voom-control` share.
 - [`vm`](./scripts/vm) orchestrates the VM lifecycle (start, stop, SSH,
   deletion, etc.), reading the appropriate pre-baked golden image and its
   sidecar from `$VMS_DIR` as necessary.

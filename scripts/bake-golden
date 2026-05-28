@@ -5,11 +5,8 @@ usage() {
   cat <<'USAGE'
 Usage: bake-golden [--system SYSTEM] [--format FORMAT] [--output-dir DIR]
 
-Builds the flake's `.#images.<system>.<format>` output and installs it
-under $VMS_DIR (default ~/vms) as a "golden" image with a per-image
-`.meta.json` sidecar (user, bake timestamp, flake revision). The `vm`
-command picks golden images from that directory based on the host
-architecture and VMM, with no further knowledge of this repo.
+Builds the flake's `.#images.<system>.<format>` output and installs it under
+$VMS_DIR (default ~/vms) as a "golden" image with a per-image sidecar.
 
 Options:
   --system SYSTEM     One of: x86_64-linux, aarch64-linux.
@@ -120,7 +117,20 @@ jq -n \
   --arg flake_rev "$FLAKE_REV" \
   --arg system "$SYSTEM" \
   --arg format "$OUT_EXT" \
-  '{user: $user, baked_at: $baked_at, flake_rev: $flake_rev, system: $system, format: $format}' \
+  '{
+    user: $user,
+    baked_at: $baked_at,
+    flake_rev: $flake_rev,
+    system: $system,
+    format: $format,
+    capabilities: {
+      metadataDisk: false,
+      controlShare: true,
+      guestPortReport: true,
+      guestShareMount: true,
+      nixosSwitch: true
+    }
+  }' \
   > "$META.partial"
 mv "$META.partial" "$META"
 
