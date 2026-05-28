@@ -9,4 +9,5 @@ shared-packages ++ [
   docker-compose
   kitty
   vfkit
+  voom
 ]

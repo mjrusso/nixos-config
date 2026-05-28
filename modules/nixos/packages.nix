@@ -12,6 +12,7 @@ shared-packages ++ [
   docker
   docker-compose
   qemu
+  voom
 
   openssh
 

@@ -155,17 +155,9 @@ with pkgs; [
 
   # gvproxy provides user-mode networking for VMs: host-side unix sockets for
   # qemu/vfkit and an HTTP forwarder API that is reachable from both the host
-  # and guest. (Invoked by the `vm` script below via VM_GVPROXY.)
+  # and guest.
   gvproxy
   nixos-rebuild
-
-  # Custom virtual machine management script
-  (pkgs.writeShellScriptBin "vm" ''
-    export VM_GVPROXY=${pkgs.gvproxy}/bin/gvproxy
-    ${pkgs.lib.optionalString pkgs.stdenv.isLinux "export VM_VIRTIOFSD=${pkgs.virtiofsd}/bin/virtiofsd"}
-    ${pkgs.lib.optionalString pkgs.stdenv.isLinux "export VM_QEMU_AARCH64_UEFI=${pkgs.qemu}/share/qemu/edk2-aarch64-code.fd"}
-    exec ${pkgs.bash}/bin/bash ${../../scripts/vm} "$@"
-  '')
 
   # Post-install bootstrap script to perform additional imperative setup.
   (pkgs.writeShellScriptBin "home-bootstrap" ''

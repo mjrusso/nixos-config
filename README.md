@@ -393,11 +393,11 @@ Additional tooling is provided that makes it easy to build and run VM images:
   `golden-<system>.<ext>`, with a per-image `.meta.json` sidecar that records
   relevant image metadata, including guest capabilities for runtime
   coordination over the `voom-control` share.
-- [`vm`](./scripts/vm) orchestrates the VM lifecycle (start, stop, SSH,
-  deletion, etc.), reading the appropriate pre-baked golden image and its
-  sidecar from `$VMS_DIR` as necessary.
 
-To start, from the root of this repository, bake (produce) a golden image:
+- [`voom`](https://github.com/mjrusso/voom) orchestrates the VM lifecycle
+  (start, stop, SSH, deletion, etc.);
+
+From the root of this repository, bake (produce) a golden image:
 
 ``` bash
 ./scripts/bake-golden    # (flags: --system x86_64-linux|aarch64-linux, --format qcow|raw)
@@ -432,166 +432,9 @@ To start, from the root of this repository, bake (produce) a golden image:
 > [`hosts/nixos/default.nix`](./hosts/nixos/default.nix) sets
 > `boot.binfmt.emulatedSystems = [ "aarch64-linux" ]`.
 
-Then, to run and manage virtual machines:
-
-``` bash
-vm start scratch       # start a VM named "scratch"
-vm start emacs-test    # start another VM
-vm list                # show state
-vm ssh scratch         # SSH in
-vm switch scratch      # apply this repo's current VM config (only supported on Linux hosts)
-vm console scratch     # stream the serial log (live boot output)
-vm info scratch        # reprint connection details (ssh/ports/console)
-vm restart scratch     # graceful stop, then start again
-vm grow scratch        # add 10G to the VM disk (VM must be stopped)
-vm grow scratch 25G    # add a specific amount
-vm wipe scratch        # remove disk/boot state, preserving name and SSH port
-vm share scratch <...> # declare a host-directory share
-vm shares scratch      # list declared host-directory shares
-vm unshare scratch src # remove a declared host-directory share
-vm stop scratch        # graceful shutdown, preserving disk/state
-vm destroy scratch     # delete VM and all its state
-```
-
-Aliases:
-
-| Alias  | Equivalent |
-|--------|------------|
-| `up`   | `start`    |
-| `halt` | `stop`     |
-| `rm`   | `destroy`  |
-| `ls`   | `list`     |
-
-`vm start` launches the VM and returns after the hypervisor process starts. It
-does not wait for SSH to become reachable; use `vm console <name>` to watch
-boot output and `vm ssh <name>` to connect when the guest is ready.
-
-`vm grow <name> [amount]` increases an existing VM disk by a positive amount
-(`10G` by default). The VM must be stopped. Amounts accept suffixes like `G`,
-`GB`, `GiB`, and `T`; a bare number is treated as GiB. On the next boot, the
-VM's NixOS config grows the partition and filesystem to use the additional
-space.
-
-`vm wipe <name>` stops the VM and removes its disk/boot state (`disk.*`,
-`efi-vars.fd`, `metadata.raw`, and `meta.json`) while preserving its state
-directory and allocated SSH port. The next `vm start <name>` recreates the disk
-from the current golden image.
-
-Use `vm destroy <name>` instead when you want to remove the entire VM state
-directory, including its persisted SSH port.
-
-`vm switch <name>` is supported exclusively on Linux hosts. This command builds
-the NixOS configuration locally, copies the closure to the running guest over
-SSH, and activates it with `nixos-rebuild switch`. On Darwin hosts, rebuild the
-golden image and refresh the VM with `vm wipe <name>; vm start <name>`, or
-update manually from inside the guest.
-
-> [!TIP]
->
-> To update manually from inside the guest, SSH into the VM, clone or update
-> this repository at `~/nixos-config`, and run `build-switch`:
->
-> ``` bash
-> vm ssh scratch
-> git clone https://github.com/mjrusso/nixos-config.git ~/nixos-config
-> cd ~/nixos-config
-> sudo nix run .#build-switch
-> ```
->
-> _(Inside a VM guest, `build-switch` detects the VM image and selects the matching
-> `vm-<system>-<format>` NixOS configuration automatically.)_
-
-The `vm` command drives two back-ends: qemu + KVM on Linux hosts, and
-[vfkit](https://github.com/crc-org/vfkit) (Apple's `Virtualization.framework`)
-on Darwin hosts. However, networking is unified via a per-VM
-[gvproxy](https://github.com/containers/gvisor-tap-vsock) process. The VM host
-always reaches each guest through `localhost:<allocated-port>` (the SSH port is
-auto-allocated from 2222–2299 and persisted per VM). SSH binds all interfaces,
-so other hosts on your LAN can reach the VM at `<vm-host>:<allocated-port>`
-too. Additional service ports are forwarded through gvproxy on demand; see
-**Publishing ports** below.
-
-Additional notes:
-
-- The host architecture must match the image architecture in both cases, as
-  cross-arch TCG emulation isn't wired up.
-- `vm list` shows the effective SSH endpoint in the `SSH` column.
-- `bake-golden` defaults to `qcow` on Linux and `raw` on Darwin; the `vm`
-  script picks the matching disk extension automatically.
-- `vm` is available on the `PATH`, so you can run it from anywhere.
-- Per-VM state (disk, port, pidfile, serial log, gvproxy sockets) lives under
-  `$VMS_DIR/<name>/`.
-
-##### Publishing ports
-
-By default each VM is reachable on its SSH port, with no other ports published.
-To publish additional ports (web servers, databases, whatever else is listening
-inside the guest), use the `vm publish` / `vm unpublish` / `vm ports`
-subcommands, which manage forwards on a running VM (via gvproxy's HTTP API)
-without restarting it:
-
-``` bash
-vm publish scratch 8080                   # 0.0.0.0:8080 on the host → guest:8080
-vm publish scratch 5432 15432             # remap: host 15432 → guest 5432
-vm publish scratch 3000 --bind 127.0.0.1  # loopback-only on the host
-vm publish scratch 8080 --auto            # pick a free host port; prints it on stdout
-vm ports scratch                          # list all active forwards
-vm unpublish scratch 8080                 # remove the forward
-```
-
-Note that `--auto` picks a port in the range 30000–60000 and prints just the
-port number on stdout, so `port=$(vm publish scratch 8080 --auto)` works for
-scripting purposes.
-
-Forwards are identified by their full `<bind>:<host-port>` tuple, so
-`vm unpublish` must be given the same `--bind` that was used at publish time
-(e.g., `vm unpublish scratch 3000 --bind 127.0.0.1` to undo the loopback
-forward above). `vm ports <name>` prints the exact local addresses, which
-can be copy-pasted back into `vm unpublish`.
-
-Forwards are only managed from the host. The gvproxy forwarder API is exposed
-on a unix socket under `$VMS_DIR/<name>/network.sock` (host-side only); there
-is no built-in path for processes inside the guest to register their own
-forwards.
-
-##### Sharing host directories
-
-Host directories can be shared into a VM with virtiofs:
-
-``` bash
-vm share scratch src ~/src /mnt/host/src
-vm share scratch repo ~/git/nixos-config /work/nixos-config --readonly
-vm shares scratch
-vm unshare scratch src
-```
-
-The `<tag>` is the virtiofs mount tag: a short device name exposed to the
-guest. It is not a path. For example, `vm share scratch repo ~/repo /work/repo`
-attaches a virtiofs device named `repo`, which the guest mounts as
-`mount -t virtiofs repo /work/repo`. The same tag is also the handle used by
-`vm unshare`.
-
-Shares are persisted per VM under `$VMS_DIR/<name>/shares.json`. Virtiofs
-devices are attached when the VM starts, so adding or removing a share while
-the VM is running requires `vm restart <name>` before the change takes effect.
-Tags may contain letters, numbers, `.`, `_`, and `-`; host paths must be
-directories and cannot contain commas, tabs, or newlines.
-`vm start` still returns after the hypervisor launches; if shares are declared,
-it also starts a background helper that waits for guest SSH and mounts the
-shares inside the guest. The mount may appear a few seconds after `vm start`
-returns. The helper log is written to `$VMS_DIR/<name>/share-mount.log`. Once a
-share has been attached, the guest can also mount and unmount that virtiofs tag
-manually at runtime.
-
-`vm wipe <name>` preserves share declarations along with the VM name and SSH
-port. `vm destroy <name>` removes them because it deletes the full VM state
-directory.
-
-Read-only shares are exported read-only by `virtiofsd` on Linux/QEMU hosts and
-mounted read-only in the guest on all hosts. On Darwin/vfkit hosts, the current
-launcher does not pass a host-side read-only flag because vfkit's documented
-`virtio-fs` device syntax exposes `sharedDir` and `mountTag`; guest-side
-read-only mounting still applies.
+Then, to run and manage virtual machines that use this base image, use the
+[Voom](https://github.com/mjrusso/voom) CLI (installed automatically via this
+Flake).
 
 ### Additional Setup
 

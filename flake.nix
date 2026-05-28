@@ -27,13 +27,19 @@
       url = "github:mjrusso/emacs-flake";
     };
 
+    voom = {
+      # For local development, use `path:../voom` (assuming a sibling checkout).
+      url = "github:mjrusso/voom";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     nixos-generators = {
       url = "github:nix-community/nixos-generators";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, nixos-generators } @inputs:
+  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, voom, nixos-generators } @inputs:
     let
       userInfo = import ./user-info.nix;
       hostInfo = import ./host-info.nix;

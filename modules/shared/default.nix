@@ -1,4 +1,4 @@
-{ config, osConfig, pkgs, emacs-flake, ... }:
+{ config, osConfig, pkgs, emacs-flake, voom, ... }:
 
 {
 
@@ -14,6 +14,7 @@
       [
         (final: prev: {
           my-emacs-with-packages = emacs-flake.packages.${prev.stdenv.hostPlatform.system}.default;
+          voom = voom.packages.${prev.stdenv.hostPlatform.system}.default;
         })
       ] ++
       # Apply each overlay found in the /overlays directory

@@ -13,4 +13,5 @@ shared-packages ++ [
   krunvm # Create microVMs from OCI images: https://github.com/containers/krunvm
   buildah # OCI image build tool: https://github.com/containers/buildah
   qemu
+  voom
 ]

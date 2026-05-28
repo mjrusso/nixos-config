@@ -24,7 +24,7 @@ log_manual_secret_setup() {
 [home-bootstrap]     1Password on the host:
 [home-bootstrap]
 [home-bootstrap]       op read "op://Private/github-vm-pat-xxx/credential" \
-[home-bootstrap]         | vm ssh <name> 'gh auth login --with-token'
+[home-bootstrap]         | voom ssh <name> 'gh auth login --with-token'
 [home-bootstrap]
 [home-bootstrap]     Adjust the op:// reference to match the vault and item names. This requires
 [home-bootstrap]     the 1Password CLI and the 1Password desktop app with CLI integration enabled.
