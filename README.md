@@ -533,15 +533,15 @@ architecture. In one of this repo's VM guests, it selects the matching
 equivalents are:
 
 ``` bash
-sudo nixos-rebuild build --flake .#x86_64-linux
-sudo nixos-rebuild switch --flake .#x86_64-linux
+nixos-rebuild build --flake .#x86_64-linux
+nixos-rebuild switch --sudo --flake .#x86_64-linux
 ```
 
 Inside an x86_64 qcow VM guest, the direct equivalents are:
 
 ``` bash
-sudo nixos-rebuild build --flake .#vm-x86_64-linux-qcow
-sudo nixos-rebuild switch --flake .#vm-x86_64-linux-qcow
+nixos-rebuild build --flake .#vm-x86_64-linux-qcow
+nixos-rebuild switch --sudo --flake .#vm-x86_64-linux-qcow
 ```
 
 On non-NixOS Linux, the dispatcher calls standalone `home-manager` instead:
