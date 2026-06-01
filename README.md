@@ -403,7 +403,8 @@ From the root of this repository, bake (produce) a golden image:
 ./scripts/bake-golden    # (flags: --system x86_64-linux|aarch64-linux, --format qcow|raw)
 ```
 
-Then import the image, and create/start the VM using Voom:
+Then import the image, and create/start the VM using Voom, and run the
+[`home-bootstrap`](./scripts/home-bootstrap) script:
 
 ``` bash
 voom image import golden ~/vms/golden-x86_64-linux.qcow2 --meta ~/vms/golden-x86_64-linux.qcow2.meta.json
@@ -411,6 +412,8 @@ voom image import golden ~/vms/golden-x86_64-linux.qcow2 --meta ~/vms/golden-x86
 voom create my-vm --image golden
 
 voom start my-vm
+
+voom ssh my-vm -- home-bootstrap
 ```
 
 _(In this example, the image is named `golden`, and the VM is named `my-vm`; both names are arbitrary)._
