@@ -97,6 +97,22 @@ let
       ${pkgs.util-linux}/bin/mount -t virtiofs "''${opts[@]}" "$tag" "$guest_path"
     done
   '';
+  voomSetHostname = pkgs.writeShellScript "voom-set-hostname" ''
+    set -euo pipefail
+
+    metadata_file="''${VOOM_METADATA_FILE:-/run/voom/metadata.json}"
+    [ -f "$metadata_file" ] || exit 0
+
+    hostname="$(${pkgs.jq}/bin/jq -er '.hostname | strings | select(length > 0 and length <= 63)' "$metadata_file")"
+    case "$hostname" in
+      *[^a-zA-Z0-9_-]*|-*|_*|*-|*_)
+        echo "Invalid voom hostname: $hostname" >&2
+        exit 1
+        ;;
+    esac
+
+    ${pkgs.inetutils}/bin/hostname "$hostname"
+  '';
 in
 {
   imports = [
@@ -164,6 +180,19 @@ in
     serviceConfig = {
       Type = "oneshot";
       ExecStart = voomMountShares;
+      RemainAfterExit = true;
+    };
+  };
+
+  systemd.services.voom-set-hostname = {
+    description = "Set hostname from voom metadata";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "run-voom.mount" ];
+    after = [ "run-voom.mount" ];
+    before = [ "sshd.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = voomSetHostname;
       RemainAfterExit = true;
     };
   };
