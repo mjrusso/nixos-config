@@ -380,7 +380,8 @@ The resulting image will be written to `./result`.
 
 Note that these images use a minimal NixOS configuration with SSH (key-only
 auth), Fish shell, and CLI development tools (and explicitly no GUI or desktop
-services). Images are [voom](https://github.com/mjrusso/voom)-compatible
+services). Disk-backed VM images (`qcow` and `raw`) also enable Docker and add
+the configured user to the `docker` group. Images are [voom](https://github.com/mjrusso/voom)-compatible
 (`cloud-init` with a `NoCloud` datasource for bootstrap metadata; runtime
 coordination via the `voom-control` virtiofs share mounted at `/run/voom`).
 

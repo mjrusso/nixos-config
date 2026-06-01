@@ -90,7 +90,14 @@
         environment.etc."mjr-vm-guest".text = "1\n";
         environment.etc."mjr-vm-image-format".text = "${format}\n";
       };
-      mkSwitchableVmModules = system: format: (mkVmModules system) ++ [
+      mkSwitchableVmModules = system: format: (mkVmModules system) ++ nixpkgs.lib.optionals
+        (format == "qcow" || format == "raw")
+        [
+          {
+            virtualisation.docker.enable = true;
+            users.users.${user}.extraGroups = [ "docker" ];
+          }
+        ] ++ [
         (mkVmImageMarkerModule format)
         ({ lib, modulesPath, pkgs, ... }: {
           imports = lib.optionals (format == "qcow") [
