@@ -381,7 +381,9 @@ The resulting image will be written to `./result`.
 Note that these images use a minimal NixOS configuration with SSH (key-only
 auth), Fish shell, and CLI development tools (and explicitly no GUI or desktop
 services). Disk-backed VM images (`qcow` and `raw`) also enable Docker and add
-the configured user to the `docker` group. Images are [voom](https://github.com/mjrusso/voom)-compatible
+the configured user to the `docker` group. VM guests grant passwordless sudo to
+`wheel` so `voom nixos switch` can activate configurations through the normal
+user. Images are [voom](https://github.com/mjrusso/voom)-compatible
 (`cloud-init` with a `NoCloud` datasource for bootstrap metadata; runtime
 coordination via the `voom-control` virtiofs share mounted at `/run/voom`).
 
@@ -417,7 +419,23 @@ voom start my-vm
 voom ssh my-vm -- home-bootstrap
 ```
 
-_(In this example, the image is named `golden`, and the VM is named `my-vm`; both names are arbitrary)._
+_(In this example, the image is named `golden`, and the VM is named `my-vm`;
+both names are arbitrary)._
+
+Later, to rebuild and switch an existing VM in place after changing this flake,
+run:
+
+``` bash
+voom nixos switch my-vm \
+  --flake .#vm-x86_64-linux-qcow \
+  -- --sudo
+```
+
+The flake target must match the VM guest's architecture and image format. In
+normal use the guest architecture matches the host architecture: use
+`vm-x86_64-linux-qcow` for an `x86_64` Linux host running a QEMU `qcow` image,
+or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
+`raw` image.
 
 > [!NOTE]
 >

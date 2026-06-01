@@ -199,6 +199,7 @@ in
 
   nix = {
     settings.allowed-users = [ "${user}" ];
+    settings.trusted-users = [ "@wheel" "${user}" ];
     package = pkgs.nixVersions.latest;
     extraOptions = ''
       experimental-features = nix-command flakes
@@ -233,6 +234,7 @@ in
 
   security.sudo = {
     enable = true;
+    wheelNeedsPassword = false;
     extraRules = [{
       commands = [
        {
