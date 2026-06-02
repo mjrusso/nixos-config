@@ -93,12 +93,13 @@ with pkgs; [
     # Automatically connects to an existing Emacs server process (if running),
     # otherwise starts a new one.
     #
-    # Note: exits with an error if the user is using vterm[0] from within Emacs,
-    # and attempts to run this script (from within vterm).
+    # Note: exits with an error if the user is already inside Emacs and attempts
+    # to run this script from vterm[0] or ghostel[1].
     #
     # [0]: https://github.com/akermu/emacs-libvterm
+    # [1]: https://github.com/dakra/ghostel
 
-    if [[ "$INSIDE_EMACS" = "vterm" ]]; then
+    if [[ "$INSIDE_EMACS" = "vterm" || "$INSIDE_EMACS" = "ghostel" ]]; then
       echo "Refusing to launch Emacs from inside Emacs: Emacsception denied"
       exit 1
     fi
