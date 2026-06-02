@@ -196,6 +196,65 @@
           -V fontsize=10pt
     '';
 
+    # tunnel: open SSH port-forwards to a host in the foreground, with no
+    # remote shell.
+    #
+    # Usage: tunnel <host> <port|local:remote>... [-- <extra ssh args>]
+    #
+    # Each port argument is forwarded local->server. A bare PORT maps
+    # localhost:PORT on both ends; a LOCAL:REMOTE pair remaps (for example,
+    # 9000:5173 sends local port 9000 to the server's port 5173). `localhost`
+    # is resolved on the server.
+    #
+    # Anything after the first `--` is passed straight to ssh:
+    #
+    #   tunnel devbox 5173                      # Vite HMR
+    #   tunnel devbox 5173 6379                 # + redis
+    #   tunnel devbox 9000:5173                 # remap
+    #   tunnel devbox 5173 -- -v -i ~/.ssh/key  # verbose, explicit key
+    #
+    # Runs with -N (no shell) in the foreground; Ctrl-C closes it.
+    tunnel = ''
+      set -l pre
+      set -l extra
+      set -l seen_sep 0
+      for a in $argv
+          if test $seen_sep -eq 0; and test "$a" = "--"
+              set seen_sep 1
+          else if test $seen_sep -eq 1
+              set extra $extra $a
+          else
+              set pre $pre $a
+          end
+      end
+
+      if test (count $pre) -lt 2
+          echo "usage: tunnel <host> <port|local:remote>... [-- <extra ssh args>]"
+          return 1
+      end
+
+      set -l host $pre[1]
+      set -l forwards
+      for spec in $pre[2..-1]
+          set -l parts (string split ':' $spec)
+          if test (count $parts) -eq 1
+              set forwards $forwards -L "$spec:localhost:$spec"
+          else if test (count $parts) -eq 2; and test -n "$parts[1]"; and test -n "$parts[2]"
+              set forwards $forwards -L "$parts[1]:localhost:$parts[2]"
+          else
+              echo "invalid port mapping: $spec"
+              return 1
+          end
+      end
+
+      ssh -N \
+          $extra \
+          -o ServerAliveInterval=30 \
+          -o ExitOnForwardFailure=yes \
+          $forwards \
+          $host
+    '';
+
     # Run an AI coding agent or development tool from numtide/llm-agents.nix.
     #
     # This is intentionally unpinned: the upstream programs update frequently
