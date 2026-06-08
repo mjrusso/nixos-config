@@ -483,6 +483,30 @@ The [`home-bootstrap`](./scripts/home-bootstrap) script performs a limited
 number of imperative steps, mostly for operations that are awkward to implement
 with _home-manager_.
 
+#### SSH Key Passphrase
+
+`~/.ssh/config` is managed by _home-manager_, as per
+[`modules/shared/config/ssh.nix`](./modules/shared/config/ssh.nix). The
+configuration sets `AddKeysToAgent yes`, loading the key into `ssh-agent` on
+first use rather than re-prompting for the passphrase on every connection.
+
+On MacOS, the `UseKeychain yes` option is also set, allowing SSH to read the
+passphrase from the system Keychain automatically. To enable, run the following
+on each host:
+
+``` bash
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+```
+
+On NixOS, `programs.ssh.startAgent` (see
+[`hosts/nixos/default.nix`](./hosts/nixos/default.nix)) runs `ssh-agent` as a
+per-user `systemd` service. The agent starts empty and holds the key for the
+life of the user's `systemd` instance. Expect to enter the passphrase once per
+fresh `ssh-agent` lifetime, usually after the first login that starts the
+user's `systemd` manager; this also applies over SSH. Multiple concurrent
+logins share the same agent. (To instead cache it until reboot, set
+`users.users.<user>.linger = true` so the agent survives between logins.)
+
 #### Fonts
 
 I use [Berkeley Mono](https://berkeleygraphics.com/typefaces/berkeley-mono/),

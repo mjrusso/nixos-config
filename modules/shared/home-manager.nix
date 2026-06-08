@@ -14,6 +14,7 @@ in {
   git = import ./config/git.nix commonArgs;
   jujutsu = import ./config/jujutsu.nix commonArgs;
   npm = import ./config/npm.nix commonArgs;
+  ssh = import ./config/ssh.nix commonArgs;
   zoxide = import ./config/zoxide.nix commonArgs;
   tmux = import ./config/tmux.nix commonArgs;
 }
