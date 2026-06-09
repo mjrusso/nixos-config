@@ -149,7 +149,10 @@ let user = userInfo.user;
     };
 
     # Let's be able to SSH into this machine
-    openssh.enable = true;
+    openssh = {
+      enable = true;
+      settings.AcceptEnv = [ "SYSTEM_APPEARANCE" ];
+    };
 
     # Sync state between machines.
     #

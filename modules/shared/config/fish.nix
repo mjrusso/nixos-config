@@ -1,5 +1,21 @@
 { pkgs, lib, ... }:
 
+let
+  systemAppearanceFish =
+    if pkgs.stdenv.isDarwin then ''
+      if test (defaults read -g AppleInterfaceStyle 2>/dev/null) = Dark
+          set -gx SYSTEM_APPEARANCE dark
+      else
+          set -gx SYSTEM_APPEARANCE light
+      end
+    '' else ''
+      set -gx SYSTEM_APPEARANCE dark
+    '';
+  indentFish = text:
+    lib.concatMapStringsSep "\n" (line: "        ${line}")
+      (lib.splitString "\n" (lib.removeSuffix "\n" text));
+in
+
 {
   enable = true;
 
@@ -63,6 +79,13 @@
     # repository) in ~/.localrc.fish.
     if test -f ~/.localrc.fish
         source ~/.localrc.fish
+    end
+
+    # Export the local system appearance for terminal Emacs, and let SSH pass it
+    # onward. Preserve an existing value so nested SSH sessions keep the
+    # original client's appearance.
+    if test -z "$SYSTEM_APPEARANCE"
+${indentFish systemAppearanceFish}
     end
   '';
 

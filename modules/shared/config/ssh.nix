@@ -16,6 +16,7 @@ in
   matchBlocks."*" = {
     addKeysToAgent = "yes";
     identityFile = "~/.ssh/id_ed25519";
+    sendEnv = [ "SYSTEM_APPEARANCE" ];
 
     # `UseKeychain yes` tells ssh to read the key's passphrase from the MacOS
     # login Keychain. This is an Apple OpenSSH extension, and exclusive to

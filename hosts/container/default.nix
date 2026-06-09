@@ -214,6 +214,7 @@ in
   services.openssh = {
     enable = true;
     settings = {
+      AcceptEnv = [ "SYSTEM_APPEARANCE" ];
       PasswordAuthentication = false;
       KbdInteractiveAuthentication = false;
     };
