@@ -3,7 +3,8 @@
 let
   systemAppearanceFish =
     if pkgs.stdenv.isDarwin then ''
-      if test (defaults read -g AppleInterfaceStyle 2>/dev/null) = Dark
+      set -l apple_interface_style (defaults read -g AppleInterfaceStyle 2>/dev/null)
+      if test "$apple_interface_style" = Dark
           set -gx SYSTEM_APPEARANCE dark
       else
           set -gx SYSTEM_APPEARANCE light
