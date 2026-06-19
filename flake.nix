@@ -33,13 +33,17 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    llm-agents = {
+      url = "github:numtide/llm-agents.nix";
+    };
+
     nixos-generators = {
       url = "github:nix-community/nixos-generators";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, voom, nixos-generators } @inputs:
+  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, voom, llm-agents, nixos-generators } @inputs:
     let
       userInfo = import ./user-info.nix;
       hostInfo = import ./host-info.nix;

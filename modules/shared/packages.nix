@@ -72,6 +72,7 @@ with pkgs; [
   socat
   tree
   tmux
+  herdr
   zoxide
   unrar
   unzip
