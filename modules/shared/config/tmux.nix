@@ -150,6 +150,7 @@
   bind -n C-\| send-keys -l "\u001B[27;5;124~"
   bind -n C-\{ send-keys -l "\u001B[27;5;123~"
   bind -n C-\} send-keys -l "\u001B[27;5;125~"
+  bind -n S-Enter send-keys -l "\u001B[27;2;13~"
   bind -n M-S-Enter send-keys -l "\u001B[27;4;13~"
 '';
 
