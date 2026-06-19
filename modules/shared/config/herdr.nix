@@ -16,7 +16,6 @@
 
     # --- Sessions (tmux session = herdr workspace) ---
     new_workspace = "prefix+shift+c"           # tmux: prefix C (new-session)
-    workspace_picker = "prefix+s"              # tmux: prefix s (choose-tree -s)
     detach = "prefix+d"                        # tmux: prefix d (detach)
 
     # --- Windows (tmux window = herdr tab) ---
