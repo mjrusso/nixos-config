@@ -15,6 +15,36 @@ let
   indentFish = text:
     lib.concatMapStringsSep "\n" (line: "        ${line}")
       (lib.splitString "\n" (lib.removeSuffix "\n" text));
+
+  # Styling for the `md2pdf` fish function defined below, which improve upon
+  # pandoc's defaults.
+  #
+  # NOTE: margins and paragraph justification are baked into pandoc's built-in
+  # `conf` function and override any `set page`/`set par(justify:)` placed
+  # here, so margins are set separately via the metadata file below.
+  md2pdfHeader = pkgs.writeText "md2pdf-header.typ" ''
+    #set text(hyphenate: true)
+    #set par(leading: 0.6em, spacing: 0.9em)
+    #show heading: set text(weight: "bold")
+    #show heading: set block(above: 1.1em, below: 0.55em)
+    #show heading.where(level: 1): set text(size: 1.3em)
+    #show heading.where(level: 2): set text(size: 1.15em)
+    #show heading.where(level: 3): set text(size: 1.05em)
+    #show heading.where(level: 4): set text(size: 1.0em)
+    #show raw: set text(font: "JetBrains Mono", size: 0.9em)
+    #show raw.where(block: true): it => block(
+      fill: luma(245), inset: 8pt, radius: 4pt, width: 100%,
+    )[#it]
+    #show link: set text(fill: rgb("#1a5fb4"))
+  '';
+
+  # Page margins for `md2pdf`. pandoc's typst `margin` variable is a map, so it
+  # can't be set via `-V` on the command line.
+  md2pdfMeta = pkgs.writeText "md2pdf-meta.yaml" ''
+    margin:
+      x: 1.9cm
+      y: 2cm
+  '';
 in
 
 {
@@ -199,7 +229,8 @@ ${indentFish systemAppearanceFish}
     # If the output path is omitted, it's derived from the input (foo.md →
     # foo.pdf). Explicit fonts are passed because pandoc's typst template
     # errors out with "font fallback list must not be empty" when the font
-    # variables are unset.
+    # variables are unset. Layout/spacing tweaks live in the metadata and
+    # header files defined above (see `md2pdfMeta` / `md2pdfHeader`).
     md2pdf = ''
       if test (count $argv) -lt 1
           echo "usage: md2pdf <input.md> [output.pdf]"
@@ -216,8 +247,9 @@ ${indentFish systemAppearanceFish}
           end
       end
       pandoc $input -o $output --pdf-engine=typst \
-          -V mainfont="DejaVu Sans" -V monofont="JetBrains Mono" \
-          -V fontsize=10pt
+          --metadata-file=${md2pdfMeta} \
+          --include-in-header=${md2pdfHeader} \
+          -V mainfont="DejaVu Sans" -V fontsize=8pt
     '';
 
     # tunnel: open SSH port-forwards to a host in the foreground, with no
