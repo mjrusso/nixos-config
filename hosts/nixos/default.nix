@@ -6,6 +6,7 @@ let user = userInfo.user;
   imports = [
     ../../modules/nixos/disk-config.nix
     ../../modules/nixos/tailscale.nix
+    ../../modules/nixos/caddy.nix
     ../../modules/shared
     ../../modules/shared/caches
   ];
@@ -80,6 +81,10 @@ let user = userInfo.user;
       else "00000000";
     hosts = hostInfo.nixosExtraHosts;
     useDHCP = lib.mkDefault true;
+  };
+
+  services.tailnetCaddy = (hostInfo.nixosTailnetCaddy or { }) // {
+    syncUser = user;
   };
 
   # Turn on flag for proprietary software

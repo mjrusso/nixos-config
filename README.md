@@ -470,6 +470,162 @@ Then, to run and manage virtual machines that use this base image, use the
 [Voom](https://github.com/mjrusso/voom) CLI (installed automatically via this
 Flake).
 
+#### Publishing VM Web Apps Over Tailscale
+
+The NixOS host can optionally publish Voom HTTP(S) forwards as HTTPS-only
+Tailscale subdomains, through Caddy. For example:
+
+``` text
+https://<vm>-<guest-port>.voom.example.com
+```
+
+To set this up, create a DNS-only wildcard record in Cloudflare for your Voom
+publishing domain pointing at the Voom host's Tailscale IP. Do not enable
+Cloudflare proxying; the record should resolve directly to the host's Tailscale
+address. (This example uses _example.com_; substitute with a real domain that you
+control and manage DNS for via Cloudflare.)
+
+For a base domain of `voom.example.com`, create this record in the
+`example.com` zone:
+
+``` text
+Type: A
+Name: *.voom
+Content: <tailscale-ip>
+Proxy status: DNS only
+TTL: Auto
+```
+
+Create a Cloudflare token scoped to the relevant domain with `Zone:Zone:Read`
+and `Zone:DNS:Edit` permissions, and store the token on the filesystem. The
+example below uses `/etc/caddy/cloudflare.env`; avoid `/run` (tmpfs, cleared on
+every reboot) unless a secrets manager is wired up to recreate the file on
+boot.
+
+``` bash
+sudo install -D -m 0600 -o root -g root /dev/null /etc/caddy/cloudflare.env
+sudoedit /etc/caddy/cloudflare.env
+```
+
+Use the following format for the `cloudflare.env` file:
+
+``` text
+CLOUDFLARE_API_TOKEN=...
+```
+
+Then update your local `host-info.nix` to enable declarative Caddy publishing:
+
+``` nix
+{
+  nixosTailnetCaddy = {
+    enable = true;
+
+    # Defaults to /etc/caddy/cloudflare.env; set this if you keep the token
+    # elsewhere (e.g. a secrets manager's /run/secrets path).
+    # cloudflareEnvironmentFile = "/run/secrets/caddy-cloudflare.env";
+
+    # The default is [ ":443" ]. This repo's Tailscale module trusts tailscale0,
+    # and this module does not open TCP/443 on non-tailnet interfaces. Set this
+    # to an explicit Tailscale address if socket-level binding is preferred.
+    # listen = [ "<tailscale-ip>:443" ];
+
+    routes.voom = {
+      domain = "voom.example.com";
+    };
+  };
+}
+```
+
+The Caddy config is responsible for the wildcard TLS policy, private listener,
+and fallback 404. The sync script (`voom-caddy-sync`) replaces the dynamic
+route list under the `voom_routes` JSON `@id`. To manually run the sync script:
+
+``` bash
+voom-caddy-sync --dry-run
+voom-caddy-sync
+```
+
+Nix generates one sync command per `nixosTailnetCaddy.routes.<name>` entry.
+Route IDs are derived as `<name>_routes`, so `routes.voom` owns `voom_routes`.
+
+The dynamic route list lives only in Caddy's running config, so anything that
+(re)loads the declarative config, such as a reboot, `systemctl restart caddy`,
+or a `nixos-rebuild` that changes the Caddy config, reseeds it to the empty
+state. The `voom-caddy-sync.service` oneshot re-runs the sync on every such
+event, so routes self-heal across restarts. Run `voom-caddy-sync` by hand only
+when Voom forwards change *without* a Caddy restart (e.g. you start a new VM
+app); the service does not watch Voom at runtime.
+
+The default HTTP probe publishes any forward that returns an HTTP response,
+including non-2xx statuses such as `401`/`403`/`404` (auth-gated apps, or apps
+with no root route). A forward is only skipped if it does not answer within
+`--timeout` (default 1 second) or does not speak HTTP at all. Bump `--timeout`
+for slow-starting apps, or pass `--all-tcp` to publish every installed non-SSH
+TCP forward without probing.
+
+##### Operating and Troubleshooting
+
+Caddy logs to the systemd journal:
+
+``` bash
+systemctl status caddy.service
+journalctl -u caddy.service -b      # this boot
+journalctl -u caddy.service -f      # follow live
+```
+
+On first start (and after editing the route domain) Caddy obtains the wildcard
+certificate via a Cloudflare DNS-01 challenge; watch the journal for
+`certificate obtained successfully`. If the service fails to start with an
+`API token '' appears invalid` error, inspect the environment file:
+
+``` bash
+sudo cat -A /etc/caddy/cloudflare.env
+```
+
+This file must contain exactly `CLOUDFLARE_API_TOKEN=<token>`. Note that
+systemd's `EnvironmentFile` does not strip quotes (`CLOUDFLARE_API_TOKEN="..."`
+passes the quotes through to Caddy), so write the token bare. `cat -A` surfaces
+stray quotes, trailing whitespace, or `^M` (CRLF) line endings. After fixing
+the file, run:
+
+
+``` bash
+sudo systemctl restart caddy.service
+```
+
+Confirm the seeded route target exists before syncing. This command should
+return an empty list (`[]`), until the first successful sync:
+
+``` bash
+curl -s localhost:2019/id/voom_routes/routes | jq
+```
+
+To sync and reach a published app from a machine on the tailnet:
+
+``` bash
+voom-caddy-sync --dry-run    # preview the routes without patching Caddy
+voom-caddy-sync
+curl -v https://<vm>-<guest-port>.voom.example.com/
+```
+
+A `no voom route` 404 served with a *valid* certificate means the request
+matched the wildcard, but the per-app route is not defined. Re-run the sync
+(also run `systemctl status voom-caddy-sync.service`), and check the synced
+routes:
+
+``` bash
+curl -s localhost:2019/id/voom_routes/routes | jq 'length'
+```
+
+If a published host is unreachable from another tailnet machine while working
+locally, the problem is likely client-side routing. Because the published names
+resolve to a Tailscale IP (`100.64.0.0/10`), a VPN or other overlay on the
+client that claims that CGNAT range can hijack the route. (`tailscale ping`
+bypasses the OS routing table, but `curl` will likely fail fast with
+`connection refused`.) Confirm with `route -n get <ip>` (MacOS) or `ip route
+get <ip>` (Linux); if it's a client-side routing issue, disconnect from VPN or
+exclude `100.64.0.0/10` from its routes.
+
 ### Additional Setup
 
 After `nix run .#build-switch` completes on a fresh machine, run
