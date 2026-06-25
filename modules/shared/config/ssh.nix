@@ -7,9 +7,13 @@ in
   enable = true;
   enableDefaultConfig = false;
 
-  # Preserve Colima's generated SSH config, written to ~/.colima/ssh_config
-  # whenever a Colima VM is running. (MacOS only.)
-  includes = lib.optionals isDarwin [
+  includes = [
+    # Scratch file for ad-hoc Host entries, outside this (read-only)
+    # home-manager-managed config. Optional; SSH ignores if absent.
+    "${config.home.homeDirectory}/.ssh/config.local"
+  ] ++ lib.optionals isDarwin [
+    # Colima's generated SSH config, written to ~/.colima/ssh_config whenever a
+    # Colima VM is running. (MacOS only.)
     "${config.home.homeDirectory}/.colima/ssh_config"
   ];
 
