@@ -100,6 +100,7 @@
           {
             virtualisation.docker.enable = true;
             users.users.${user}.extraGroups = [ "docker" ];
+            time.timeZone = "America/New_York";
           }
         ] ++ [
         (mkVmImageMarkerModule format)
