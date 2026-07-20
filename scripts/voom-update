@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: voom-update [--dry-run] [VM...]
+
+Runs `voom nixos switch` against this checkout for each VM.
+
+With no VM names, updates every VM whose image supports `nixos switch`. Stopped
+VMs are skipped.
+
+Options:
+  --dry-run           List what would be switched, without switching.
+  -h, --help          Show this help.
+USAGE
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
+}
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/.." && pwd))"
+
+DRY_RUN=0
+NAMES=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) usage >&2; exit 1 ;;
+    *) NAMES+=("$1") ;;
+  esac
+  shift
+done
+
+require_cmd voom
+require_cmd jq
+
+if [ ! -f "$REPO_ROOT/flake.nix" ]; then
+  echo "No flake.nix in $REPO_ROOT" >&2
+  exit 1
+fi
+
+# Ignore non-NixOS guests.
+if [ ${#NAMES[@]} -eq 0 ]; then
+  while read -r name; do
+    [ -n "$name" ] || continue
+    image="$(voom info "$name" --output json | jq -r '.vm.image.name')"
+    capable="$(voom image inspect "$image" --output json | jq -r '.image.capabilities.nixosSwitch')"
+    if [ "$capable" = true ]; then
+      NAMES+=("$name")
+    else
+      echo "skipping $name: image '$image' does not support nixos switch"
+    fi
+  done < <(voom list --output json | jq -r '.[].name')
+fi
+
+if [ ${#NAMES[@]} -eq 0 ]; then
+  echo "No VMs to update"
+  exit 0
+fi
+
+SWITCHED=()
+SKIPPED=()
+FAILED=()
+
+for name in "${NAMES[@]}"; do
+  # An unknown VM name (typo) fails here rather than being reported as a
+  # stopped VM and silently passing.
+  if ! info="$(voom info "$name" --output json)"; then
+    echo "Cannot inspect $name" >&2
+    FAILED+=("$name")
+    continue
+  fi
+
+  if [ "$(jq -r '.running' <<<"$info")" != true ]; then
+    echo "skipping $name: not running"
+    SKIPPED+=("$name")
+    continue
+  fi
+
+  attr="$(jq -r '.vm.nixos.flakeRef // empty' <<<"$info" | sed 's/^.*#//')"
+  if [ -z "$attr" ]; then
+    arch="$(jq -r '.vm.arch' <<<"$info")"
+    image="$(jq -r '.vm.image.name' <<<"$info")"
+    # Image formats are reported as `qcow2`/`raw`; the flake outputs are named
+    # `vm-<system>-qcow` / `vm-<system>-raw`.
+    format="$(voom image inspect "$image" --output json | jq -r '.image.format')"
+    attr="vm-${arch}-${format/qcow2/qcow}"
+  fi
+
+  echo "==> $name ($REPO_ROOT#$attr)"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    continue
+  fi
+
+  if voom nixos switch "$name" --flake "$REPO_ROOT#$attr" -- --sudo; then
+    SWITCHED+=("$name")
+  else
+    FAILED+=("$name")
+  fi
+done
+
+if [ ${#SWITCHED[@]} -gt 0 ]; then
+  echo "switched: ${SWITCHED[*]}"
+fi
+if [ ${#SKIPPED[@]} -gt 0 ]; then
+  echo "skipped (not running): ${SKIPPED[*]}" >&2
+fi
+if [ ${#FAILED[@]} -gt 0 ]; then
+  echo "failed: ${FAILED[*]}" >&2
+  exit 1
+fi
+
+exit 0

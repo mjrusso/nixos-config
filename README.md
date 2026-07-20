@@ -398,7 +398,10 @@ Additional tooling is provided that makes it easy to build and run VM images:
   coordination over the `voom-control` share.
 
 - [`voom`](https://github.com/mjrusso/voom) orchestrates the VM lifecycle
-  (start, stop, SSH, deletion, etc.);
+  (start, stop, SSH, deletion, etc.).
+
+- [`voom-update`](./scripts/voom-update) rebuilds and switches every running
+  NixOS guest onto this checkout's configuration.
 
 From the root of this repository, bake (produce) a golden image:
 
@@ -436,6 +439,19 @@ normal use the guest architecture matches the host architecture: use
 `vm-x86_64-linux-qcow` for an `x86_64` Linux host running a QEMU `qcow` image,
 or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
 `raw` image.
+
+To rebuild and switch every NixOS VM at once, use
+[`voom-update`](./scripts/voom-update):
+
+``` bash
+./scripts/voom-update              # all NixOS guests; add --dry-run to preview
+./scripts/voom-update my-vm        # or name specific VMs
+```
+
+This script picks the flake target per VM (reusing whatever the guest was last
+switched to, otherwise deriving it from the VM's architecture and image
+format), skips guests whose image doesn't support `nixos switch`, and skips
+(with a warning) VMs that aren't running.
 
 > [!NOTE]
 >
