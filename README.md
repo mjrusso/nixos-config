@@ -561,8 +561,10 @@ voom-caddy-sync --dry-run
 voom-caddy-sync
 ```
 
-Nix generates one sync command per `nixosTailnetCaddy.routes.<name>` entry.
-Route IDs are derived as `<name>_routes`, so `routes.voom` owns `voom_routes`.
+Nix generates one sync command per `nixosTailnetCaddy.routes.<name>` entry,
+named after that route's `syncer` (see [Publishing Docker Apps Over
+Tailscale](#publishing-docker-apps-over-tailscale) for the other kind). Route
+IDs are derived as `<name>_routes`, so `routes.voom` owns `voom_routes`.
 
 The dynamic route list lives only in Caddy's running config, so anything that
 (re)loads the declarative config, such as a reboot, `systemctl restart caddy`,
@@ -641,6 +643,110 @@ bypasses the OS routing table, but `curl` will likely fail fast with
 `connection refused`.) Confirm with `route -n get <ip>` (MacOS) or `ip route
 get <ip>` (Linux); if it's a client-side routing issue, disconnect from VPN or
 exclude `100.64.0.0/10` from its routes.
+
+#### Publishing Docker Apps Over Tailscale
+
+The same Caddy instance can publish local Docker containers as HTTPS-only
+Tailscale subdomains, driven entirely by container labels:
+
+``` text
+https://<caddy.host>.homelab.example.com
+```
+
+_(Unlike the Voom route, a watcher re-syncs on every container start and stop;
+no manual sync step is necessary.)_
+
+This reuses the Cloudflare token and environment file described in [Publishing
+VM Web Apps Over Tailscale](#publishing-vm-web-apps-over-tailscale), with a
+single token covering both routes, provided that both domains live in the same
+zone. This requires a second DNS-only wildcard record; for example, for a base
+domain of `homelab.example.com`:
+
+``` text
+Type: A
+Name: *.lab
+Content: <tailscale-ip>
+Proxy status: DNS only
+TTL: Auto
+```
+
+Next, add a route with `syncer = "docker"` to your local `host-info.nix`:
+
+``` nix
+{
+  nixosTailnetCaddy = {
+    enable = true;
+
+    routes.voom = {
+      domain = "voom.example.com";
+    };
+
+    routes.homelab = {
+      domain = "homelab.example.com";
+      syncer = "docker";
+    };
+  };
+}
+```
+
+`syncer = "voom"` (the default) publishes Voom forwards, `syncer = "docker"`
+publishes Docker containers, and `syncer = "none"` generates no syncer (leaving
+the route empty/available for ad-hoc `PATCH`es).
+
+The Docker/ Compose stack does not need to be aware of the published domain.
+Compose files can live anywhere, with containers opting in with labels:
+
+``` yaml
+services:
+  app1:
+    image: traefik/whoami
+    ports:
+      - "127.0.0.1:8080:80"
+    labels:
+      - caddy.host=app1
+    restart: unless-stopped
+```
+
+| Label            | Description                                                                           |
+|------------------|---------------------------------------------------------------------------------------|
+| `caddy.host`     | Required. Publishes the container at `<value>.<domain>`. Must be a single DNS label.  |
+| `caddy.upstream` | Dial address override. Defaults to the container's lowest `127.0.0.1` published port. |
+
+Publishing is strictly opt-in: containers without a `caddy.host` label are
+never routed. Containers that do not publish a `127.0.0.1` port and don't set
+`caddy.upstream` are also skipped. If `caddy.host` is not a usable DNS label,
+it is skipped with a warning in the journal.
+
+Discovery is daemon-wide (`docker ps --filter label=caddy.host`), not tied to
+any particular Compose project or directory, so apps can be spread across as
+many Compose files as convenient. `caddy.host` values are therefore a
+_host-wide_ namespace: if two containers claim the same name, the sync logs
+which containers collided and which upstream won, then publishes one of them.
+The winner is chosen by ordering on the dial address, so it does not change
+from sync to sync.
+
+This is implemented with two systemd units:
+
+- `docker-caddy-sync-<name>.service` is a oneshot bound to Caddy, re-seeding
+  the routes whenever Caddy starts or restarts (as with Voom, the dynamic route
+  list does not survive a restart).
+- `docker-caddy-sync-<name>-watch.service` follows `docker events` and re-syncs
+  on container start and stop.
+
+##### Operating and Troubleshooting
+
+The sync command is on `PATH`, and can be run manually:
+
+``` bash
+docker-caddy-sync-homelab --dry-run   # preview routes without patching Caddy
+docker-caddy-sync-homelab
+```
+
+``` bash
+systemctl status docker-caddy-sync-homelab.service
+journalctl -u docker-caddy-sync-homelab-watch.service -f
+curl -s localhost:2019/id/homelab_routes/routes | jq
+```
 
 ### Additional Setup
 

@@ -6,9 +6,24 @@ let
   caddyCloudflareHash = "sha256-AWeNtf4Eh1WfdLdleYy53n+IGhm4/YGDwXseiCQjblc=";
 
   routeModule = lib.types.submodule {
-    options.domain = lib.mkOption {
-      type = lib.types.str;
-      description = "Base DNS domain for this private Caddy route set.";
+    options = {
+      domain = lib.mkOption {
+        type = lib.types.str;
+        description = "Base DNS domain for this private Caddy route set.";
+      };
+
+      syncer = lib.mkOption {
+        type = lib.types.enum [ "voom" "docker" "none" ];
+        default = "voom";
+        description = ''
+          Which syncer owns this route's dynamic route list. Exactly one unit
+          may PATCH a given route's subroute, so this also selects which unit is
+          generated: "voom" publishes Voom forwards, "docker" publishes Docker
+          containers labelled `caddy.host`, and "none" generates no syncer,
+          leaving the route empty for ad-hoc PATCHes.
+        '';
+      };
+
     };
   };
 
@@ -295,6 +310,237 @@ let
       '';
     };
 
+  mkDockerSyncPackage = routeName: routeCfg:
+    let
+      commandName = if routeName == "docker" then
+        "docker-caddy-sync"
+      else
+        "docker-caddy-sync-${routeName}";
+    in pkgs.writeShellApplication {
+      name = commandName;
+      runtimeInputs = [
+        pkgs.coreutils
+        pkgs.curl
+        pkgs.jq
+        config.virtualisation.docker.package
+      ];
+      text = ''
+        set -euo pipefail
+
+        usage() {
+          cat <<'EOF'
+        Usage: ${commandName} [options]
+
+        Publish Docker containers labelled `caddy.host` through this Caddy route.
+
+        Container labels:
+          caddy.host=<label>          Required. Publish at <label>.${routeCfg.domain}.
+                                      Must be a single DNS label: the wildcard
+                                      certificate and route match one level only.
+          caddy.upstream=<host:port>  Dial address override. Defaults to the
+                                      container's lowest 127.0.0.1 published port.
+
+        Containers without a caddy.host label are never published.
+
+        Options:
+          --admin URL             Caddy admin API URL (default: http://localhost:2019)
+          --watch                 Keep running, re-syncing on container start/die
+          --dry-run               Print generated routes instead of patching Caddy
+          --help                  Show this help
+        EOF
+        }
+
+        admin_url="http://localhost:2019"
+        route_id=${lib.escapeShellArg (routeId routeName)}
+        domain=${lib.escapeShellArg routeCfg.domain}
+        watch=0
+        dry_run=0
+
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --admin)
+              admin_url="''${2:?missing value for --admin}"
+              shift 2
+              ;;
+            --watch)
+              watch=1
+              shift
+              ;;
+            --dry-run)
+              dry_run=1
+              shift
+              ;;
+            --help|-h)
+              usage
+              exit 0
+              ;;
+            *)
+              echo "unknown argument: $1" >&2
+              usage >&2
+              exit 2
+              ;;
+          esac
+        done
+
+        log() {
+          echo "${commandName}: $*" >&2
+        }
+
+        # Every container labelled caddy.host, as a JSON array. `valid` flags the
+        # hosts usable as a single DNS label; `dial` prefers an explicit
+        # caddy.upstream over the lowest 127.0.0.1 published port.
+        gather() {
+          local ids
+
+          ids="$(docker ps --filter label=caddy.host --format '{{.ID}}')"
+
+          if [[ -z "$ids" ]]; then
+            printf '[]\n'
+            return 0
+          fi
+
+          # shellcheck disable=SC2086
+          docker inspect $ids | jq --arg domain "$domain" '
+            [
+              .[]
+              | (.Config.Labels // {}) as $labels
+              | ((($labels["caddy.host"]) // "") | ascii_downcase) as $sub
+              | select($sub != "")
+              | (
+                  [
+                    (.NetworkSettings.Ports // {})
+                    | to_entries[]
+                    | (.value // [])[]
+                    | select(.HostIp == "127.0.0.1")
+                    | .HostPort
+                  ]
+                  | sort_by(tonumber)
+                  | first
+                ) as $published
+              | (
+                  ($labels["caddy.upstream"])
+                  // (
+                    if $published == null then
+                      null
+                    else
+                      "127.0.0.1:" + $published
+                    end
+                  )
+                ) as $dial
+              | select($dial != null)
+              | {
+                  sub: $sub,
+                  valid: (
+                    ($sub | test("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"))
+                    and (($sub | length) <= 63)
+                  ),
+                  host: ($sub + "." + $domain),
+                  dial: $dial
+                }
+            ]'
+        }
+
+        sync_once() {
+          local all
+          local claimed
+          local containers
+          local routes
+          local status
+          local count
+
+          all="$(gather)"
+
+          while IFS= read -r bad; do
+            [[ -n "$bad" ]] || continue
+            log "skipping container: caddy.host is not a DNS label: $bad"
+          done < <(jq -r '.[] | select(.valid | not) | .sub' <<<"$all")
+
+          claimed="$(jq '[ .[] | select(.valid) ]' <<<"$all")"
+
+          # caddy.host names are host-wide, and multiple containers can
+          # (attempt to) claim the same name. Caddy serves the first matching
+          # route and reverse_proxy never calls the next handler, so a duplicate
+          # would be shadowed with no indication of why. Report the collision
+          # rather than failing the whole sync.
+          while IFS= read -r collision; do
+            log "$collision"
+          done < <(jq -r '
+            group_by(.sub)
+            | map(select(length > 1))[]
+            | "caddy.host=" + .[0].sub + " claimed by " + (length | tostring)
+              + " containers (" + ([ .[].dial ] | sort | join(", ")) + "); publishing "
+              + (sort_by(.dial) | first | .dial)
+          ' <<<"$claimed")
+
+          # Resolve collisions by ordering on the dial address, so the same
+          # container keeps the name on every sync; `docker ps` ordering would
+          # hand it to whichever container was created most recently. The log
+          # line above names the winning upstream, so which one wins is visible.
+          containers="$(jq 'group_by(.sub) | map(sort_by(.dial) | first)' <<<"$claimed")"
+          routes="$(jq '
+            [
+              .[]
+              | {
+                  match: [ { host: [ .host ] } ],
+                  handle: [
+                    { handler: "reverse_proxy", upstreams: [ { dial: .dial } ] }
+                  ]
+                }
+            ]' <<<"$containers")"
+
+          if [[ "$dry_run" -eq 1 ]]; then
+            jq . <<<"$routes"
+            return 0
+          fi
+
+          status="$(curl -sS -o /dev/null -w '%{http_code}' "$admin_url/id/$route_id/routes" || true)"
+          case "$status" in
+            200)
+              ;;
+            404)
+              log "Caddy route target @id=$route_id does not exist"
+              return 1
+              ;;
+            *)
+              log "could not inspect Caddy route target @id=$route_id: HTTP $status"
+              return 1
+              ;;
+          esac
+
+          curl -fsS -X PATCH \
+            -H 'Content-Type: application/json' \
+            --data-binary "$routes" \
+            "$admin_url/id/$route_id/routes" >/dev/null
+
+          count="$(jq 'length' <<<"$routes")"
+          log "synced $count Caddy route(s) from Docker labels"
+        }
+
+        if [[ "$watch" -eq 0 ]]; then
+          sync_once
+          exit 0
+        fi
+
+        sync_once || log "initial sync failed (continuing)"
+        log "watching Docker container events"
+
+        while IFS= read -r _; do
+          # Coalesce bursts: `docker compose up` emits one event per container,
+          # and each sync PATCHes the whole route list anyway.
+          while IFS= read -r -t 1 _; do :; done
+          sync_once || log "sync failed (continuing)"
+        done < <(
+          docker events \
+            --filter type=container \
+            --filter event=start \
+            --filter event=die
+        )
+
+        log "Docker event stream ended"
+        exit 1
+      '';
+    };
+
   # Block until Caddy's admin API is serving, so a sync triggered at Caddy
   # startup does not race the admin endpoint coming up.
   waitForCaddyAdmin = pkgs.writeShellScript "wait-caddy-admin" ''
@@ -309,7 +555,7 @@ let
     done
   '';
 
-  mkSyncUnit = routeName: routeCfg:
+  mkVoomSyncUnit = routeName: routeCfg:
     let
       pkg = mkVoomSyncPackage routeName routeCfg;
       # Voom reads live VM/forward state from the user's runtime dir, but a
@@ -344,6 +590,60 @@ let
         ExecStart = "${runner}";
       };
     };
+
+  # Two units per Docker route: a oneshot that re-seeds on every Caddy start
+  # (Caddy empties the dynamic route list whenever it starts, exactly as for
+  # Voom), and a watcher that keeps the list current between those restarts.
+  mkDockerSyncUnits = routeName: routeCfg:
+    let
+      pkg = mkDockerSyncPackage routeName routeCfg;
+      exe = "${pkg}/bin/${pkg.name}";
+    in [
+      (lib.nameValuePair pkg.name {
+        description = "Re-seed Caddy '${routeName}' routes from Docker labels";
+        after = [ "caddy.service" "docker.service" ];
+        requires = [ "caddy.service" "docker.service" ];
+        wantedBy = [ "caddy.service" ]; # start with Caddy (e.g. at boot)
+        partOf = [ "caddy.service" ]; # and re-run when Caddy restarts
+        serviceConfig = {
+          Type = "oneshot";
+          # partOf only propagates restarts to units that are active, and a
+          # oneshot without this goes inactive as soon as it succeeds.
+          RemainAfterExit = true;
+          User = cfg.syncUser;
+          ExecStartPre = "${waitForCaddyAdmin}";
+          ExecStart = exe;
+        };
+      })
+      (lib.nameValuePair "${pkg.name}-watch" {
+        description =
+          "Re-sync Caddy '${routeName}' routes on Docker container changes";
+        after = [ "${pkg.name}.service" "docker.service" ];
+        wantedBy = [ "multi-user.target" ];
+        # Deliberately neither partOf nor requires docker.service: `docker
+        # events` exits cleanly when the daemon goes away, and the watcher syncs
+        # once before watching, so Restart = always recovers on its own. Docker
+        # here is partOf libvirtd (see hosts/nixos/default.nix), so it restarts
+        # more often than usual; clear the start rate limit so a long Docker
+        # outage cannot make systemd give up on the watcher permanently.
+        unitConfig.StartLimitIntervalSec = 0;
+        serviceConfig = {
+          User = cfg.syncUser;
+          ExecStartPre = "${waitForCaddyAdmin}";
+          ExecStart = "${exe} --watch";
+          Restart = "always";
+          RestartSec = 5;
+        };
+      })
+    ];
+
+  # Each route's subroute is PATCHed by exactly one syncer, so the route set is
+  # partitioned before any unit or package is generated: without this, a Docker
+  # route would also get a Voom syncer that wipes its routes on every restart.
+  voomRoutes = lib.filterAttrs (_: routeCfg: routeCfg.syncer == "voom") cfg.routes;
+
+  dockerRoutes =
+    lib.filterAttrs (_: routeCfg: routeCfg.syncer == "docker") cfg.routes;
 
 in {
   options.services.tailnetCaddy = {
@@ -411,6 +711,11 @@ in {
         message =
           "services.tailnetCaddy uses the default :443 listener, which relies on the firewall to stay tailnet-only; either keep networking.firewall.enable, or set services.tailnetCaddy.listen to an explicit Tailscale address.";
       }
+      {
+        assertion = dockerRoutes == { } || config.virtualisation.docker.enable;
+        message =
+          "services.tailnetCaddy routes with syncer = \"docker\" read container labels from the local Docker daemon; either enable virtualisation.docker, or change the route's syncer.";
+      }
     ];
 
     services.tailscale.enable = true;
@@ -442,11 +747,19 @@ in {
       };
     };
 
-    environment.systemPackages =
-      lib.mapAttrsToList mkVoomSyncPackage cfg.routes;
+    environment.systemPackages = (lib.mapAttrsToList mkVoomSyncPackage voomRoutes)
+      ++ (lib.mapAttrsToList mkDockerSyncPackage dockerRoutes);
 
-    systemd.services =
-      builtins.listToAttrs (lib.mapAttrsToList mkSyncUnit cfg.routes);
+    systemd.services = builtins.listToAttrs
+      ((lib.mapAttrsToList mkVoomSyncUnit voomRoutes)
+        ++ (lib.concatLists (lib.mapAttrsToList mkDockerSyncUnits dockerRoutes)));
+
+    # The Docker syncers run as syncUser rather than root, so they need group
+    # access to the Docker socket. The Caddy admin API is already reachable by
+    # any local user, so this is the only privilege they require.
+    users.users = lib.mkIf (dockerRoutes != { }) {
+      ${cfg.syncUser}.extraGroups = [ "docker" ];
+    };
 
     networking.firewall.interfaces.tailscale0.allowedTCPPorts = [ 443 ];
   };
