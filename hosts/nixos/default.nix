@@ -63,8 +63,10 @@ let user = userInfo.user;
     tmp.useTmpfs = true;
     zfs.requestEncryptionCredentials = true;
     # qemu-user-static via binfmt_misc, so x86_64-linux hosts can build
-    # aarch64-linux derivations. This is a no-op on aarch64-linux hosts.
-    binfmt.emulatedSystems = [ "aarch64-linux" ];
+    # aarch64-linux derivations. Registering the host's own system is an error
+    # (nixpkgs asserts on it), so filter it out for native aarch64-linux hosts.
+    binfmt.emulatedSystems =
+      lib.filter (s: s != pkgs.stdenv.hostPlatform.system) [ "aarch64-linux" ];
   };
 
   # Set your time zone.
