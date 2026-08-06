@@ -400,8 +400,9 @@ Additional tooling is provided that makes it easy to build and run VM images:
 - [`voom`](https://github.com/mjrusso/voom) orchestrates the VM lifecycle
   (start, stop, SSH, deletion, etc.).
 
-- [`voom-update`](./scripts/voom-update) rebuilds and switches every running
-  NixOS guest onto this checkout's configuration.
+- [`voom-update`](./scripts/voom-update) brings every running NixOS guest up to
+  date with this host: the system configuration, [agent skills](#agent-skills),
+  and `~/.emacs.d`.
 
 From the root of this repository, bake (produce) a golden image:
 
@@ -440,8 +441,7 @@ normal use the guest architecture matches the host architecture: use
 or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
 `raw` image.
 
-To rebuild and switch every NixOS VM at once, use
-[`voom-update`](./scripts/voom-update):
+To update every NixOS VM at once, use [`voom-update`](./scripts/voom-update):
 
 ``` bash
 ./scripts/voom-update              # all NixOS guests; add --dry-run to preview
@@ -478,15 +478,12 @@ The `agents` phase exists because [agent skills](#agent-skills) are not part of
 the flake, and VM guests are never Syncthing peers (only physical hosts run the
 service). `agent-skills-link` is installed on a guest only through this flake,
 so a guest still on an older configuration will report `has no
-agent-skills-link: run the nixos phase first`. A guest that cannot be reached
-at all reports `cannot reach <vm> over ssh`, with ssh's own message.
+agent-skills-link: run the nixos phase first`.
 
 > [!NOTE]
 >
 > The `agents` phase is a mirror: it deletes any skill that is in a guest but
-> not on this host. (Install skills on the host, not inside the guest VM.)
-> Under `--dry-run` this phase connects to each guest and itemizes the
-> transfer (including deletions).
+> not on this host. Install skills on a physical host, not inside a VM.
 >
 > The `emacs` phase skips a guest whose `~/.emacs.d` has uncommitted changes,
 > and reports that guest as failed. It pulls from

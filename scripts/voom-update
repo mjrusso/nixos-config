@@ -1,18 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Bring VM guests up to date with this host, in three phases:
+#
+#   nixos    `voom nixos switch` against this checkout
+#   agents   rsync `~/.agents`, then `agent-skills-link` in the guest
+#   emacs    pull the guest's `~/.emacs.d` clone
+
 usage() {
   cat <<'USAGE'
-Usage: voom-update [--dry-run] [VM...]
+Usage: voom-update [--dry-run] [--nixos] [--agents] [--emacs] [VM...]
 
-Runs `voom nixos switch` against this checkout for each VM.
+Updates VM guests from this host.
 
-With no VM names, updates every VM whose image supports `nixos switch`. Stopped
+With no VM names, updates every VM whose image runs this configuration. Stopped
 VMs are skipped.
 
+Phases (with no phase flag, all three run, in this order):
+  --nixos             Rebuild and switch onto this checkout's configuration.
+  --agents            Mirror ~/.agents into the guest and link the skills.
+  --emacs             Update the guest's ~/.emacs.d clone.
+
 Options:
-  --dry-run           List what would be switched, without switching.
+  --dry-run           List what would be done, without doing it. The agents
+                      phase connects to each guest to itemize the transfer,
+                      including the deletions.
   -h, --help          Show this help.
+
+Environment:
+  AGENTS_DIR          Canonical skills root (default: ~/.agents).
+  EMACS_REPO_URL      Emacs configuration repository to clone if missing.
+
+Notes:
+  The agents phase is a mirror: it deletes any skill that is in a guest but not
+  on this host. Install skills on a physical host, not in a VM.
+
+  The emacs phase skips a guest whose ~/.emacs.d has uncommitted changes, and
+  reports that guest as failed. It never discards local work.
 USAGE
 }
 
@@ -23,12 +47,21 @@ require_cmd() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/.." && pwd))"
 
+AGENTS_DIR="${AGENTS_DIR:-$HOME/.agents}"
+EMACS_REPO_URL="${EMACS_REPO_URL:-https://github.com/mjrusso/.emacs.d}"
+
 DRY_RUN=0
 NAMES=()
+DO_NIXOS=0
+DO_AGENTS=0
+DO_EMACS=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
+    --nixos) DO_NIXOS=1 ;;
+    --agents) DO_AGENTS=1 ;;
+    --emacs) DO_EMACS=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) usage >&2; exit 1 ;;
     *) NAMES+=("$1") ;;
@@ -36,15 +69,149 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+if [ "$DO_NIXOS" -eq 0 ] && [ "$DO_AGENTS" -eq 0 ] && [ "$DO_EMACS" -eq 0 ]; then
+  DO_NIXOS=1
+  DO_AGENTS=1
+  DO_EMACS=1
+fi
+
 require_cmd voom
 require_cmd jq
 
-if [ ! -f "$REPO_ROOT/flake.nix" ]; then
+if [ "$DO_NIXOS" -eq 1 ] && [ ! -f "$REPO_ROOT/flake.nix" ]; then
   echo "No flake.nix in $REPO_ROOT" >&2
   exit 1
 fi
 
-# Ignore non-NixOS guests.
+if [ "$DO_AGENTS" -eq 1 ]; then
+  require_cmd rsync
+  if [ ! -d "$AGENTS_DIR" ]; then
+    echo "No agents directory at $AGENTS_DIR" >&2
+    exit 1
+  fi
+fi
+
+SSH_CONFIG="$(mktemp)"
+trap 'rm -f "$SSH_CONFIG"' EXIT
+
+# rsync needs its own ssh invocation, so go through the guest's OpenSSH config
+# rather than `voom ssh`. Write that config to a file: the fd behind a process
+# substitution does not reliably outlive rsync's ssh child. This echoes the
+# host alias the config declares, rather than rebuild the alias here.
+ssh_host_for() {
+  local name="$1" host
+  voom ssh-config "$name" > "$SSH_CONFIG" || return 1
+  host="$(awk '/^[[:space:]]*Host[[:space:]]/ { print $2; exit }' "$SSH_CONFIG")"
+  [ -n "$host" ] || { echo "No Host alias in ssh config for $name" >&2; return 1; }
+  echo "$host"
+}
+
+phase_nixos() {
+  local name="$1" info="$2" attr arch image format field
+
+  # A phase runs as the left side of `||`, which disables errexit for the whole
+  # function body. Every step that feeds the flake target is therefore checked
+  # by hand: an unchecked failure here builds a truncated attribute (say
+  # `vm-x86_64-linux-`) and hands it to `voom nixos switch`, or reports it as a
+  # successful dry run.
+  attr="$(jq -r '.vm.nixos.flakeRef // empty' <<<"$info" | sed 's/^.*#//')" || return 1
+  if [ -z "$attr" ]; then
+    arch="$(jq -r '.vm.arch' <<<"$info")" || return 1
+    image="$(jq -r '.vm.image.name' <<<"$info")" || return 1
+    # Image formats are reported as `qcow2`/`raw`; the flake outputs are named
+    # `vm-<system>-qcow` / `vm-<system>-raw`.
+    format="$(voom image inspect "$image" --output json | jq -r '.image.format')" || return 1
+
+    # jq prints a literal `null` for a missing key, which would otherwise reach
+    # the flake reference as text.
+    for field in "$arch" "$image" "$format"; do
+      if [ -z "$field" ] || [ "$field" = null ]; then
+        echo "cannot derive a flake target for $name" \
+          "(arch='$arch', image='$image', format='$format')" >&2
+        return 1
+      fi
+    done
+
+    attr="vm-${arch}-${format/qcow2/qcow}"
+  fi
+
+  echo "    nixos: $REPO_ROOT#$attr"
+  if [ "$DRY_RUN" -eq 1 ]; then return 0; fi
+
+  voom nixos switch "$name" --flake "$REPO_ROOT#$attr" -- --sudo
+}
+
+phase_agents() {
+  local name="$1" host err
+  local -a rsync_opts=(
+    -az --delete
+    --exclude='.stfolder/'
+    --exclude='.stversions/'
+    --exclude='.stignore'
+    --exclude='.stignore_synced'
+  )
+
+  echo "    agents: $AGENTS_DIR"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    rsync_opts+=(--dry-run --itemize-changes)
+  fi
+
+  if ! err="$(voom ssh "$name" -- true 2>&1 >/dev/null)"; then
+    echo "cannot reach $name over ssh${err:+: $err}" >&2
+    return 1
+  fi
+
+  if ! voom ssh "$name" -- command -v agent-skills-link >/dev/null 2>&1; then
+    echo "$name has no agent-skills-link: run the nixos phase first" >&2
+    return 1
+  fi
+
+  host="$(ssh_host_for "$name")" || return 1
+
+  rsync "${rsync_opts[@]}" -e "ssh -F $SSH_CONFIG" \
+    "$AGENTS_DIR/" "$host:.agents/" || return 1
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    voom ssh "$name" -- agent-skills-link --dry-run
+  else
+    voom ssh "$name" -- agent-skills-link
+  fi
+}
+
+phase_emacs() {
+  local name="$1"
+
+  echo "    emacs: $EMACS_REPO_URL"
+  if [ "$DRY_RUN" -eq 1 ]; then return 0; fi
+
+  voom ssh "$name" -- env EMACS_REPO_URL="$EMACS_REPO_URL" bash -s <<'REMOTE'
+set -euo pipefail
+
+repo="$HOME/.emacs.d"
+
+if [ ! -e "$repo" ]; then
+  git clone "$EMACS_REPO_URL" "$repo"
+  exit 0
+fi
+
+if [ ! -d "$repo/.git" ]; then
+  echo "$repo exists but is not a git repository" >&2
+  exit 1
+fi
+
+# Never discard work that only exists in the guest.
+if [ -n "$(git -C "$repo" status --porcelain)" ]; then
+  echo "skipping $repo: uncommitted changes" >&2
+  exit 1
+fi
+
+git -C "$repo" pull --ff-only
+REMOTE
+}
+
+# Ignore non-NixOS guests. `nixosSwitch` is the proxy for "runs this
+# configuration", and so for guests that have `agent-skills-link` and `git`.
 if [ ${#NAMES[@]} -eq 0 ]; then
   while read -r name; do
     [ -n "$name" ] || continue
@@ -53,7 +220,7 @@ if [ ${#NAMES[@]} -eq 0 ]; then
     if [ "$capable" = true ]; then
       NAMES+=("$name")
     else
-      echo "skipping $name: image '$image' does not support nixos switch"
+      echo "skipping $name: image '$image' does not run this configuration"
     fi
   done < <(voom list --output json | jq -r '.[].name')
 fi
@@ -63,7 +230,7 @@ if [ ${#NAMES[@]} -eq 0 ]; then
   exit 0
 fi
 
-SWITCHED=()
+UPDATED=()
 SKIPPED=()
 FAILED=()
 
@@ -82,30 +249,28 @@ for name in "${NAMES[@]}"; do
     continue
   fi
 
-  attr="$(jq -r '.vm.nixos.flakeRef // empty' <<<"$info" | sed 's/^.*#//')"
-  if [ -z "$attr" ]; then
-    arch="$(jq -r '.vm.arch' <<<"$info")"
-    image="$(jq -r '.vm.image.name' <<<"$info")"
-    # Image formats are reported as `qcow2`/`raw`; the flake outputs are named
-    # `vm-<system>-qcow` / `vm-<system>-raw`.
-    format="$(voom image inspect "$image" --output json | jq -r '.image.format')"
-    attr="vm-${arch}-${format/qcow2/qcow}"
+  echo "==> $name"
+
+  failed_phases=()
+  if [ "$DO_NIXOS" -eq 1 ]; then
+    phase_nixos "$name" "$info" || failed_phases+=("nixos")
+  fi
+  if [ "$DO_AGENTS" -eq 1 ]; then
+    phase_agents "$name" || failed_phases+=("agents")
+  fi
+  if [ "$DO_EMACS" -eq 1 ]; then
+    phase_emacs "$name" || failed_phases+=("emacs")
   fi
 
-  echo "==> $name ($REPO_ROOT#$attr)"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    continue
-  fi
-
-  if voom nixos switch "$name" --flake "$REPO_ROOT#$attr" -- --sudo; then
-    SWITCHED+=("$name")
+  if [ ${#failed_phases[@]} -eq 0 ]; then
+    UPDATED+=("$name")
   else
-    FAILED+=("$name")
+    FAILED+=("$name(${failed_phases[*]})")
   fi
 done
 
-if [ ${#SWITCHED[@]} -gt 0 ]; then
-  echo "switched: ${SWITCHED[*]}"
+if [ ${#UPDATED[@]} -gt 0 ]; then
+  echo "updated: ${UPDATED[*]}"
 fi
 if [ ${#SKIPPED[@]} -gt 0 ]; then
   echo "skipped (not running): ${SKIPPED[*]}" >&2
