@@ -448,10 +448,50 @@ To rebuild and switch every NixOS VM at once, use
 ./scripts/voom-update my-vm        # or name specific VMs
 ```
 
-This script picks the flake target per VM (reusing whatever the guest was last
-switched to, otherwise deriving it from the VM's architecture and image
-format), skips guests whose image doesn't support `nixos switch`, and skips
-(with a warning) VMs that aren't running.
+The script runs three phases:
+
+| Phase      | What it does                                                                        |
+|------------|-------------------------------------------------------------------------------------|
+| `--nixos`  | Rebuilds and switches the guest onto this checkout's configuration.                 |
+| `--agents` | Mirrors `~/.agents` into the guest over rsync, then runs `agent-skills-link` there. |
+| `--emacs`  | Pulls the guest's `~/.emacs.d` clone (cloning it first if missing).                 |
+
+With no phase flag, all three run. Name one or more to run only the specified
+phase(s):
+
+``` bash
+./scripts/voom-update --agents            # skills only, every guest
+./scripts/voom-update --agents my-vm      # skills only, one guest
+./scripts/voom-update --nixos --emacs     # skip the skills mirror
+```
+
+Every phase selects VMs the same way: the script ignores guests whose image
+doesn't support `nixos switch`, and skips guests that aren't running (with a
+warning). The `nixos` phase picks the flake target per VM. It reuses whatever
+the guest was last switched to, and otherwise derives the target from the VM's
+architecture and image format.
+
+Phases are independent: a failure in one doesn't stop the others, and the
+summary names both the VM and the phases that failed (`failed: my-vm(agents)`).
+
+The `agents` phase exists because [agent skills](#agent-skills) are not part of
+the flake, and VM guests are never Syncthing peers (only physical hosts run the
+service). `agent-skills-link` is installed on a guest only through this flake,
+so a guest still on an older configuration will report `has no
+agent-skills-link: run the nixos phase first`. A guest that cannot be reached
+at all reports `cannot reach <vm> over ssh`, with ssh's own message.
+
+> [!NOTE]
+>
+> The `agents` phase is a mirror: it deletes any skill that is in a guest but
+> not on this host. (Install skills on the host, not inside the guest VM.)
+> Under `--dry-run` this phase connects to each guest and itemizes the
+> transfer (including deletions).
+>
+> The `emacs` phase skips a guest whose `~/.emacs.d` has uncommitted changes,
+> and reports that guest as failed. It pulls from
+> [the repository](https://github.com/mjrusso/.emacs.d), so unpushed work on
+> this host is not pushed to the guests.
 
 > [!NOTE]
 >
@@ -840,6 +880,49 @@ script, or can alternatively be cloned directly:
 ``` bash
 git clone https://github.com/mjrusso/.emacs.d ~/.emacs.d
 ```
+
+#### Agent Skills
+
+Global agent skills live in `~/.agents/skills/`, installed with `npx skills add
+<source> -g`. Each agent has its own skills directory, with one symlink per
+skill:
+
+``` text
+~/.claude/skills/<name>   ->   ~/.agents/skills/<name>
+~/.codex/skills/<name>    ->   ~/.agents/skills/<name>
+```
+
+[Syncthing](#syncthing) syncs `~/.agents/` between physical hosts, so every
+machine gets the same skills. It does not create the symlinks, which live
+outside `~/.agents/` and differ per machine. Create them with
+[`agent-skills-link`](./scripts/agent-skills-link), on every machine, after
+installing a skill:
+
+``` bash
+agent-skills-link --dry-run    # report what would change
+agent-skills-link
+```
+
+The script is idempotent. It removes a symlink only when that symlink points
+into `~/.agents/skills/` and its target is no longer a skill, so
+`~/.codex/skills/.system` and anything else in an agent's directory survives.
+It exits non-zero if a real file or directory blocked a skill from being
+linked.
+
+A skill is any subdirectory of `~/.agents/skills/` that holds a `SKILL.md`.
+
+Skills can be added manually:
+
+``` bash
+mkdir -p ~/.agents/skills/my-skill
+$EDITOR ~/.agents/skills/my-skill/SKILL.md
+agent-skills-link
+```
+
+...or from a git repository via `npx skills add ...`.
+
+To push skills to VM guests, see the `--agents` phase of
+[`voom-update`](#running-vm-images).
 
 ## Usage
 
