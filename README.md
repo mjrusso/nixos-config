@@ -475,10 +475,13 @@ Phases are independent: a failure in one doesn't stop the others, and the
 summary names both the VM and the phases that failed (`failed: my-vm(agents)`).
 
 The `agents` phase exists because [agent skills](#agent-skills) are not part of
-the flake, and VM guests are never Syncthing peers (only physical hosts run the
+the flake, and VM guests are not Syncthing peers (only physical hosts run the
 service). `agent-skills-link` is installed on a guest only through this flake,
 so a guest still on an older configuration will report `has no
 agent-skills-link: run the nixos phase first`.
+
+`voom-update` does not push agent *configuration* (credentials, settings,
+etc.). See [`agent-config-push`](#agent-configuration).
 
 > [!NOTE]
 >
@@ -920,6 +923,43 @@ agent-skills-link
 
 To push skills to VM guests, see the `--agents` phase of
 [`voom-update`](#running-vm-images).
+
+#### Agent Configuration
+
+The [`agent-config-push`](./scripts/agent-config-push) script copies a subset
+of agent-specific configuration to other machines over SSH:
+
+``` bash
+agent-config-push --dry-run --voom myvm                 # report what would change
+agent-config-push --voom myvm --voom myvm2 user@myhost
+```
+
+Each `--voom` flag specifies one Voom-powered VM. Bare arguments are SSH
+destinations. See `agent-config-push --help` for additional details.
+
+| Pushed                                          | Notes                                                 |
+|-------------------------------------------------|-------------------------------------------------------|
+| `.claude/.credentials.json`, `.codex/auth.json` | OAuth tokens, mode `0600`. Pushed unless `--no-auth`. |
+| `.claude/CLAUDE.md`, `.codex/AGENTS.md`         | Global instructions, if present.                      |
+| `.claude/statusline-command.sh`                 | Status line script, if present.                       |
+| `.claude/settings.json`                         | Merged, not copied. Pushed unless `--no-config`.      |
+| `.codex/config.toml`                            | Merged, not copied. Pushed unless `--no-config`.      |
+
+Skills, custom agents, commands, and per-machine state are never pushed.
+
+`settings.json` and `config.toml` are merged, not replaced: only a subset of
+keys are sent.
+
+> [!NOTE]
+>
+> This copies live OAuth tokens; every destination gains full access to those
+> accounts. Push only to machines you control.
+>
+> Tokens are copied, not shared: a refresh on one machine can invalidate
+> another's copy. Re-run the script if a guest reports an expired session.
+>
+> On MacOS, Claude Code keeps credentials in the Keychain, so
+> `.credentials.json` does not exist there. Push from a Linux host.
 
 ## Usage
 

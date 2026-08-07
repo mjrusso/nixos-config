@@ -173,6 +173,12 @@ with pkgs; [
     exec ${pkgs.bash}/bin/bash ${../../scripts/agent-skills-link} "$@"
   '')
 
+  # Pushes coding agent (Claude Code, Codex, etc.) configuration (credentials,
+  # etc.) from this machine to other SSH destinations.
+  (pkgs.writeShellScriptBin "agent-config-push" ''
+    exec ${pkgs.bash}/bin/bash ${../../scripts/agent-config-push} "$@"
+  '')
+
   # `better-git-branch`: Display git branches ordered by last commit,
   # ahead/behind info, and descriptions. With thanks to [0]. Also see: [1].
   #
