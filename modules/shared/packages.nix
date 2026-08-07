@@ -66,6 +66,7 @@ with pkgs; [
   iftop
   jetbrains-mono
   jq
+  yq # Provides `tomlq` (and `xq`, `yq`) binaries
   osc
   ripgrep
   fd
