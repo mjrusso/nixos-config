@@ -334,11 +334,24 @@ let
         Publish Docker containers labelled `caddy.host` through this Caddy route.
 
         Container labels:
-          caddy.host=<label>          Required. Publish at <label>.${routeCfg.domain}.
-                                      Must be a single DNS label: the wildcard
-                                      certificate and route match one level only.
+          caddy.host=<names>          Required. Comma-separated list of names,
+                                      each published at <name>.${routeCfg.domain}.
+                                      Every name must be a single DNS label: the
+                                      wildcard certificate and route match one
+                                      level only.
           caddy.upstream=<host:port>  Dial address override. Defaults to the
                                       container's lowest 127.0.0.1 published port.
+          caddy.csp=<policy>          Content-Security-Policy to set on responses.
+          caddy.csp-paths=<paths>     Comma-separated Caddy path matchers limiting
+                                      where caddy.csp applies (default: everywhere).
+          caddy.paths=<paths>         Comma-separated Caddy path matchers; anything
+                                      outside them gets a 404 (default: serve all).
+          caddy.rewrite-from=<path>   Rewrite this request path to
+          caddy.rewrite-to=<uri>      this upstream URI. Both or neither.
+
+        Any label above except caddy.host may be suffixed with .<name> to apply
+        to one published name only, which is how one container serves different
+        things on each of its names. The suffixed value wins where both are set.
 
         Containers without a caddy.host label are never published.
 
@@ -386,9 +399,10 @@ let
           echo "${commandName}: $*" >&2
         }
 
-        # Every container labelled caddy.host, as a JSON array. `valid` flags the
-        # hosts usable as a single DNS label; `dial` prefers an explicit
-        # caddy.upstream over the lowest 127.0.0.1 published port.
+        # Every name claimed by a container labelled caddy.host, as a JSON array,
+        # one record per name. `valid` flags the names usable as a single DNS
+        # label; `dial` prefers an explicit caddy.upstream over the lowest
+        # 127.0.0.1 published port.
         gather() {
           local ids
 
@@ -401,11 +415,16 @@ let
 
           # shellcheck disable=SC2086
           docker inspect $ids | jq --arg domain "$domain" '
+            def csv: split(",") | map(gsub("[[:space:]]"; "")) | map(select(. != ""));
+
+            def pick($labels; $sub; key):
+              ($labels[key + "." + $sub]) // ($labels[key]) // "";
+
             [
               .[]
               | (.Config.Labels // {}) as $labels
-              | ((($labels["caddy.host"]) // "") | ascii_downcase) as $sub
-              | select($sub != "")
+              | ((($labels["caddy.host"]) // "") | ascii_downcase) as $claimed
+              | select($claimed != "")
               | (
                   [
                     (.NetworkSettings.Ports // {})
@@ -417,17 +436,27 @@ let
                   | sort_by(tonumber)
                   | first
                 ) as $published
+              # Every per-name label must be read below this fan-out; a lookup
+              # hoisted above it silently ignores its .<name> override and
+              # publishes against the container-wide value instead. Note that
+              # `unique` is crucial: without it, caddy.host=a,a reports
+              # a collision against itself.
+              | ($claimed | csv | unique)[] as $sub
+              | (pick($labels; $sub; "caddy.upstream")) as $upstream
               | (
-                  ($labels["caddy.upstream"])
-                  // (
-                    if $published == null then
-                      null
-                    else
-                      "127.0.0.1:" + $published
-                    end
-                  )
+                  # `//` is no use here: pick yields "" when the label is unset,
+                  # and jq counts the empty string as truthy.
+                  if $upstream != "" then
+                    $upstream
+                  elif $published == null then
+                    null
+                  else
+                    "127.0.0.1:" + $published
+                  end
                 ) as $dial
               | select($dial != null)
+              | (pick($labels; $sub; "caddy.rewrite-from")) as $rw_from
+              | (pick($labels; $sub; "caddy.rewrite-to")) as $rw_to
               | {
                   sub: $sub,
                   valid: (
@@ -435,7 +464,16 @@ let
                     and (($sub | length) <= 63)
                   ),
                   host: ($sub + "." + $domain),
-                  dial: $dial
+                  dial: $dial,
+                  csp: pick($labels; $sub; "caddy.csp"),
+                  cspPaths: (pick($labels; $sub; "caddy.csp-paths") | csv),
+                  paths: (pick($labels; $sub; "caddy.paths") | csv),
+                  rewriteFrom: $rw_from,
+                  rewriteTo: $rw_to,
+                  # Reported at sync time: a half-set rewrite would otherwise
+                  # publish the name with its friendly path 404ing and nothing
+                  # to say why.
+                  rewritePartial: (($rw_from == "") != ($rw_to == ""))
                 }
             ]'
         }
@@ -454,6 +492,11 @@ let
             [[ -n "$bad" ]] || continue
             log "skipping container: caddy.host is not a DNS label: $bad"
           done < <(jq -r '.[] | select(.valid | not) | .sub' <<<"$all")
+
+          while IFS= read -r partial; do
+            [[ -n "$partial" ]] || continue
+            log "ignoring rewrite for $partial: needs both caddy.rewrite-from and caddy.rewrite-to"
+          done < <(jq -r '.[] | select(.rewritePartial) | .sub' <<<"$all")
 
           claimed="$(jq '[ .[] | select(.valid) ]' <<<"$all")"
 
@@ -477,14 +520,79 @@ let
           # hand it to whichever container was created most recently. The log
           # line above names the winning upstream, so which one wins is visible.
           containers="$(jq 'group_by(.sub) | map(sort_by(.dial) | first)' <<<"$claimed")"
+          # The caddy.paths gate must come before the rewrite, so that it
+          # matches the URI the client sent.
           routes="$(jq '
             [
               .[]
+              | { handler: "reverse_proxy", upstreams: [ { dial: .dial } ] } as $proxy
+              | (
+                  (
+                    if (.paths | length) == 0 then
+                      [ ]
+                    else
+                      [ {
+                        match: [ { not: [ { path: .paths } ] } ],
+                        handle: [ {
+                          handler: "static_response",
+                          status_code: 404,
+                          body: "not published on this name\n"
+                        } ],
+                        terminal: true
+                      } ]
+                    end
+                  )
+                  + (
+                    if .csp == "" then
+                      [ ]
+                    else
+                      # A route carrying only a headers handler is non-terminal,
+                      # so it sets the policy and falls through to the proxy
+                      # route below. That is what allows caddy.csp-paths to scope
+                      # the policy to some paths and not others.
+                      [ (
+                        {
+                          handle: [ {
+                            handler: "headers",
+                            response: {
+                              # deferred applies the header when the response is
+                              # written, so it wins over one the upstream sets.
+                              set: { "Content-Security-Policy": [ .csp ] },
+                              deferred: true
+                            }
+                          } ]
+                        }
+                        + (
+                          if (.cspPaths | length) == 0 then
+                            { }
+                          else
+                            { match: [ { path: .cspPaths } ] }
+                          end
+                        )
+                      ) ]
+                    end
+                  )
+                  + (
+                    if .rewritePartial or .rewriteFrom == "" then
+                      [ ]
+                    else
+                      [ {
+                        match: [ { path: [ .rewriteFrom ] } ],
+                        handle: [ { handler: "rewrite", uri: .rewriteTo } ]
+                      } ]
+                    end
+                  )
+                  + [ { handle: [ $proxy ] } ]
+                ) as $stages
               | {
                   match: [ { host: [ .host ] } ],
-                  handle: [
-                    { handler: "reverse_proxy", upstreams: [ { dial: .dial } ] }
-                  ]
+                  handle: (
+                    if ($stages | length) == 1 then
+                      [ $proxy ]
+                    else
+                      [ { handler: "subroute", routes: $stages } ]
+                    end
+                  )
                 }
             ]' <<<"$containers")"
 

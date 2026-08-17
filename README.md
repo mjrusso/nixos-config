@@ -747,15 +747,44 @@ services:
     restart: unless-stopped
 ```
 
-| Label            | Description                                                                           |
-|------------------|---------------------------------------------------------------------------------------|
-| `caddy.host`     | Required. Publishes the container at `<value>.<domain>`. Must be a single DNS label.  |
-| `caddy.upstream` | Dial address override. Defaults to the container's lowest `127.0.0.1` published port. |
+| Label                | Description                                                                                                                   |
+|----------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `caddy.host`         | Required. Comma-separated names; publishes the container at `<name>.<domain>` for each. Each name must be a single DNS label. |
+| `caddy.upstream`     | Dial address override. Defaults to the container's lowest `127.0.0.1` published port.                                         |
+| `caddy.csp`          | `Content-Security-Policy` to set on responses.                                                                                |
+| `caddy.csp-paths`    | Comma-separated Caddy path matchers limiting where `caddy.csp` applies. Defaults to every path.                               |
+| `caddy.paths`        | Comma-separated Caddy path matchers; anything outside them gets a 404. Defaults to serving all.                               |
+| `caddy.rewrite-from` | Request path to rewrite. Requires `caddy.rewrite-to`.                                                                         |
+| `caddy.rewrite-to`   | Upstream URI to rewrite it to. Requires `caddy.rewrite-from`.                                                                 |
 
 Publishing is strictly opt-in: containers without a `caddy.host` label are
 never routed. Containers that do not publish a `127.0.0.1` port and don't set
-`caddy.upstream` are also skipped. If `caddy.host` is not a usable DNS label,
-it is skipped with a warning in the journal.
+`caddy.upstream` are also skipped. If a `caddy.host` name is not a usable DNS
+label, that name is skipped with a warning in the journal; the container's other
+names are unaffected. Setting only one half of a rewrite is likewise reported in
+the journal, and the rewrite is dropped.
+
+A container claiming several names is published at each of them, all dialling
+the same upstream. Every label except `caddy.host` may be suffixed with
+`.<name>` to apply to one of those names only, and the suffixed value wins where
+both are set. One app can therefore expose a small surface on one hostname and
+its full interface on another:
+
+``` yaml
+    labels:
+      - caddy.host=app1,app1-admin
+      # Sandbox user-supplied content wherever it is served from...
+      - caddy.csp=sandbox allow-scripts
+      - "caddy.csp-paths=/files/*"
+      # ...but only app1-admin serves anything beyond it.
+      - "caddy.paths.app1=/files/*,/upload"
+      # A friendly path for an upstream endpoint that needs a token in its URI.
+      - caddy.rewrite-from.app1=/upload
+      - caddy.rewrite-to.app1=/api/guest/SOME_TOKEN
+```
+
+Per name, the stages run in this order: the `caddy.paths` gate, then the
+`caddy.csp` header, then the rewrite, then the proxy.
 
 Discovery is daemon-wide (`docker ps --filter label=caddy.host`), not tied to
 any particular Compose project or directory, so apps can be spread across as
