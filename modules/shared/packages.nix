@@ -26,6 +26,7 @@ with pkgs; [
   nodejs_22
   python3
   pipx
+  uv
   rustc
   cargo
   ruby_3_3
