@@ -6,6 +6,8 @@
 # - Reload config:    herdr server reload-config
 {
   text = ''
+    onboarding = false
+
     [terminal]
     default_shell = "fish"
     shell_mode = "auto"
@@ -42,15 +44,55 @@
     swap_pane_up = "prefix+shift+up"
     swap_pane_down = "prefix+shift+down"
 
+    # --- Remote (`herdr --remote`) ---
+    # Under --remote, herdr grabs the raw ctrl+v keystroke whenever the local
+    # clipboard holds an image, stealing C-v (scroll-up) from Emacs and
+    # block-visual from vim. Ghostty's own paste (ctrl+shift+v, cmd+v on MacOS)
+    # still bridges clipboard images over SSH.
+    remote_image_paste = ""
+
+    # --- Custom commands ---
+    # Popups capture all input and herdr has no dismiss key, so only bind
+    # commands that can exit themselves. For Emacs, use `C-x C-c`.
+
+    [[keys.command]]
+    key = "prefix+t"
+    type = "popup"
+    command = "fish -c e" # `e` is a fish function; popup commands run via `sh`.
+    description = "emacs (current project)"
+    width = "90%"
+    height = "90%"
+
+    [[keys.command]]
+    key = "prefix+x"
+    type = "popup"
+    command = "btop"
+    description = "btop (system monitor)"
+    width = "90%"
+    height = "90%"
+
+    [update]
+    # herdr is managed by Nix; `herdr update` can't write to the store.
+    version_check = false
+
     [ui]
     mouse_capture = true
+    pane_scrollbars = false                    # reclaim the column; keeps it out of Ghostty selections
     confirm_close = true
     prompt_new_tab_name = true
     show_agent_labels_on_pane_borders = true
-    agent_panel_scope = "all"
+    hide_tab_bar_when_single_tab = true
+    tab_bar_position = "bottom"
 
     [theme]
     name = "terminal"
+
+    [experimental]
+    # Restore recent pane contents after a full server restart (Nix installs
+    # can't do herdr's live handoff, so every version bump stops the server).
+    # Writes pane output to ~/.config/herdr/session-history.json; treat that
+    # directory like shell history.
+    pane_history = true
 
     [advanced]
     scrollback_limit_bytes = 52428800
