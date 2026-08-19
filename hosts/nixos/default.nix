@@ -62,6 +62,7 @@ let user = userInfo.user;
     kernelModules = [ "uinput" ];
     tmp.useTmpfs = true;
     zfs.requestEncryptionCredentials = true;
+    zfs.forceImportRoot = true;
     # qemu-user-static via binfmt_misc, so x86_64-linux hosts can build
     # aarch64-linux derivations. Registering the host's own system is an error
     # (nixpkgs asserts on it), so filter it out for native aarch64-linux hosts.
