@@ -12,7 +12,7 @@ with pkgs; [
   killall
   fastfetch
   nh # Nix helper; `nh clean all` garbage-collects old generations (see README)
-  nixfmt-classic
+  nixfmt
   rsync
   sqlite
   wget
