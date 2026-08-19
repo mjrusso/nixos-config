@@ -10,7 +10,7 @@ with pkgs; [
   coreutils
   fish
   killall
-  neofetch
+  fastfetch
   nh # Nix helper; `nh clean all` garbage-collects old generations (see README)
   nixfmt-classic
   rsync
