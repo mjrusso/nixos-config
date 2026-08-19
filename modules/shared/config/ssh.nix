@@ -17,19 +17,17 @@ in
     "${config.home.homeDirectory}/.colima/ssh_config"
   ];
 
-  matchBlocks."*" = {
-    addKeysToAgent = "yes";
-    identityFile = "~/.ssh/id_ed25519";
-    sendEnv = [ "SYSTEM_APPEARANCE" ];
-
+  settings."*" = {
+    AddKeysToAgent = "yes";
+    IdentityFile = "~/.ssh/id_ed25519";
+    SendEnv = [ "SYSTEM_APPEARANCE" ];
+  } // lib.optionalAttrs isDarwin {
     # `UseKeychain yes` tells ssh to read the key's passphrase from the MacOS
     # login Keychain. This is an Apple OpenSSH extension, and exclusive to
     # Darwin hosts only.
     #
     # Requires one-time setup per MacOS host: store the passphrase with
     # `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`.
-    extraOptions = lib.optionalAttrs isDarwin {
-      UseKeychain = "yes";
-    };
+    UseKeychain = "yes";
   };
 }
