@@ -40,6 +40,7 @@ in
       name = "Adwaita-dark";
       package = pkgs.adwaita-icon-theme;
     };
+    gtk4.theme = config.gtk.theme;
   };
 
   # Screen lock
