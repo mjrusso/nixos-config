@@ -22,7 +22,8 @@ with pkgs; [
   pyright
 
   # Programming languages
-  nodejs_22
+  #
+  # Note that nodejs is installed via home-manager (`npm.enable = true`).
   beam29Packages.elixir_1_20
   python3
   pipx
