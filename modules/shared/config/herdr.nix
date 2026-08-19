@@ -75,6 +75,9 @@
     # herdr is managed by Nix; `herdr update` can't write to the store.
     version_check = false
 
+    [worktrees]
+    directory = "~/git/worktrees"
+
     [ui]
     mouse_capture = true
     pane_scrollbars = false                    # reclaim the column; keeps it out of Ghostty selections
