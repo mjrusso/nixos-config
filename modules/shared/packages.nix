@@ -22,8 +22,8 @@ with pkgs; [
   pyright
 
   # Programming languages
-  elixir_1_19
   nodejs_22
+  beam29Packages.elixir_1_20
   python3
   pipx
   uv
