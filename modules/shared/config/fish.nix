@@ -2,7 +2,7 @@
 
 let
   systemAppearanceFish =
-    if pkgs.stdenv.isDarwin then ''
+    if pkgs.stdenv.hostPlatform.isDarwin then ''
       set -l apple_interface_style (defaults read -g AppleInterfaceStyle 2>/dev/null)
       if test "$apple_interface_style" = Dark
           set -gx SYSTEM_APPEARANCE dark
@@ -51,7 +51,7 @@ in
   enable = true;
 
   plugins =
-    if pkgs.stdenv.isLinux
+    if pkgs.stdenv.hostPlatform.isLinux
     then
       [
         # Set up the Nix environment for a non-NixOS Fish shell. See:

@@ -154,7 +154,7 @@ with pkgs; [
     # `.emacs-31.0.50-` — so `killall emacs` finds nothing. We fall back to
     # `pkill -f`, which matches the full argv and is stable across rebuilds.
 
-    ${if pkgs.stdenv.isDarwin
+    ${if pkgs.stdenv.hostPlatform.isDarwin
       then "exec killall -9 emacs"
       else "exec pkill -9 -f 'emacs.*daemon'"}
   '')
@@ -251,6 +251,6 @@ with pkgs; [
         fi
     done
   '')
-] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
   pkgs.virtiofsd
 ]
