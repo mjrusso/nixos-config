@@ -35,6 +35,7 @@
     last_pane = "prefix+;"                     # tmux: prefix ; (last-pane -Z)
     zoom = "prefix+z"
     copy_mode = "prefix+["                     # tmux default [
+    edit_scrollback = "prefix+x"
 
     focus_pane_left = "prefix+left"
     focus_pane_down = "prefix+down"
@@ -53,10 +54,11 @@
 
     # --- Custom commands ---
     # Popups capture all input and herdr has no dismiss key, so only bind
-    # commands that can exit themselves. For Emacs, use `C-x C-c`.
+    # commands that can exit themselves: Emacs with `C-x C-c`, a shell with
+    # `exit` or `C-d`, etc.
 
     [[keys.command]]
-    key = "prefix+t"
+    key = "prefix+e"
     type = "popup"
     command = "fish -c e" # `e` is a fish function; popup commands run via `sh`.
     description = "emacs (current project)"
@@ -64,12 +66,12 @@
     height = "90%"
 
     [[keys.command]]
-    key = "prefix+x"
+    key = "prefix+t"
     type = "popup"
-    command = "btop"
-    description = "btop (system monitor)"
-    width = "90%"
-    height = "90%"
+    command = "fish"
+    description = "terminal (fish shell)"
+    width = "60%"
+    height = "70%"
 
     [update]
     # herdr is managed by Nix; `herdr update` can't write to the store.
