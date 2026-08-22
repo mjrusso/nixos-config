@@ -1,4 +1,4 @@
-{ hostInfo, ... }:
+{ hostInfo, userInfo, ... }:
 
 {
   disko.devices = {
@@ -47,7 +47,11 @@
         root = {
           type = "zfs_fs";
           mountpoint = "/";
-          options."com.sun:auto-snapshot" = "true";
+          options = {
+            "com.sun:auto-snapshot" = "true";
+            # Guarantees the host can still write when a guest fills the pool.
+            refreservation = "8G";
+          };
         };
         home = {
           type = "zfs_fs";
@@ -58,6 +62,16 @@
           type = "zfs_fs";
           mountpoint = "/nix";
           options."com.sun:auto-snapshot" = "false";
+        };
+        voom = {
+          type = "zfs_fs";
+          mountpoint = "/home/${userInfo.user}/.local/share/voom";
+          options = {
+            recordsize = "64K";
+            primarycache = "metadata";
+            logbias = "throughput";
+            "com.sun:auto-snapshot" = "false";
+          };
         };
         vms = {
           type = "zfs_fs";
