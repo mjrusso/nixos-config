@@ -1106,8 +1106,9 @@ nix build .#checks.aarch64-darwin.nixos-x86_64-linux
 nix build .#checks.aarch64-darwin.image-x86_64-linux-docker
 ```
 
-These checks work on any platform, by forcing full evaluation of each
-configuration's module system without building the target derivation.
+Each check forces full evaluation of a configuration's module system without
+building the target derivation, so most of them run on any platform. The Darwin
+checks are the exception: they need a Darwin builder.
 
 ## References
 
