@@ -1,7 +1,15 @@
 { config, inputs, pkgs, lib, userInfo, hostInfo, ... }:
 
 let user = userInfo.user;
-    keys = userInfo.sshKeys; in
+    keys = userInfo.sshKeys;
+    backup = {
+      enable = false;
+      target = "";
+      targetUser = user;
+      repositoryPath = "";
+      passwordFile = "/etc/restic/password";
+      identityFile = "/home/${user}/.ssh/id_ed25519";
+    } // (hostInfo.nixosBackup or { }); in
 {
   imports = [
     ../../modules/nixos/disk-config.nix
@@ -23,6 +31,10 @@ let user = userInfo.user;
     {
       assertion = hostInfo.nixosMainDisk != "REPLACE_ME";
       message = "Set hostInfo.nixosMainDisk in host-info.nix to the target drive's stable /dev/disk/by-id path before building the NixOS host.";
+    }
+    {
+      assertion = !backup.enable || (backup.target != "" && backup.repositoryPath != "");
+      message = "Set hostInfo.nixosBackup.target and hostInfo.nixosBackup.repositoryPath in host-info.nix when nixosBackup.enable is true.";
     }
   ];
 
@@ -284,6 +296,44 @@ let user = userInfo.user;
 
     gvfs.enable = true; # Mount, trash, and other functionalities
     tumbler.enable = true; # Thumbnail support for images
+
+    restic.backups = lib.mkIf backup.enable {
+      "${hostInfo.nixosHostname}" = {
+        inherit user;
+        initialize = true;
+        repository =
+          "sftp:${backup.targetUser}@${backup.target}:${backup.repositoryPath}/${hostInfo.nixosHostname}";
+        passwordFile = backup.passwordFile;
+        paths = [ "/home/${user}" ];
+
+        extraOptions = [
+          "sftp.command='ssh ${backup.targetUser}@${backup.target} -i ${backup.identityFile} -s sftp'"
+        ];
+
+        exclude = [
+          "/home/${user}/.local/share/voom"
+          "/home/${user}/vms"
+          "/home/${user}/.cache"
+          "/home/${user}/.npm"
+          "/home/${user}/.emacs.d.bak"
+          "**/node_modules"
+          "**/.direnv"
+          "**/result"
+        ];
+
+        timerConfig = {
+          OnCalendar = "daily";
+          RandomizedDelaySec = "1h";
+          Persistent = true;
+        };
+
+        pruneOpts = [
+          "--keep-daily 7"
+          "--keep-weekly 4"
+          "--keep-monthly 6"
+        ];
+      };
+    };
 
     zfs = {
       autoScrub.enable = true;

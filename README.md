@@ -353,6 +353,109 @@ systemctl status syncthing
 journalctl -u syncthing -b
 ```
 
+#### Backups
+
+Physical NixOS hosts back up the user's home directory (minus some exceptions)
+to a remote target over SFTP using [restic](https://restic.net/). The job is
+defined in [`hosts/nixos/default.nix`](./hosts/nixos/default.nix) and driven by
+the `nixosBackup` block in [`host-info.nix`](./host-info.nix). Container and VM
+images do not enable backups.
+
+``` nix
+nixosBackup = {
+  enable = true;
+  target = "<target>";
+  repositoryPath = "<path-on-target>";
+};
+```
+
+`target` is an SSH destination reachable from this host; add it to
+`nixosExtraHosts` if it has no DNS entry. `repositoryPath` is a directory on
+the target, and the repository is created inside it under a directory named
+after `nixosHostname`, so several hosts can share one target drive without
+colliding.
+
+Additional keys:
+
+| Key            | Default                                        |
+|----------------|------------------------------------------------|
+| `targetUser`   | `user` from [`user-info.nix`](./user-info.nix) |
+| `passwordFile` | `/etc/restic/password`                         |
+| `identityFile` | that user's `~/.ssh/id_ed25519`                |
+
+Setting `enable = false`, or omitting the block, removes the service and its
+timer.
+
+##### Initial Setup
+
+1. Check that this host can reach the target non-interactively, and that the
+   target's SFTP subsystem answers:
+
+   ``` bash
+   ssh -o BatchMode=yes <user>@<target> true && echo "ssh ok"
+   echo quit | sftp -q -o BatchMode=yes <user>@<target>
+   ```
+
+   The timer runs unattended, so the identity must be usable without a
+   prompt. See [SSH Key Passphrase](#ssh-key-passphrase).
+
+2. Create the parent directory on the target. restic creates the repository
+   directory itself, but not missing parents:
+
+   ``` bash
+   ssh <user>@<target> 'mkdir -p <path-on-target>'
+   ```
+
+3. Generate the repository password and install it on this host. _Record it in
+   a password manager._
+
+   ``` bash
+   pw=$(head -c 32 /dev/urandom | base64)
+   printf '%s\n' "$pw"        # copy this into a password manager now
+   sudo install -d -m 0755 /etc/restic
+   printf '%s\n' "$pw" \
+     | sudo install -m 0400 -o <user> /dev/stdin /etc/restic/password
+   unset pw
+   ```
+
+4. Rebuild, then take the first snapshot by hand rather than waiting for the
+   timer. `initialize = true` creates the repository on that first run:
+
+   ``` bash
+   nix run .#build-switch
+   sudo systemctl start restic-backups-<hostname>.service
+   ```
+
+   The first run uploads everything and will take some time; subsequent runs
+   send only what has changed, and will complete more quickly.
+
+##### Operating and Troubleshooting
+
+Useful checks:
+
+``` bash
+systemctl status restic-backups-<hostname>.service
+systemctl list-timers restic-backups-<hostname>.timer
+journalctl -u restic-backups-<hostname>.service -b
+```
+
+Each backup also installs a `restic-<hostname>` wrapper on `PATH` that presets
+the repository, the password file, and the SFTP transport, so restic can be
+run by hand as the backup user without re-supplying any of them:
+
+``` bash
+restic-<hostname> snapshots
+restic-<hostname> stats latest
+restic-<hostname> check
+```
+
+To restore, either into a scratch directory or back over the original paths:
+
+``` bash
+restic-<hostname> restore latest --target /tmp/restore
+restic-<hostname> restore latest --target / --include <path>
+```
+
 ### Container and VM Images
 
 Container and VM images can be built using
