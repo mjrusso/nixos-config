@@ -456,6 +456,31 @@ restic-<hostname> restore latest --target /tmp/restore
 restic-<hostname> restore latest --target / --include <path>
 ```
 
+#### ZFS Layout Drift
+
+[Disko](https://github.com/nix-community/disko) provisions the pool at install
+time only, and contributes no activation scripts or systemd units, so
+`build-switch` cannot reconcile the running pool against
+[`modules/nixos/disk-config.nix`](./modules/nixos/disk-config.nix). If a
+dataset is added or retuned on a live pool (manually via `zfs create`, `zfs
+set`, etc.), there is no automated indication that the two disagree.
+
+> [!NOTE]
+>
+> A dataset declaration generates a `fileSystems` entry, and thus a mount unit.
+> The dataset has to exist *before* switching to a configuration that declares
+> it, or the mount will fail on switch, and again at every boot.
+
+To compare a pool against what has been declared, list the properties that were
+set explicitly rather than inherited:
+
+``` bash
+zfs get -r -s local -o name,property,value all <pool>
+```
+
+Every line should correspond to an entry in `disk-config.nix`, except for
+`nixos:shutdown-time`, which the NixOS ZFS module stamps on the pool.
+
 ### Container and VM Images
 
 Container and VM images can be built using
