@@ -8,7 +8,7 @@ let user = userInfo.user;
       targetUser = user;
       repositoryPath = "";
       passwordFile = "/etc/restic/password";
-      identityFile = "/home/${user}/.ssh/id_ed25519";
+      identityFile = "/home/${user}/.ssh/id_ed25519_restic";
     } // (hostInfo.nixosBackup or { }); in
 {
   imports = [
@@ -307,7 +307,7 @@ let user = userInfo.user;
         paths = [ "/home/${user}" ];
 
         extraOptions = [
-          "sftp.command='ssh ${backup.targetUser}@${backup.target} -i ${backup.identityFile} -s sftp'"
+          "sftp.command='ssh ${backup.targetUser}@${backup.target} -i ${backup.identityFile} -o IdentitiesOnly=yes -s sftp'"
         ];
 
         exclude = [

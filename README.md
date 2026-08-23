@@ -381,23 +381,44 @@ Additional keys:
 |----------------|------------------------------------------------|
 | `targetUser`   | `user` from [`user-info.nix`](./user-info.nix) |
 | `passwordFile` | `/etc/restic/password`                         |
-| `identityFile` | that user's `~/.ssh/id_ed25519`                |
+| `identityFile` | that user's `~/.ssh/id_ed25519_restic`         |
 
 Setting `enable = false`, or omitting the block, removes the service and its
 timer.
 
 ##### Initial Setup
 
-1. Check that this host can reach the target non-interactively, and that the
-   target's SFTP subsystem answers:
+1. Generate a dedicated key for the backup and authorize it on the target. The
+   timer does not have an agent or a terminal, so this key must **not** have a
+   passphrase:
 
    ``` bash
-   ssh -o BatchMode=yes <user>@<target> true && echo "ssh ok"
-   echo quit | sftp -q -o BatchMode=yes <user>@<target>
+   ssh-keygen -t ed25519 -N "" -C "restic (unattended)" \
+     -f ~/.ssh/id_ed25519_restic
    ```
 
-   The timer runs unattended, so the identity must be usable without a
-   prompt. See [SSH Key Passphrase](#ssh-key-passphrase).
+   Authorize the new key by adding the public key to `sshKeys` in
+   [`user-info.nix`](./user-info.nix) and rebuilding the target host. Because
+   the key does not have a passphrase, confine it to sftp access only:
+
+   ``` nix
+   sshKeys = [
+     # ...
+     ''restrict,command="internal-sftp",from="<source>" ssh-ed25519 AAAA...''
+   ];
+   ```
+
+   Note that `sshKeys` authorizes a key on every host built from this
+   repository, not only on the backup target. The key remains sftp-only
+   everywhere, but sftp is not confined to the repository path (i.e., it can
+   read and write anything the user can).
+
+   Verify access from the source to the target:
+
+   ``` bash
+   echo quit | env -u SSH_AUTH_SOCK sftp -q -o BatchMode=yes \
+     -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519_restic <user>@<target>
+   ```
 
 2. Create the parent directory on the target. restic creates the repository
    directory itself, but not missing parents:
