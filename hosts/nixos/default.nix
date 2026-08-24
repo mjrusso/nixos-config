@@ -408,6 +408,7 @@ let user = userInfo.user;
       ];
       shell = pkgs.fish;
       openssh.authorizedKeys.keys = keys;
+      linger = true;
     };
 
     root = {
