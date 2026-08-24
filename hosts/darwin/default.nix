@@ -1,7 +1,13 @@
-{ config, osConfig, pkgs, userInfo, systemType, ... }:
+{ config, osConfig, pkgs, lib, userInfo, systemType, ... }:
 
 let user = userInfo.user;
-    keys = userInfo.sshKeys; in
+    keys = userInfo.sshKeys;
+    # restic pushes to this host, so it cannot be marked read-only (adding the
+    # `-R` flag here would break the backup).
+    resticFrom = let src = userInfo.resticKeySource or ""; in
+      lib.optionalString (src != "") '',from="${src}"'';
+    backupKeys = lib.optional ((userInfo.resticKey or "") != "")
+      ''restrict,command="internal-sftp"${resticFrom} ${userInfo.resticKey}''; in
 
 {
 
@@ -60,7 +66,7 @@ let user = userInfo.user;
   # Set fish as the default shell
   programs.fish.enable = true;
 
-  users.users.${user}.openssh.authorizedKeys.keys = keys;
+  users.users.${user}.openssh.authorizedKeys.keys = keys ++ backupKeys;
 
   system = {
     stateVersion = 4;
