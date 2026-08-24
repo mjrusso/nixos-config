@@ -3,6 +3,16 @@
 let
   user = userInfo.user;
   keys = userInfo.sshKeys;
+  # Note that sudo is required to make root-owned state readable when backing
+  # up. The `from=` address is gvproxy's gateway (i.e., the address a guest
+  # sees for a connection originating on the host).
+  #
+  # We use rsync instead of sftp, because sshfs returns EPERM on readlink, so
+  # every symlink would be stored without its target.
+  voomReadFrom = let src = userInfo.voomReadKeySource or ""; in
+    lib.optionalString (src != "") '',from="${src}"'';
+  backupKeys = lib.optional ((userInfo.voomReadKey or "") != "")
+    ''restrict,command="sudo --preserve-env=SSH_ORIGINAL_COMMAND ${pkgs.rrsync}/bin/rrsync -ro /"${voomReadFrom} ${userInfo.voomReadKey}'';
   voomPortfwd = pkgs.writeShellScript "voom-portfwd" ''
     set -u
 
@@ -225,7 +235,7 @@ in
       isNormalUser = true;
       extraGroups = [ "wheel" ];
       shell = pkgs.fish;
-      openssh.authorizedKeys.keys = keys;
+      openssh.authorizedKeys.keys = keys ++ backupKeys;
     };
 
     root = {

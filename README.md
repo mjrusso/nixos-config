@@ -377,11 +377,13 @@ colliding.
 
 Additional keys:
 
-| Key            | Default                                        |
-|----------------|------------------------------------------------|
-| `targetUser`   | `user` from [`user-info.nix`](./user-info.nix) |
-| `passwordFile` | `/etc/restic/password`                         |
-| `identityFile` | that user's `~/.ssh/id_ed25519_restic`         |
+| Key                    | Default                                        |
+|------------------------|------------------------------------------------|
+| `targetUser`           | `user` from [`user-info.nix`](./user-info.nix) |
+| `passwordFile`         | `/etc/restic/password`                         |
+| `identityFile`         | that user's `~/.ssh/id_ed25519_restic`         |
+| `voomGuests`           | `false`, see [Voom Guests](#voom-guests)       |
+| `voomReadIdentityFile` | that user's `~/.ssh/id_ed25519_voom_read`      |
 
 Setting `enable = false`, or omitting the block, removes the service and its
 timer.
@@ -397,21 +399,15 @@ timer.
      -f ~/.ssh/id_ed25519_restic
    ```
 
-   Authorize the new key by adding the public key to `sshKeys` in
-   [`user-info.nix`](./user-info.nix) and rebuilding the target host. Because
-   the key does not have a passphrase, confine it to sftp access only:
+   Authorize it by adding the public key to `resticKey` in
+   [`user-info.nix`](./user-info.nix) and rebuilding the target host. Note that
+   the target's configuration confines the key to sftp, and `resticKeySource`
+   defines the address it can connect from.
 
    ``` nix
-   sshKeys = [
-     # ...
-     ''restrict,command="internal-sftp",from="<source>" ssh-ed25519 AAAA...''
-   ];
+   resticKey = "ssh-ed25519 AAAA...";
+   resticKeySource = "<source>";
    ```
-
-   Note that `sshKeys` authorizes a key on every host built from this
-   repository, not only on the backup target. The key remains sftp-only
-   everywhere, but sftp is not confined to the repository path (i.e., it can
-   read and write anything the user can).
 
    Verify access from the source to the target:
 
@@ -449,6 +445,49 @@ timer.
 
    The first run uploads everything and will take some time; subsequent runs
    send only what has changed, and will complete more quickly.
+
+##### Voom Guests
+
+Setting `voomGuests = true` in the `nixosBackup` block adds a second daily
+timer that pulls each running [Voom](https://github.com/mjrusso/voom) guest's
+`/home` and Docker volumes into the same repository. (Stopped guests are
+skipped.)
+
+Data for each guest is copied to a staging directory that is persisted between
+runs. Each is recorded under its own name:
+
+``` bash
+restic-<hostname> snapshots --host <guest>
+restic-<hostname> restore latest --host <guest> --target /tmp/restore
+```
+
+This procedure uses a second key, separate from the repository key. To
+configure:
+
+1. Generate the key. As with the repository key, it must have no passphrase:
+
+   ``` bash
+   ssh-keygen -t ed25519 -N "" -C "voom read" \
+     -f ~/.ssh/id_ed25519_voom_read
+   ```
+
+2. Add the public key to `voomReadKey` in [`user-info.nix`](./user-info.nix).
+   `voomReadKeySource` is the address a guest sees for a connection originating
+   on the host (i.e., gvproxy's gateway).
+
+3. Push the guest configuration, then rebuild this host, in this order.
+
+   ``` bash
+   voom-update
+   nix run .#build-switch
+   ```
+
+To manually trigger a run:
+
+``` bash
+sudo systemctl start voom-backup.service
+journalctl -u voom-backup.service -b
+```
 
 ##### Operating and Troubleshooting
 

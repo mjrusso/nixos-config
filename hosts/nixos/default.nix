@@ -9,7 +9,10 @@ let user = userInfo.user;
       repositoryPath = "";
       passwordFile = "/etc/restic/password";
       identityFile = "/home/${user}/.ssh/id_ed25519_restic";
-    } // (hostInfo.nixosBackup or { }); in
+      voomGuests = false;
+      voomReadIdentityFile = "/home/${user}/.ssh/id_ed25519_voom_read";
+    } // (hostInfo.nixosBackup or { });
+    voomExcludes = [ ".cache" ".npm" ".smolvm" "node_modules" ".direnv" "result" ]; in
 {
   imports = [
     ../../modules/nixos/disk-config.nix
@@ -35,6 +38,10 @@ let user = userInfo.user;
     {
       assertion = !backup.enable || (backup.target != "" && backup.repositoryPath != "");
       message = "Set hostInfo.nixosBackup.target and hostInfo.nixosBackup.repositoryPath in host-info.nix when nixosBackup.enable is true.";
+    }
+    {
+      assertion = !(backup.enable && backup.voomGuests) || (userInfo.voomReadKey or "") != "";
+      message = "Set userInfo.voomReadKey in user-info.nix when nixosBackup.voomGuests is true, and rebuild the guests.";
     }
   ];
 
@@ -391,12 +398,118 @@ let user = userInfo.user;
     partOf = [ "libvirtd.service" ];
   };
 
+  # The staging copy is kept between runs, reducing the amount of work that
+  # rsync and restic need to do. Note that the staging copy lives on its own
+  # dataset with snapshots disabled; see modules/nixos/disk-config.nix.
+  systemd.services.voom-backup = lib.mkIf (backup.enable && backup.voomGuests) {
+    description = "Back up running Voom guests into the restic repository";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      User = user;
+      CacheDirectory = "voom-staging";
+    };
+    path = [ pkgs.voom pkgs.jq pkgs.rsync pkgs.openssh ]
+      ++ builtins.filter (p: (p.name or "") == "restic-${hostInfo.nixosHostname}")
+           config.environment.systemPackages;
+    script = ''
+      set -euo pipefail
+
+      stage="$CACHE_DIRECTORY"
+
+      # systemd does not set these env vars for a User= service. (Important,
+      # because voom resolves its state directory from HOME and decides that a
+      # guest is running by finding its pidfile under XDG_RUNTIME_DIR.)
+      export HOME=${lib.escapeShellArg "/home/${user}"}
+      export XDG_RUNTIME_DIR="/run/user/$UID"
+      key=${lib.escapeShellArg backup.voomReadIdentityFile}
+
+      known="$(voom list --output json | jq -r '.[].name')"
+      if [ -n "$known" ]; then
+        for d in "$stage"/*; do
+          [ -d "$d" ] || continue
+          if ! printf '%s\n' "$known" | grep -qxF "$(basename "$d")"; then
+            echo "removing staging for unknown guest $(basename "$d")"
+            rm -rf "$d"
+          fi
+        done
+      fi
+
+      # Skip stopped guests.
+      guests="$(voom list --output json \
+        | jq -r '.[] | select(.status == "running") | "\(.name) \(.sshPort)"')"
+
+      if [ -z "$guests" ]; then
+        echo "no running guests to back up" >&2
+        exit 0
+      fi
+
+      printf '%s\n' "$guests" | while read -r name port; do
+        echo "==> $name"
+        dest="$stage/$name"
+
+        home_ok=1
+        for path in /home /var/lib/docker/volumes; do
+          mkdir -p "$dest$path"
+          # No --rsync-path: the guest forces `sudo rrsync -ro /`, which
+          # supplies both the privilege and the read-only restriction.
+          set +e
+          rsync -aHAXS --delete ${lib.concatMapStringsSep " " (e: "--exclude=${lib.escapeShellArg e}") voomExcludes} \
+            -e "ssh -p $port -i $key -o IdentitiesOnly=yes -o BatchMode=yes \
+                -o LogLevel=ERROR -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null" \
+            ${user}@127.0.0.1:"$path/" "$dest$path/"
+          rc=$?
+          set -e
+          # 24 is rsync's own warning for source files that vanished mid-copy,
+          # which is routine on a running guest.
+          case $rc in
+            0|24) ;;
+            *) echo "!! $name: $path not captured (rsync exit $rc)" >&2
+               if [ "$path" = /home ]; then home_ok=0; fi ;;
+          esac
+        done
+
+        # Leave a partial copy in place: --delete reconciles it next run,
+        # and discarding it would force a full re-transfer.
+        if [ "$home_ok" = 0 ]; then
+          echo "!! $name: skipped" >&2
+          continue
+        fi
+
+        # --host gives each guest its own identity in the repository.
+        #
+        # restic exits 3 when it saved a snapshot but could not read every
+        # source file; this is treated as a warning instead of a failed backup.
+        set +e
+        restic-${hostInfo.nixosHostname} backup --host "$name" --tag voom "$dest"
+        rc=$?
+        set -e
+        case $rc in
+          0) ;;
+          3) echo "!! $name: snapshot saved, some files unreadable" >&2 ;;
+          *) echo "!! $name: backup failed (restic exit $rc)" >&2 ;;
+        esac
+      done
+    '';
+  };
+
+  systemd.timers.voom-backup = lib.mkIf (backup.enable && backup.voomGuests) {
+    description = "Daily Voom guest backup";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "daily";
+      RandomizedDelaySec = "1h";
+      Persistent = true;
+    };
+  };
+
   zramSwap = {
     enable = true;
     memoryPercent = 50;
   };
 
-  # It's me, it's you, it's everyone
   users.users = {
     ${user} = {
       isNormalUser = true;
