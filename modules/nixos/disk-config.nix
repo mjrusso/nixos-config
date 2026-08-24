@@ -73,6 +73,16 @@
             "com.sun:auto-snapshot" = "false";
           };
         };
+        # Persistent rsync staging for the backup of voom guests. Snapshots are
+        # disabled because this is a copy of data already backed up elsewhere.
+        voom-staging = {
+          type = "zfs_fs";
+          mountpoint = "/var/cache/voom-staging";
+          options = {
+            primarycache = "metadata";
+            "com.sun:auto-snapshot" = "false";
+          };
+        };
         vms = {
           type = "zfs_fs";
           mountpoint = "/var/lib/libvirt/images";
