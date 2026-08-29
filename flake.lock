@@ -612,11 +612,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1780324904,
-        "narHash": "sha256-pXtTIi4VWSnhE54qrzDjR8XmO4yEaTs1unpyMIO/ZFw=",
+        "lastModified": 1787948086,
+        "narHash": "sha256-oFYkRuEsoiFVXNgquAUlzvJucyiX5CmMum7BJUw8TNI=",
         "owner": "mjrusso",
         "repo": "voom",
-        "rev": "68df898eed5a6475a9882eea6aa6315ba92f5824",
+        "rev": "02a9e5103eaa3016ea738b260120b09f876604ef",
         "type": "github"
       },
       "original": {
