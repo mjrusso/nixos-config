@@ -1,0 +1,22 @@
+default:
+    @just --list
+
+dev:
+    @echo "TODO: dev"
+
+test:
+    @echo "TODO: test"
+
+lint:
+    @echo "TODO: lint"
+
+typecheck:
+    @echo "TODO: typecheck"
+
+format:
+    nixpkgs-fmt flake.nix
+
+ci: lint typecheck test
+
+deps:
+    @echo "TODO: deps"

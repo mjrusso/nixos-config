@@ -182,6 +182,13 @@ with pkgs; [
     exec ${pkgs.bash}/bin/bash ${../../scripts/agent-config-push} "$@"
   '')
 
+  # Scaffolds a new Nix flake project: a nix-direnv `.envrc`, a `flake.nix`
+  # with a devShell, and a `justfile`.
+  (pkgs.writeShellScriptBin "flake-init" ''
+    export FLAKE_INIT_TEMPLATES=${../../templates}
+    exec ${pkgs.bash}/bin/bash ${../../scripts/flake-init} "$@"
+  '')
+
   # `better-git-branch`: Display git branches ordered by last commit,
   # ahead/behind info, and descriptions. With thanks to [0]. Also see: [1].
   #

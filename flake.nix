@@ -156,6 +156,16 @@
       devShells = forAllSystems devShell;
       apps = nixpkgs.lib.genAttrs linuxSystems mkLinuxApps // nixpkgs.lib.genAttrs darwinSystems mkDarwinApps;
 
+      # Starting points for new projects.
+
+      templates = {
+        default = self.templates.dev;
+        dev = {
+          path = ./templates/default;
+          description = "A nix-direnv .envrc, a flake with default and ci devShells, and a justfile";
+        };
+      };
+
       # Darwin (MacOS) config.
 
       darwinConfigurations = {

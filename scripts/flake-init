@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Scaffolds a Nix flake project: drops a nix-direnv `.envrc`, a `flake.nix`
+# with `default` and `ci` devShells, and a `justfile` into a directory.
+#
+# The files come from `templates/<name>/`, which the repo flake also exposes as
+# a flake template, so `nix flake init -t github:mjrusso/nixos-config` writes
+# the same files without going through this script. This script adds
+# --envrc-only, --force, and a target directory, and it skips files that
+# already exist rather than exiting 1 on the ones that differ.
+#
+# Every template file has to be tracked by git, or Nix does not see it. The
+# global gitignore excludes `.envrc`, so each template's copy needs an
+# un-ignore line in this repo's `.gitignore`.
+
+log() { echo "[flake-init] $*"; }
+die() { echo "[flake-init] error: $*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: flake-init [options] [directory]
+
+Scaffolds a Nix flake project (.envrc, flake.nix, justfile) in DIRECTORY,
+defaulting to the current directory. Existing files are left alone unless
+--force is given.
+
+Options:
+  -e, --envrc-only     Write only the .envrc, for a project that already has
+                       a flake.
+  -f, --force          Overwrite files that already exist.
+  -t, --template NAME  Template to scaffold from (default: default).
+  -h, --help           Show this help.
+EOF
+}
+
+# Only correct when running from a repo checkout; the home-manager wrapper
+# installs the script and the templates as separate store paths, and sets
+# FLAKE_INIT_TEMPLATES to bridge them.
+default_templates_dir() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  echo "${script_dir}/../templates"
+}
+
+template="default"
+envrc_only=0
+force=0
+target=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -e|--envrc-only) envrc_only=1; shift ;;
+    -f|--force) force=1; shift ;;
+    -t|--template)
+      [ $# -ge 2 ] || die "--template requires an argument"
+      template="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) die "unknown option: $1 (try --help)" ;;
+    *)
+      [ -z "$target" ] || die "unexpected argument: $1"
+      target="$1"; shift ;;
+  esac
+done
+
+[ -n "$target" ] || target="${1:-.}"
+
+templates_dir="${FLAKE_INIT_TEMPLATES:-$(default_templates_dir)}"
+template_dir="${templates_dir}/${template}"
+[ -d "$template_dir" ] || die "no such template: ${template} (looked in ${templates_dir})"
+
+mkdir -p "$target"
+target="$(cd "$target" && pwd)"
+
+shopt -s dotglob nullglob
+sources=("$template_dir"/*)
+shopt -u dotglob nullglob
+[ ${#sources[@]} -gt 0 ] || die "template ${template} is empty"
+
+written=()
+for src in "${sources[@]}"; do
+  name="$(basename "$src")"
+
+  if [ "$envrc_only" -eq 1 ] && [ "$name" != ".envrc" ]; then
+    continue
+  fi
+
+  dest="${target}/${name}"
+  if [ -e "$dest" ] && [ "$force" -eq 0 ]; then
+    log "${name} already exists — skipping (use --force to overwrite)"
+    continue
+  fi
+
+  # `cp` here would produce read-only files: the templates are mode 444 when
+  # they come from the Nix store.
+  install -m 644 "$src" "$dest"
+  log "wrote ${name}"
+  written+=("$name")
+done
+
+if [ ${#written[@]} -eq 0 ]; then
+  log "nothing to do"
+  exit 0
+fi
+
+# Nix reads flake.nix out of the git index, so it has to be staged.
+to_stage=()
+for name in "${written[@]}"; do
+  [ "$name" = ".envrc" ] || to_stage+=("$name")
+done
+
+echo
+echo "Next steps (from ${target}):"
+echo
+
+step=1
+if [ ${#to_stage[@]} -gt 0 ] && git -C "$target" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  cat <<EOF
+  ${step}. Stage the new files. Nix only sees files that git knows about, so an
+     unstaged flake.nix is invisible to it (committing is not required):
+
+         git add ${to_stage[*]}
+
+EOF
+  step=$((step + 1))
+fi
+
+if printf '%s\n' "${written[@]}" | grep -qx '.envrc'; then
+  cat <<EOF
+  ${step}. Let direnv load the environment:
+
+         direnv allow
+
+EOF
+  step=$((step + 1))
+
+  cat <<EOF
+  ${step}. The .envrc sets nix_direnv_manual_reload, so the shell is not built
+     automatically. Build it now, and again after every flake.nix change:
+
+         nix-direnv-reload
+EOF
+else
+  cat <<EOF
+  ${step}. Rebuild the dev shell to pick up the change:
+
+         nix-direnv-reload
+EOF
+fi
