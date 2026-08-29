@@ -794,13 +794,19 @@ named after that route's `syncer` (see [Publishing Docker Apps Over
 Tailscale](#publishing-docker-apps-over-tailscale) for the other kind). Route
 IDs are derived as `<name>_routes`, so `routes.voom` owns `voom_routes`.
 
-The dynamic route list lives only in Caddy's running config, so anything that
-(re)loads the declarative config, such as a reboot, `systemctl restart caddy`,
-or a `nixos-rebuild` that changes the Caddy config, reseeds it to the empty
-state. The `voom-caddy-sync.service` oneshot re-runs the sync on every such
-event, so routes self-heal across restarts. Run `voom-caddy-sync` by hand only
-when Voom forwards change *without* a Caddy restart (e.g. you start a new VM
-app); the service does not watch Voom at runtime.
+This is implemented with two systemd units:
+
+- `voom-caddy-sync.service` is a oneshot unit bound to Caddy. The dynamic route
+  list lives only in Caddy's running config, so anything that (re)loads the
+  declarative config, such as a reboot, `systemctl restart caddy`, or a
+  `nixos-rebuild` that changes Caddy's config, empties the state; the oneshot
+  re-runs the sync on every such event, so routes self-heal across restarts.
+- `voom-caddy-sync-watch.service` follows `voom events` and re-syncs when a VM
+  starts or stops and when an automatic forward is installed or removed.
+
+Voom events are wake-up hints rather than a state replica, so every event
+triggers a full re-sync, with bursts (e.g. a booting VM installing one forward
+per port) coalesced into a single sync.
 
 The default HTTP probe publishes any forward that returns an HTTP response,
 including non-2xx statuses such as `401`/`403`/`404` (auth-gated apps, or apps
@@ -856,10 +862,11 @@ curl -v https://<vm>-<guest-port>.voom.example.com/
 
 A `no voom route` 404 served with a *valid* certificate means the request
 matched the wildcard, but the per-app route is not defined. Re-run the sync
-(also run `systemctl status voom-caddy-sync.service`), and check the synced
-routes:
+(also check both units), and inspect the synced routes:
 
 ``` bash
+systemctl status voom-caddy-sync.service
+journalctl -u voom-caddy-sync-watch.service -f
 curl -s localhost:2019/id/voom_routes/routes | jq 'length'
 ```
 
@@ -880,9 +887,6 @@ Tailscale subdomains, driven entirely by container labels:
 ``` text
 https://<caddy.host>.homelab.example.com
 ```
-
-_(Unlike the Voom route, a watcher re-syncs on every container start and stop;
-no manual sync step is necessary.)_
 
 This reuses the Cloudflare token and environment file described in [Publishing
 VM Web Apps Over Tailscale](#publishing-vm-web-apps-over-tailscale), with a
@@ -988,7 +992,8 @@ This is implemented with two systemd units:
   the routes whenever Caddy starts or restarts (as with Voom, the dynamic route
   list does not survive a restart).
 - `docker-caddy-sync-<name>-watch.service` follows `docker events` and re-syncs
-  on container start and stop.
+  on container start and stop, exactly as the Voom watcher follows `voom
+  events`.
 
 ##### Operating and Troubleshooting
 
