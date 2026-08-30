@@ -11,6 +11,7 @@ with pkgs; [
   fish
   killall
   fastfetch
+  miniserve
   nh # Nix helper; `nh clean all` garbage-collects old generations (see README)
   nixfmt
   rsync
@@ -187,6 +188,12 @@ with pkgs; [
   (pkgs.writeShellScriptBin "flake-init" ''
     export FLAKE_INIT_TEMPLATES=${../../templates}
     exec ${pkgs.bash}/bin/bash ${../../scripts/flake-init} "$@"
+  '')
+
+  # Serves a directory over HTTP with miniserve. Loopback-only, read-only, and
+  # uncached by default; `--public` opens it up. See `serve --help`.
+  (pkgs.writeShellScriptBin "serve" ''
+    exec ${pkgs.bash}/bin/bash ${../../scripts/serve} "$@"
   '')
 
   # `better-git-branch`: Display git branches ordered by last commit,

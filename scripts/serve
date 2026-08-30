@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Serve a directory over HTTP with miniserve.
+#
+# The server listens on localhost only, unless `--public` is passed, and it
+# never allows writes: `serve -- -u` enables uploads, `-R` deletion, `-U` new
+# directories. New options should not widen the binding or turn those write
+# flags on.
+#
+# Defaults are set through miniserve's MINISERVE_* environment variables rather
+# than on the command line, because miniserve rejects an option that is
+# provided twice ("cannot be used multiple times"): a default passed as an
+# argument turns every matching passthrough flag into an error, while a default
+# passed through the environment is overridden by that flag instead.
+
+usage() {
+  cat <<'USAGE'
+Usage: serve [--public] [--cache] [PATH] [PORT] [-- <miniserve args>]
+
+Serves PATH (default: the current directory) over HTTP with miniserve.
+
+The two positional arguments are order-independent: an argument that is all
+digits is the port, anything else is the path.
+
+  serve                       Current directory, on http://127.0.0.1:8000.
+  serve ./dist                A directory.
+  serve 3000                  A port.
+  serve 3000 ./dist           Both, in either order.
+  serve --public              Reachable from other machines.
+  serve -- -u -U              miniserve's own flags: here, upload and mkdir.
+
+Defaults:
+  Bound to 127.0.0.1 and ::1, so only this machine can reach the server.
+  Read-only: no upload, no deletion, no directory creation.
+  Hidden files, including .git and .env, are not served.
+  Responses carry `Cache-Control: no-store`, so nothing is served from the
+  browser's cache after an edit.
+  tar and zip downloads, README.md rendering, and directories-first sorting
+  are on.
+
+Options:
+  --public            Bind every interface, so that other machines on the LAN,
+                      and on any VPN (including Tailscale), can reach the
+                      server. Also stops symlinks from being followed out of
+                      the served directory.
+  --cache             Keep miniserve's normal caching headers instead of
+                      sending `Cache-Control: no-store`. Worth it when moving
+                      large files.
+  -h, --help          Show this help.
+
+Notes:
+  Everything after `--` goes to miniserve unchanged, and wins: the defaults
+  above are set through MINISERVE_* environment variables, which an explicit
+  flag overrides. `serve -- -p 9000 -H` serves on port 9000 with hidden files
+  shown, and a `--header` of your own replaces the `Cache-Control` default
+  rather than adding to it.
+
+  The exception is `-i`/`--interfaces`, passed as an argument in the default
+  loopback mode and accepted more than once by miniserve: a passthrough `-i`
+  adds an interface instead of replacing loopback. Use `--public` to bind
+  everything, or `--public -- -i <addr>` to bind one chosen address.
+
+  For a QR code of the URL, add miniserve's `-q` to a run bound to a single
+  address: `serve --public -- -i 192.168.1.5 -q`. miniserve prints one QR code
+  per reachable URL, so it is not on by default.
+
+  This script never sets a password. `--public` puts the directory on the
+  network for anyone who can route to it; pass miniserve's `-a user:pass`
+  after `--` when that matters.
+USAGE
+}
+
+warn() { echo "[serve] $*" >&2; }
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
+}
+
+PUBLIC=0
+CACHE=0
+SEEN_SEP=0
+POSITIONAL=()
+PASSTHRU=()
+
+while [ $# -gt 0 ]; do
+  if [ "$SEEN_SEP" -eq 1 ]; then
+    PASSTHRU+=("$1")
+    shift
+    continue
+  fi
+  case "$1" in
+    --) SEEN_SEP=1 ;;
+    --public) PUBLIC=1 ;;
+    --cache) CACHE=1 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) warn "unknown option: $1 (pass miniserve's own flags after --)"; usage >&2; exit 1 ;;
+    *) POSITIONAL+=("$1") ;;
+  esac
+  shift
+done
+
+SERVE_PATH="."
+# Not miniserve's own default of 8080, which a published docker container holds
+# on the NixOS host.
+PORT=8000
+PATH_SET=0
+PORT_SET=0
+
+for arg in ${POSITIONAL[@]+"${POSITIONAL[@]}"}; do
+  if [[ "$arg" =~ ^[0-9]+$ ]]; then
+    if [ "$PORT_SET" -eq 1 ]; then
+      warn "more than one port given: $arg"
+      exit 1
+    fi
+    PORT="$arg"
+    PORT_SET=1
+  else
+    if [ "$PATH_SET" -eq 1 ]; then
+      warn "more than one path given: $arg"
+      exit 1
+    fi
+    SERVE_PATH="$arg"
+    PATH_SET=1
+  fi
+done
+
+# The length test runs first so that the arithmetic below cannot overflow, and
+# `10#` keeps a port written with a leading zero out of bash's octal base.
+if [ "${#PORT}" -gt 5 ] || [ "$((10#$PORT))" -lt 1 ] || [ "$((10#$PORT))" -gt 65535 ]; then
+  warn "port out of range: $PORT"
+  exit 1
+fi
+PORT=$((10#$PORT))
+
+if [ ! -e "$SERVE_PATH" ]; then
+  warn "no such file or directory: $SERVE_PATH"
+  exit 1
+fi
+
+require_cmd miniserve
+
+export MINISERVE_PORT="$PORT"
+export MINISERVE_ENABLE_TAR=true
+export MINISERVE_ENABLE_ZIP=true
+export MINISERVE_README=true
+export MINISERVE_DIRS_FIRST=true
+
+if [ "$CACHE" -eq 0 ]; then
+  export MINISERVE_HEADER="Cache-Control:no-store"
+fi
+
+ARGS=()
+
+if [ "$PUBLIC" -eq 1 ]; then
+  export MINISERVE_NO_SYMLINKS=true
+  warn "public: every interface, including the LAN and any VPN, can reach $SERVE_PATH"
+else
+  ARGS+=(--interfaces 127.0.0.1 --interfaces ::1)
+fi
+
+exec miniserve ${ARGS[@]+"${ARGS[@]}"} ${PASSTHRU[@]+"${PASSTHRU[@]}"} "$SERVE_PATH"
