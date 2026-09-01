@@ -78,6 +78,7 @@ with pkgs; [
   tree
   tmux
   herdr
+  herdlord
   zoxide
   unrar
   unzip

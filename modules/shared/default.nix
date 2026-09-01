@@ -1,4 +1,4 @@
-{ config, osConfig, pkgs, emacs-flake, voom, llm-agents, ... }:
+{ config, osConfig, pkgs, emacs-flake, voom, herdlord, llm-agents, ... }:
 
 {
 
@@ -15,6 +15,7 @@
         (final: prev: {
           my-emacs-with-packages = emacs-flake.packages.${prev.stdenv.hostPlatform.system}.default;
           voom = voom.packages.${prev.stdenv.hostPlatform.system}.default;
+          herdlord = herdlord.packages.${prev.stdenv.hostPlatform.system}.default;
           herdr = llm-agents.packages.${prev.stdenv.hostPlatform.system}.herdr;
         })
       ] ++

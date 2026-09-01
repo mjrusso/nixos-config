@@ -33,6 +33,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    herdlord = {
+      # For local development, use `path:../herdlord` (assuming a sibling checkout).
+      url = "github:mjrusso/herdlord";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     llm-agents = {
       url = "github:numtide/llm-agents.nix";
     };
@@ -43,7 +49,7 @@
     };
   };
 
-  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, voom, llm-agents, nixos-generators } @inputs:
+  outputs = { self, darwin, home-manager, nixpkgs, disko, mac-app-util, emacs-flake, voom, herdlord, llm-agents, nixos-generators } @inputs:
     let
       userInfo = import ./user-info.nix;
       hostInfo = import ./host-info.nix;
