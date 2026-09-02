@@ -1,18 +1,36 @@
-{ config, inputs, pkgs, lib, userInfo, hostInfo, ... }:
+{
+  config,
+  inputs,
+  pkgs,
+  lib,
+  userInfo,
+  hostInfo,
+  ...
+}:
 
-let user = userInfo.user;
-    keys = userInfo.sshKeys;
-    backup = {
-      enable = false;
-      target = "";
-      targetUser = user;
-      repositoryPath = "";
-      passwordFile = "/etc/restic/password";
-      identityFile = "/home/${user}/.ssh/id_ed25519_restic";
-      voomGuests = false;
-      voomReadIdentityFile = "/home/${user}/.ssh/id_ed25519_voom_read";
-    } // (hostInfo.nixosBackup or { });
-    voomExcludes = [ ".cache" ".npm" ".smolvm" "node_modules" ".direnv" "result" ]; in
+let
+  user = userInfo.user;
+  keys = userInfo.sshKeys;
+  backup = {
+    enable = false;
+    target = "";
+    targetUser = user;
+    repositoryPath = "";
+    passwordFile = "/etc/restic/password";
+    identityFile = "/home/${user}/.ssh/id_ed25519_restic";
+    voomGuests = false;
+    voomReadIdentityFile = "/home/${user}/.ssh/id_ed25519_voom_read";
+  }
+  // (hostInfo.nixosBackup or { });
+  voomExcludes = [
+    ".cache"
+    ".npm"
+    ".smolvm"
+    "node_modules"
+    ".direnv"
+    "result"
+  ];
+in
 {
   imports = [
     ../../modules/nixos/disk-config.nix
@@ -24,7 +42,7 @@ let user = userInfo.user;
 
   assertions = [
     {
-      assertion = hostInfo.nixosHostname != "REPLACE_ME";
+      assertion = hostInfo.nixosHostname != "hostname";
       message = "Set hostInfo.nixosHostname in host-info.nix before building the NixOS host.";
     }
     {
@@ -32,7 +50,7 @@ let user = userInfo.user;
       message = "Set hostInfo.nixosHostId in host-info.nix to exactly 8 hex characters before building the NixOS host.";
     }
     {
-      assertion = hostInfo.nixosMainDisk != "REPLACE_ME";
+      assertion = hostInfo.nixosMainDisk != "/dev/disk/by-id/...";
       message = "Set hostInfo.nixosMainDisk in host-info.nix to the target drive's stable /dev/disk/by-id path before building the NixOS host.";
     }
     {
@@ -57,7 +75,12 @@ let user = userInfo.user;
     supportedFilesystems = [ "zfs" ];
     initrd.supportedFilesystems = [ "zfs" ];
     initrd.availableKernelModules = [
-      "xhci_pci" "ahci" "nvme" "usbhid" "usb_storage" "sd_mod"
+      "xhci_pci"
+      "ahci"
+      "nvme"
+      "usbhid"
+      "usb_storage"
+      "sd_mod"
       "igb"
     ];
     initrd.systemd.enable = true;
@@ -85,8 +108,7 @@ let user = userInfo.user;
     # qemu-user-static via binfmt_misc, so x86_64-linux hosts can build
     # aarch64-linux derivations. Registering the host's own system is an error
     # (nixpkgs asserts on it), so filter it out for native aarch64-linux hosts.
-    binfmt.emulatedSystems =
-      lib.filter (s: s != pkgs.stdenv.hostPlatform.system) [ "aarch64-linux" ];
+    binfmt.emulatedSystems = lib.filter (s: s != pkgs.stdenv.hostPlatform.system) [ "aarch64-linux" ];
   };
 
   # Set your time zone.
@@ -98,9 +120,10 @@ let user = userInfo.user;
   networking = {
     hostName = hostInfo.nixosHostname;
     hostId =
-      if builtins.match "[0-9a-fA-F]{8}" hostInfo.nixosHostId != null
-      then hostInfo.nixosHostId
-      else "00000000";
+      if builtins.match "[0-9a-fA-F]{8}" hostInfo.nixosHostId != null then
+        hostInfo.nixosHostId
+      else
+        "00000000";
     hosts = hostInfo.nixosExtraHosts;
     useDHCP = lib.mkDefault true;
   };
@@ -111,14 +134,16 @@ let user = userInfo.user;
 
   # Turn on flag for proprietary software
   nix = {
-    nixPath = [ "nixos-config=/home/${user}/.local/share/src/nixos-config:/etc/nixos" ];
     settings.allowed-users = [ "${user}" ];
-    settings.trusted-users = [ "@wheel" "${user}" ];
+    settings.trusted-users = [
+      "@wheel"
+      "${user}"
+    ];
     package = pkgs.nixVersions.latest;
     extraOptions = ''
       experimental-features = nix-command flakes
     '';
-   };
+  };
 
   # Manages keys and such
   programs = {
@@ -239,8 +264,8 @@ let user = userInfo.user;
           "class_g = 'i3lock'"
         ];
         round-borders = 3;
-        round-borders-exclude = [];
-        round-borders-rule = [];
+        round-borders-exclude = [ ];
+        round-borders-rule = [ ];
         shadow = true;
         shadow-radius = 8;
         shadow-opacity = 0.4;
@@ -291,12 +316,29 @@ let user = userInfo.user;
         log-level = "info";
 
         wintypes = {
-          normal = { fade = true; shadow = false; };
-          tooltip = { fade = true; shadow = false; opacity = 0.75; focus = true; full-shadow = false; };
-          dock = { shadow = false; };
-          dnd = { shadow = false; };
-          popup_menu = { opacity = 1.0; };
-          dropdown_menu = { opacity = 1.0; };
+          normal = {
+            fade = true;
+            shadow = false;
+          };
+          tooltip = {
+            fade = true;
+            shadow = false;
+            opacity = 0.75;
+            focus = true;
+            full-shadow = false;
+          };
+          dock = {
+            shadow = false;
+          };
+          dnd = {
+            shadow = false;
+          };
+          popup_menu = {
+            opacity = 1.0;
+          };
+          dropdown_menu = {
+            opacity = 1.0;
+          };
         };
       };
     };
@@ -308,8 +350,7 @@ let user = userInfo.user;
       "${hostInfo.nixosHostname}" = {
         inherit user;
         initialize = true;
-        repository =
-          "sftp:${backup.targetUser}@${backup.target}:${backup.repositoryPath}/${hostInfo.nixosHostname}";
+        repository = "sftp:${backup.targetUser}@${backup.target}:${backup.repositoryPath}/${hostInfo.nixosHostname}";
         passwordFile = backup.passwordFile;
         paths = [ "/home/${user}" ];
 
@@ -370,7 +411,6 @@ let user = userInfo.user;
     ledger.enable = true;
   };
 
-
   # Add docker daemon
   virtualisation = {
     docker = {
@@ -410,9 +450,15 @@ let user = userInfo.user;
       User = user;
       CacheDirectory = "voom-staging";
     };
-    path = [ pkgs.voom pkgs.jq pkgs.rsync pkgs.openssh ]
-      ++ builtins.filter (p: (p.name or "") == "restic-${hostInfo.nixosHostname}")
-           config.environment.systemPackages;
+    path = [
+      pkgs.voom
+      pkgs.jq
+      pkgs.rsync
+      pkgs.openssh
+    ]
+    ++ builtins.filter (
+      p: (p.name or "") == "restic-${hostInfo.nixosHostname}"
+    ) config.environment.systemPackages;
     script = ''
       set -euo pipefail
 
@@ -455,7 +501,9 @@ let user = userInfo.user;
           # No --rsync-path: the guest forces `sudo rrsync -ro /`, which
           # supplies both the privilege and the read-only restriction.
           set +e
-          rsync -aHAXS --delete ${lib.concatMapStringsSep " " (e: "--exclude=${lib.escapeShellArg e}") voomExcludes} \
+          rsync -aHAXS --delete ${
+            lib.concatMapStringsSep " " (e: "--exclude=${lib.escapeShellArg e}") voomExcludes
+          } \
             -e "ssh -p $port -i $key -o IdentitiesOnly=yes -o BatchMode=yes \
                 -o LogLevel=ERROR -o StrictHostKeyChecking=no \
                 -o UserKnownHostsFile=/dev/null" \
@@ -532,15 +580,17 @@ let user = userInfo.user;
   # Don't require password for users in `wheel` group for these commands
   security.sudo = {
     enable = true;
-    extraRules = [{
-      commands = [
-       {
-         command = "${pkgs.systemd}/bin/reboot";
-         options = [ "NOPASSWD" ];
-        }
-      ];
-      groups = [ "wheel" ];
-    }];
+    extraRules = [
+      {
+        commands = [
+          {
+            command = "${pkgs.systemd}/bin/reboot";
+            options = [ "NOPASSWD" ];
+          }
+        ];
+        groups = [ "wheel" ];
+      }
+    ];
   };
 
   fonts.packages = with pkgs; [

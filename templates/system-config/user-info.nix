@@ -1,7 +1,7 @@
 {
   user = "yourusername";
   name = "Your Name";
-  email = "youremail@example.com";
+  email = "you@example.com";
   sshKeys = [
     "ssh-ed25519 AAAA..."
   ];

@@ -9,7 +9,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: voom-update [--dry-run] [--nixos] [--agents] [--emacs] [VM...]
+Usage: voom-update [--flake PATH] [--dry-run] [--nixos] [--agents] [--emacs] [VM...]
 
 Updates VM guests from this host.
 
@@ -22,6 +22,8 @@ Phases (with no phase flag, all three run, in this order):
   --emacs             Update the guest's ~/.emacs.d clone.
 
 Options:
+  --flake PATH        Flake to use for NixOS switches. Defaults to the current
+                      directory.
   --dry-run           List what would be done, without doing it. The agents
                       phase connects to each guest to itemize the transfer,
                       including the deletions.
@@ -44,9 +46,7 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/.." && pwd))"
-
+FLAKE_ROOT="$(pwd)"
 AGENTS_DIR="${AGENTS_DIR:-$HOME/.agents}"
 EMACS_REPO_URL="${EMACS_REPO_URL:-https://github.com/mjrusso/.emacs.d}"
 
@@ -58,6 +58,11 @@ DO_EMACS=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --flake)
+      [ "$#" -ge 2 ] || { echo "--flake requires a path" >&2; exit 1; }
+      FLAKE_ROOT="$(cd "$2" && pwd)"
+      shift
+      ;;
     --dry-run) DRY_RUN=1 ;;
     --nixos) DO_NIXOS=1 ;;
     --agents) DO_AGENTS=1 ;;
@@ -78,8 +83,8 @@ fi
 require_cmd voom
 require_cmd jq
 
-if [ "$DO_NIXOS" -eq 1 ] && [ ! -f "$REPO_ROOT/flake.nix" ]; then
-  echo "No flake.nix in $REPO_ROOT" >&2
+if [ "$DO_NIXOS" -eq 1 ] && [ ! -f "$FLAKE_ROOT/flake.nix" ]; then
+  echo "No flake.nix in $FLAKE_ROOT" >&2
   exit 1
 fi
 
@@ -135,10 +140,10 @@ phase_nixos() {
     attr="vm-${arch}-${format/qcow2/qcow}"
   fi
 
-  echo "    nixos: $REPO_ROOT#$attr"
+  echo "    nixos: $FLAKE_ROOT#$attr"
   if [ "$DRY_RUN" -eq 1 ]; then return 0; fi
 
-  voom nixos switch "$name" --flake "$REPO_ROOT#$attr" -- --sudo
+  voom nixos switch "$name" --flake "$FLAKE_ROOT#$attr" -- --sudo
 }
 
 phase_agents() {

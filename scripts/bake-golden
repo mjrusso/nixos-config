@@ -3,12 +3,13 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: bake-golden [--system SYSTEM] [--format FORMAT] [--output-dir DIR]
+Usage: bake-golden [--flake PATH] [--system SYSTEM] [--format FORMAT] [--output-dir DIR]
 
 Builds the flake's `.#images.<system>.<format>` output and installs it under
 $VMS_DIR (default ~/vms) as a "golden" image with a per-image sidecar.
 
 Options:
+  --flake PATH        Flake to build. Defaults to the current directory.
   --system SYSTEM     One of: x86_64-linux, aarch64-linux.
                       Defaults to the host architecture.
   --format FORMAT     One of: qcow, raw. Defaults to the host's VMM:
@@ -41,15 +42,18 @@ copy_image() {
   cp "$src" "$dst"
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/.." && pwd))"
-
+FLAKE_ROOT="$(pwd)"
 SYSTEM=""
 FORMAT=""
 OUTPUT_DIR="${VMS_DIR:-$HOME/vms}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --flake)
+      [ "$#" -ge 2 ] || { echo "--flake requires a path" >&2; exit 1; }
+      FLAKE_ROOT="$(cd "$2" && pwd)"
+      shift 2
+      ;;
     --system) SYSTEM="$2"; shift 2 ;;
     --format) FORMAT="$2"; shift 2 ;;
     --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
@@ -85,12 +89,12 @@ require_cmd jq
 
 mkdir -p "$OUTPUT_DIR"
 
-echo "Building .#images.${SYSTEM}.${FORMAT} from $REPO_ROOT..."
-(cd "$REPO_ROOT" && nix build ".#images.${SYSTEM}.${FORMAT}")
+echo "Building .#images.${SYSTEM}.${FORMAT} from $FLAKE_ROOT..."
+(cd "$FLAKE_ROOT" && nix build ".#images.${SYSTEM}.${FORMAT}")
 
-SRC="$(find -L "$REPO_ROOT/result" -maxdepth 3 -type f \( -name "*.qcow2" -o -name "*.raw" -o -name "*.img" \) -print -quit)"
+SRC="$(find -L "$FLAKE_ROOT/result" -maxdepth 3 -type f \( -name "*.qcow2" -o -name "*.raw" -o -name "*.img" \) -print -quit)"
 [ -n "${SRC:-}" ] && [ -f "$SRC" ] || {
-  echo "No image file found under $REPO_ROOT/result" >&2
+  echo "No image file found under $FLAKE_ROOT/result" >&2
   exit 1
 }
 
@@ -103,10 +107,10 @@ copy_image "$SRC" "$DEST.partial"
 chmod u+w "$DEST.partial"
 mv "$DEST.partial" "$DEST"
 
-USER_FIELD="$(nix eval --raw -f "$REPO_ROOT/user-info.nix" user)"
+USER_FIELD="$(nix eval --raw -f "$FLAKE_ROOT/user-info.nix" user)"
 BAKED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-FLAKE_REV="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
-if [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
+FLAKE_REV="$(git -C "$FLAKE_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ -n "$(git -C "$FLAKE_ROOT" status --porcelain 2>/dev/null)" ]; then
   FLAKE_REV="${FLAKE_REV}-dirty"
 fi
 

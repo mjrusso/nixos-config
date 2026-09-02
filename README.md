@@ -1,28 +1,60 @@
 # mjrusso's NixOS System Configurations
 
+This shared repository contains the modules and tools for my systems. I keep
+user- and host-specific values in a separate system configuration repository,
+which consumes the shared flake.
+
+The shared flake exports the following constructors under `lib`:
+
+- `mkDarwinConfiguration`
+- `mkNixosConfiguration`
+- `mkHomeConfiguration`
+- `mkVmConfiguration`
+- `mkImage`
+
+Each constructor wires the inputs and modules from the shared repository. Each
+accepts `userInfo` and, where applicable, `hostInfo`. The constructors also
+accept `extraModules`, `extraHomeModules`, and `extraSpecialArgs` for local
+extensions.
+
 ## Setup and Installation
 
-Start by editing [`user-info.nix`](./user-info.nix) to set your desired
-username, full name, email address, and SSH public keys.
+### Create a system configuration repository
 
-To prevent local edits to machine-local files from showing up as modifications
-(and to prevent committing changes), flag them with the [`skip-worktree`
-bit](https://git-scm.com/docs/git-update-index#_skip_worktree_bit) in each
-clone:
+Create a Git repository from the included template:
 
 ``` bash
-git update-index --skip-worktree user-info.nix
-git update-index --skip-worktree host-info.nix
+mkdir my-system-config
+cd my-system-config
+git init
+nix flake init -t github:mjrusso/nixos-config#system-config
 ```
 
-_(To verify the flag is set, run `git ls-files -v user-info.nix host-info.nix`;
-an `S` prefix means `skip-worktree` is on.)_
+The generated `flake.nix` uses `github:mjrusso/nixos-config` as an input and
+re-exports its apps. It also creates Darwin, NixOS, standalone Home Manager,
+VM, image, and check outputs. Remove outputs you do not need, or use the extra
+module arguments above to extend them.
 
-To undo (e.g. to pull an upstream change to the template), run the same
-command with `--no-skip-worktree`.
+At its simplest, the system configuration flake uses this input and
+constructor:
 
-For NixOS hosts, keep stable machine identity in `host-info.nix` next to
-`user-info.nix`:
+``` nix
+inputs.nixos-config.url = "github:mjrusso/nixos-config";
+
+outputs = { nixos-config, ... }: {
+  nixosConfigurations.x86_64-linux =
+    nixos-config.lib.mkNixosConfiguration {
+      system = "x86_64-linux";
+      userInfo = import ./user-info.nix;
+      hostInfo = import ./host-info.nix;
+    };
+};
+```
+
+The template repeats this pattern for all supported output types.
+
+Edit the generated `user-info.nix` with your username, name, email address,
+and SSH public keys. For a physical NixOS host, edit `host-info.nix`:
 
 ``` nix
 {
@@ -47,8 +79,28 @@ partitions and installs onto (see the NixOS install section below).
 an IP address to a list of names, for example `{ "192.168.1.10" = [
 "fileserver" ]; }`.
 
-Like `user-info.nix`, this file contains machine-local values and should not be
-casually changed after install.
+This file contains stable machine identity and should not be casually changed
+after installation. Commit the configuration files normally. Use a private
+repository if you do not want to publish them.
+
+Add the generated files before evaluating the system configuration flake. Then
+create and commit its lock file:
+
+``` bash
+git add flake.nix user-info.nix host-info.nix .gitignore
+nix flake lock
+git add flake.lock
+git commit -m "Initialize system configuration"
+```
+
+Unless a section says otherwise, run the commands below from the system
+configuration repository. To test unpublished changes in a sibling checkout
+of the shared repository, override the input:
+
+``` bash
+nix run .#build --override-input nixos-config path:../nixos-config
+nix flake check --override-input nixos-config path:../nixos-config
+```
 
 ### Mac
 
@@ -61,8 +113,8 @@ xcode-select --install
 Next, install Nix using [The Determinate Nix
 Installer](https://zero-to-nix.com/concepts/nix-installer).
 
-Then clone this repository, `cd` into the directory, and run the following
-command to build and apply changes:
+Then clone your system configuration repository, `cd` into it, and build and
+apply the configuration:
 
 ``` bash
 nix run .#build-switch
@@ -92,8 +144,8 @@ nix-channel --update
 nix-shell '<home-manager>' -A install
 ```
 
-Then clone this repository, `cd` into the directory, and run the following
-command to build and apply changes:
+Then clone your system configuration repository, `cd` into it, and build and
+apply the configuration:
 
 ``` bash
 nix run .#build-switch
@@ -130,9 +182,12 @@ sudo -i
 ip -br addr show           # confirm wired NIC has a DHCP lease
 ping -c2 1.1.1.1           # confirm outbound works
 cd /tmp
-git clone https://github.com/mjrusso/nixos-config.git
-cd nixos-config
+git clone <your-configuration-repository-url> system-config
+cd system-config
 ```
+
+For a private repository, authenticate Git in the installer environment before
+cloning it.
 
 Identify the target disk and note its stable `by-id` path:
 
@@ -141,9 +196,8 @@ lsblk -d -o NAME,SIZE,TYPE
 ls -l /dev/disk/by-id/ | grep -v part
 ```
 
-Then fill in `host-info.nix` and `user-info.nix` per the descriptions at the
-top of this file, with `nixosMainDisk` set to the `by-id` path identified
-above.
+Confirm `host-info.nix` and `user-info.nix` contain the intended values, with
+`nixosMainDisk` set to the `by-id` path identified above.
 
 #### Run disko and set ZFS encryption passphrase
 
@@ -243,7 +297,7 @@ passwd <user>              # the username defined in user-info.nix
 Generate a long random password and store it in your password manager
 alongside the ZFS and root passwords. Since `users.mutableUsers` is `true` by
 default, this password persists across `nixos-rebuild`s and is not stored in
-the flake.
+the system configuration flake.
 
 #### SSH-in-initrd unlock
 
@@ -358,8 +412,8 @@ journalctl -u syncthing -b
 Physical NixOS hosts back up the user's home directory (minus some exceptions)
 to a remote target over SFTP using [restic](https://restic.net/). The job is
 defined in [`hosts/nixos/default.nix`](./hosts/nixos/default.nix) and driven by
-the `nixosBackup` block in [`host-info.nix`](./host-info.nix). Container and VM
-images do not enable backups.
+the `nixosBackup` block in your system configuration repository's
+`host-info.nix`. Container and VM images do not enable backups.
 
 ``` nix
 nixosBackup = {
@@ -377,13 +431,13 @@ colliding.
 
 Additional keys:
 
-| Key                    | Default                                        |
-|------------------------|------------------------------------------------|
-| `targetUser`           | `user` from [`user-info.nix`](./user-info.nix) |
-| `passwordFile`         | `/etc/restic/password`                         |
-| `identityFile`         | that user's `~/.ssh/id_ed25519_restic`         |
-| `voomGuests`           | `false`, see [Voom Guests](#voom-guests)       |
-| `voomReadIdentityFile` | that user's `~/.ssh/id_ed25519_voom_read`      |
+| Key                    | Default                                                     |
+|------------------------|-------------------------------------------------------------|
+| `targetUser`           | `user` from your system configuration repository's `user-info.nix` |
+| `passwordFile`         | `/etc/restic/password`                                      |
+| `identityFile`         | that user's `~/.ssh/id_ed25519_restic`                      |
+| `voomGuests`           | `false`, see [Voom Guests](#voom-guests)                    |
+| `voomReadIdentityFile` | that user's `~/.ssh/id_ed25519_voom_read`                   |
 
 Setting `enable = false`, or omitting the block, removes the service and its
 timer.
@@ -399,10 +453,10 @@ timer.
      -f ~/.ssh/id_ed25519_restic
    ```
 
-   Authorize it by adding the public key to `resticKey` in
-   [`user-info.nix`](./user-info.nix) and rebuilding the target host. Note that
-   the target's configuration confines the key to sftp, and `resticKeySource`
-   defines the address it can connect from.
+   Authorize it by adding the public key to `resticKey` in your system
+   configuration repository's `user-info.nix`, then rebuild the target host.
+   The target's configuration confines the key to sftp, and
+   `resticKeySource` defines the address it can connect from.
 
    ``` nix
    resticKey = "ssh-ed25519 AAAA...";
@@ -471,14 +525,14 @@ configure:
      -f ~/.ssh/id_ed25519_voom_read
    ```
 
-2. Add the public key to `voomReadKey` in [`user-info.nix`](./user-info.nix).
-   `voomReadKeySource` is the address a guest sees for a connection originating
-   on the host (i.e., gvproxy's gateway).
+2. Add the public key to `voomReadKey` in your system configuration
+   repository's `user-info.nix`. `voomReadKeySource` is the address a guest
+   sees for a connection originating on the host (i.e., gvproxy's gateway).
 
 3. Push the guest configuration, then rebuild this host, in this order.
 
    ``` bash
-   voom-update
+   nix run .#voom-update
    nix run .#build-switch
    ```
 
@@ -592,10 +646,11 @@ Additional tooling is provided that makes it easy to build and run VM images:
   date with this host: the system configuration, [agent skills](#agent-skills),
   and `~/.emacs.d`.
 
-From the root of this repository, bake (produce) a golden image:
+From the system configuration repository, bake (produce) a golden image:
 
 ``` bash
-./scripts/bake-golden    # (flags: --system x86_64-linux|aarch64-linux, --format qcow|raw)
+nix run .#bake-golden
+# Optional flags: --system x86_64-linux|aarch64-linux, --format qcow|raw
 ```
 
 Then import the image, and create/start the VM using Voom, and run the
@@ -614,8 +669,8 @@ voom ssh my-vm -- home-bootstrap
 _(In this example, the image is named `golden`, and the VM is named `my-vm`;
 both names are arbitrary)._
 
-Later, to rebuild and switch an existing VM in place after changing this flake,
-run:
+Later, to rebuild and switch an existing VM in place after changing the system
+configuration flake, run:
 
 ``` bash
 voom nixos switch my-vm \
@@ -629,18 +684,26 @@ normal use the guest architecture matches the host architecture: use
 or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
 `raw` image.
 
-To update every NixOS VM at once, use [`voom-update`](./scripts/voom-update):
+To update every NixOS VM at once, run the exported `voom-update` app:
 
 ``` bash
-./scripts/voom-update              # all NixOS guests; add --dry-run to preview
-./scripts/voom-update my-vm        # or name specific VMs
+nix run .#voom-update                            # all guests
+nix run .#voom-update -- --dry-run               # preview
+nix run .#voom-update -- my-vm                   # specific VMs
+```
+
+The NixOS phase uses the system configuration flake in the current directory.
+To run it from another directory, pass the configuration path to both commands:
+
+``` bash
+nix run /path/to/system-config#voom-update -- --flake /path/to/system-config
 ```
 
 The script runs three phases:
 
 | Phase      | What it does                                                                        |
 |------------|-------------------------------------------------------------------------------------|
-| `--nixos`  | Rebuilds and switches the guest onto this checkout's configuration.                 |
+| `--nixos`  | Rebuilds and switches the guest onto the system configuration checkout.              |
 | `--agents` | Mirrors `~/.agents` into the guest over rsync, then runs `agent-skills-link` there. |
 | `--emacs`  | Pulls the guest's `~/.emacs.d` clone (cloning it first if missing).                 |
 
@@ -648,9 +711,9 @@ With no phase flag, all three run. Name one or more to run only the specified
 phase(s):
 
 ``` bash
-./scripts/voom-update --agents            # skills only, every guest
-./scripts/voom-update --agents my-vm      # skills only, one guest
-./scripts/voom-update --nixos --emacs     # skip the skills mirror
+nix run .#voom-update -- --agents          # skills only, every guest
+nix run .#voom-update -- --agents my-vm    # skills only, one guest
+nix run .#voom-update -- --nixos --emacs   # skip the skills mirror
 ```
 
 Every phase selects VMs the same way: the script ignores guests whose image
@@ -663,9 +726,9 @@ Phases are independent: a failure in one doesn't stop the others, and the
 summary names both the VM and the phases that failed (`failed: my-vm(agents)`).
 
 The `agents` phase exists because [agent skills](#agent-skills) are not part of
-the flake, and VM guests are not Syncthing peers (only physical hosts run the
-service). `agent-skills-link` is installed on a guest only through this flake,
-so a guest still on an older configuration will report `has no
+the system configuration flake, and VM guests are not Syncthing peers (only
+physical hosts run the service). `agent-skills-link` comes from the shared
+repository, so a guest still on an older configuration will report `has no
 agent-skills-link: run the nixos phase first`.
 
 `voom-update` does not push agent *configuration* (credentials, settings,
@@ -693,7 +756,7 @@ etc.). See [`agent-config-push`](#agent-configuration).
 >
 > ``` bash
 > # On the host with Linux builder:
-> ./scripts/bake-golden --format raw --system aarch64-linux
+> nix run .#bake-golden -- --format raw --system aarch64-linux
 >
 > # From the other host:
 > rsync -aS --info=progress2 \
@@ -711,8 +774,8 @@ etc.). See [`agent-config-push`](#agent-configuration).
 > `boot.binfmt.emulatedSystems = [ "aarch64-linux" ]`.
 
 Then, to run and manage virtual machines that use this base image, use the
-[Voom](https://github.com/mjrusso/voom) CLI (installed automatically via this
-Flake).
+[Voom](https://github.com/mjrusso/voom) CLI. The system configuration installs
+it automatically.
 
 #### Publishing VM Web Apps Over Tailscale
 
@@ -757,7 +820,8 @@ Use the following format for the `cloudflare.env` file:
 CLOUDFLARE_API_TOKEN=...
 ```
 
-Then update your local `host-info.nix` to enable declarative Caddy publishing:
+Then enable declarative Caddy publishing in your system configuration
+repository's `host-info.nix`:
 
 ``` nix
 {
@@ -768,9 +832,10 @@ Then update your local `host-info.nix` to enable declarative Caddy publishing:
     # elsewhere (e.g. a secrets manager's /run/secrets path).
     # cloudflareEnvironmentFile = "/run/secrets/caddy-cloudflare.env";
 
-    # The default is [ ":443" ]. This repo's Tailscale module trusts tailscale0,
-    # and this module does not open TCP/443 on non-tailnet interfaces. Set this
-    # to an explicit Tailscale address if socket-level binding is preferred.
+    # The default is [ ":443" ]. The Tailscale module in the shared repository
+    # trusts tailscale0, and this module does not open TCP/443 on non-tailnet
+    # interfaces. Set this to an explicit Tailscale address if socket-level
+    # binding is preferred.
     # listen = [ "<tailscale-ip>:443" ];
 
     routes.voom = {
@@ -902,7 +967,8 @@ Proxy status: DNS only
 TTL: Auto
 ```
 
-Next, add a route with `syncer = "docker"` to your local `host-info.nix`:
+Next, add a route with `syncer = "docker"` to your system configuration
+repository's `host-info.nix`:
 
 ``` nix
 {
@@ -1057,7 +1123,7 @@ which must be manually installed.
 Emacs is installed via Nix, using a custom build
 ([mjrusso/emacs-flake](https://github.com/mjrusso/emacs-flake)).
 
-This flake is automatically built and
+The Emacs flake is automatically built and
 [cached](https://garnix.io/docs/ci/caching/) by [Garnix](https://garnix.io/).
 
 - Garnix's binary cache is configured automatically for Darwin and NixOS hosts
@@ -1095,9 +1161,10 @@ If nothing matches, Nix won't query Garnix, and any build that depends on a
 pre-built artifact there (such as Emacs) will fall through to building from source.
 
 Note that my [Emacs configuration](https://github.com/mjrusso/.emacs.d) is not
-part of this repository (and not managed by _home-manager_). It is cloned into
-`~/.emacs.d` automatically by the [`home-bootstrap`](./scripts/home-bootstrap)
-script, or can alternatively be cloned directly:
+part of the shared repository (and not managed by _home-manager_). It is cloned
+into `~/.emacs.d` automatically by the
+[`home-bootstrap`](./scripts/home-bootstrap) script, or can alternatively be
+cloned directly:
 
 ``` bash
 git clone https://github.com/mjrusso/.emacs.d ~/.emacs.d
@@ -1185,8 +1252,7 @@ keys are sent.
 
 ## Usage
 
-_(These commands must be executed from the directory that this repo has been
-cloned to.)_
+Run these commands from your system configuration repository.
 
 To build (without applying changes):
 
@@ -1206,9 +1272,9 @@ dispatcher. The dispatcher maps `build` to a build-only action and
 current platform.
 
 On NixOS, it detects `/etc/NIXOS` and calls `nixos-rebuild` for the current
-architecture. In one of this repo's VM guests, it selects the matching
-`vm-<system>-<format>` configuration instead. On x86_64 NixOS, the direct
-equivalents are:
+architecture. In a VM guest created by the system configuration, it selects
+the matching `vm-<system>-<format>` configuration instead. On x86_64 NixOS,
+the direct equivalents are:
 
 ``` bash
 nixos-rebuild build --flake .#x86_64-linux
@@ -1240,15 +1306,36 @@ configuration from `system_profiler`, builds
 > Store](https://zero-to-nix.com/concepts/nix-store). Ensure that any new files
 > have been added to the working tree (use `git add`) before running
 > `nix run .#build` or `nix run .#build-switch`, or they will be ignored. (The
-> files do not need to be committed to the repo.)
+> files do not need to be committed to the system configuration repository.)
 
 ### Updating dependencies
 
-To update dependencies, run:
+Both repositories are flakes, and each repository has its own `flake.lock`.
+The lock file in the shared repository pins inputs such as Nixpkgs, Home
+Manager, and nix-darwin. To update those inputs, run this command in the shared
+repository:
 
 ``` bash
 nix flake update
 ```
+
+Commit and push the updated lock file with the related changes. Your system
+configuration repository continues to use its pinned revision of the shared
+repository until you update it. Run this command in the system
+configuration repository to update only that revision:
+
+``` bash
+nix flake update nixos-config
+```
+
+The lock file in the system configuration repository records the selected
+revision of the shared repository and the resulting dependency graph. Its
+inputs that follow the shared repository, such as Nixpkgs, update at the same
+time. Use `nix flake update` without an input name if you add other independent
+inputs and want to update all of them.
+
+The `--override-input nixos-config path:../nixos-config` option temporarily uses
+a local checkout. It does not change either lock file.
 
 ### Garbage collection
 
@@ -1294,14 +1381,15 @@ nix flake check --show-trace --print-build-logs
 Examples of how to run a single check:
 
 ``` bash
-nix build .#checks.aarch64-darwin.darwin-aarch64-darwin@desktop
-nix build .#checks.aarch64-darwin.nixos-x86_64-linux
-nix build .#checks.aarch64-darwin.image-x86_64-linux-docker
+nix build .#checks.x86_64-linux.darwin-aarch64-darwin@desktop
+nix build .#checks.x86_64-linux.nixos-x86_64-linux
+nix build .#checks.x86_64-linux.image-x86_64-linux-docker
 ```
 
 Each check forces full evaluation of a configuration's module system without
-building the target derivation, so most of them run on any platform. The Darwin
-checks are the exception: they need a Darwin builder.
+building the target derivation. Use the `checks.<host-system>` namespace for
+the machine running the check; evaluating a Darwin configuration this way does
+not require a Darwin builder.
 
 ## References
 
@@ -1309,9 +1397,3 @@ checks are the exception: they need a Darwin builder.
 - https://github.com/mitchellh/nixos-config
 - https://determinate.systems/posts/nix-direnv/
 - https://mitchellh.com/writing/nix-with-dockerfiles
-
-## Thanks
-
-Thanks to [Dustin Lyons's starter
-template](https://github.com/dustinlyons/nixos-config), which this
-configuration is based off of.
