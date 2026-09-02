@@ -31,8 +31,8 @@ Pushed:
                                 destination's file. Unless --no-config.
 
 Never pushed:
-  skills/                       Owned by agent-skills-link.
-  agents/, commands/, rules/    Managed through ~/.agents.
+  skills/                       Managed separately.
+  agents/, commands/, rules/    Managed separately.
   hooks/
   .claude.json, and all per-machine state: sessions, history, caches,
   databases, installation ids.

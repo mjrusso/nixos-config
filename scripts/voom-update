@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Bring VM guests up to date with this host, in three phases:
+# Bring VM guests up to date with this host, in two phases:
 #
 #   nixos    `voom nixos switch` against this checkout
-#   agents   rsync `~/.agents`, then `agent-skills-link` in the guest
 #   emacs    pull the guest's `~/.emacs.d` clone
 
 usage() {
   cat <<'USAGE'
-Usage: voom-update [--flake PATH] [--public-flake PATH] [--dry-run] [--nixos] [--agents] [--emacs] [VM...]
+Usage: voom-update [--flake PATH] [--public-flake PATH] [--dry-run] [--nixos] [--emacs] [VM...]
 
 Updates VM guests from this host.
 
 With no VM names, updates every VM whose image runs this configuration. Stopped
 VMs are skipped.
 
-Phases (with no phase flag, all three run, in this order):
+Phases (with no phase flag, both run, in this order):
   --nixos             Rebuild and switch onto this checkout's configuration.
-  --agents            Mirror ~/.agents into the guest and link the skills.
   --emacs             Update the guest's ~/.emacs.d clone.
 
 Options:
@@ -26,19 +24,13 @@ Options:
                       directory.
   --public-flake PATH Override the flake's nixos-config input during NixOS
                       switches.
-  --dry-run           List what would be done, without doing it. The agents
-                      phase connects to each guest to itemize the transfer,
-                      including the deletions.
+  --dry-run           List what would be done, without doing it.
   -h, --help          Show this help.
 
 Environment:
-  AGENTS_DIR          Canonical skills root (default: ~/.agents).
   EMACS_REPO_URL      Emacs configuration repository to clone if missing.
 
 Notes:
-  The agents phase is a mirror: it deletes any skill that is in a guest but not
-  on this host. Install skills on a physical host, not in a VM.
-
   The emacs phase skips a guest whose ~/.emacs.d has uncommitted changes, and
   reports that guest as failed. It never discards local work.
 USAGE
@@ -50,13 +42,11 @@ require_cmd() {
 
 FLAKE_ROOT="$(pwd)"
 PUBLIC_FLAKE=""
-AGENTS_DIR="${AGENTS_DIR:-$HOME/.agents}"
 EMACS_REPO_URL="${EMACS_REPO_URL:-https://github.com/mjrusso/.emacs.d}"
 
 DRY_RUN=0
 NAMES=()
 DO_NIXOS=0
-DO_AGENTS=0
 DO_EMACS=0
 
 while [ $# -gt 0 ]; do
@@ -73,7 +63,6 @@ while [ $# -gt 0 ]; do
       ;;
     --dry-run) DRY_RUN=1 ;;
     --nixos) DO_NIXOS=1 ;;
-    --agents) DO_AGENTS=1 ;;
     --emacs) DO_EMACS=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) usage >&2; exit 1 ;;
@@ -82,9 +71,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-if [ "$DO_NIXOS" -eq 0 ] && [ "$DO_AGENTS" -eq 0 ] && [ "$DO_EMACS" -eq 0 ]; then
+if [ "$DO_NIXOS" -eq 0 ] && [ "$DO_EMACS" -eq 0 ]; then
   DO_NIXOS=1
-  DO_AGENTS=1
   DO_EMACS=1
 fi
 
@@ -95,29 +83,6 @@ if [ "$DO_NIXOS" -eq 1 ] && [ ! -f "$FLAKE_ROOT/flake.nix" ]; then
   echo "No flake.nix in $FLAKE_ROOT" >&2
   exit 1
 fi
-
-if [ "$DO_AGENTS" -eq 1 ]; then
-  require_cmd rsync
-  if [ ! -d "$AGENTS_DIR" ]; then
-    echo "No agents directory at $AGENTS_DIR" >&2
-    exit 1
-  fi
-fi
-
-SSH_CONFIG="$(mktemp)"
-trap 'rm -f "$SSH_CONFIG"' EXIT
-
-# rsync needs its own ssh invocation, so go through the guest's OpenSSH config
-# rather than `voom ssh`. Write that config to a file: the fd behind a process
-# substitution does not reliably outlive rsync's ssh child. This echoes the
-# host alias the config declares, rather than rebuild the alias here.
-ssh_host_for() {
-  local name="$1" host
-  voom ssh-config "$name" > "$SSH_CONFIG" || return 1
-  host="$(awk '/^[[:space:]]*Host[[:space:]]/ { print $2; exit }' "$SSH_CONFIG")"
-  [ -n "$host" ] || { echo "No Host alias in ssh config for $name" >&2; return 1; }
-  echo "$host"
-}
 
 phase_nixos() {
   local name="$1" info="$2" attr arch image format field
@@ -158,44 +123,6 @@ phase_nixos() {
   voom nixos switch "$name" --flake "$FLAKE_ROOT#$attr" -- "${rebuild_args[@]}"
 }
 
-phase_agents() {
-  local name="$1" host err
-  local -a rsync_opts=(
-    -az --delete
-    --exclude='.stfolder/'
-    --exclude='.stversions/'
-    --exclude='.stignore'
-    --exclude='.stignore_synced'
-  )
-
-  echo "    agents: $AGENTS_DIR"
-
-  if [ "$DRY_RUN" -eq 1 ]; then
-    rsync_opts+=(--dry-run --itemize-changes)
-  fi
-
-  if ! err="$(voom ssh "$name" -- true 2>&1 >/dev/null)"; then
-    echo "cannot reach $name over ssh${err:+: $err}" >&2
-    return 1
-  fi
-
-  if ! voom ssh "$name" -- command -v agent-skills-link >/dev/null 2>&1; then
-    echo "$name has no agent-skills-link: run the nixos phase first" >&2
-    return 1
-  fi
-
-  host="$(ssh_host_for "$name")" || return 1
-
-  rsync "${rsync_opts[@]}" -e "ssh -F $SSH_CONFIG" \
-    "$AGENTS_DIR/" "$host:.agents/" || return 1
-
-  if [ "$DRY_RUN" -eq 1 ]; then
-    voom ssh "$name" -- agent-skills-link --dry-run
-  else
-    voom ssh "$name" -- agent-skills-link
-  fi
-}
-
 phase_emacs() {
   local name="$1"
 
@@ -228,7 +155,7 @@ REMOTE
 }
 
 # Ignore non-NixOS guests. `nixosSwitch` is the proxy for "runs this
-# configuration", and so for guests that have `agent-skills-link` and `git`.
+# configuration", and so for guests that have `git`.
 if [ ${#NAMES[@]} -eq 0 ]; then
   while read -r name; do
     [ -n "$name" ] || continue
@@ -271,9 +198,6 @@ for name in "${NAMES[@]}"; do
   failed_phases=()
   if [ "$DO_NIXOS" -eq 1 ]; then
     phase_nixos "$name" "$info" || failed_phases+=("nixos")
-  fi
-  if [ "$DO_AGENTS" -eq 1 ]; then
-    phase_agents "$name" || failed_phases+=("agents")
   fi
   if [ "$DO_EMACS" -eq 1 ]; then
     phase_emacs "$name" || failed_phases+=("emacs")

@@ -643,8 +643,7 @@ Additional tooling is provided that makes it easy to build and run VM images:
   (start, stop, SSH, deletion, etc.).
 
 - [`voom-update`](./scripts/voom-update) brings every running NixOS guest up to
-  date with this host: the system configuration, [agent skills](#agent-skills),
-  and `~/.emacs.d`.
+  date with this host: the system configuration and `~/.emacs.d`.
 
 From the system configuration repository, bake (produce) a golden image:
 
@@ -699,21 +698,19 @@ To run it from another directory, pass the configuration path to both commands:
 nix run /path/to/system-config#voom-update -- --flake /path/to/system-config
 ```
 
-The script runs three phases:
+The script runs two phases:
 
-| Phase      | What it does                                                                        |
-|------------|-------------------------------------------------------------------------------------|
-| `--nixos`  | Rebuilds and switches the guest onto the system configuration checkout.              |
-| `--agents` | Mirrors `~/.agents` into the guest over rsync, then runs `agent-skills-link` there. |
-| `--emacs`  | Pulls the guest's `~/.emacs.d` clone (cloning it first if missing).                 |
+| Phase     | What it does                                                            |
+|-----------|-------------------------------------------------------------------------|
+| `--nixos` | Rebuilds and switches the guest onto the system configuration checkout. |
+| `--emacs` | Pulls the guest's `~/.emacs.d` clone (cloning it first if missing).     |
 
-With no phase flag, all three run. Name one or more to run only the specified
+With no phase flag, both phases run. Name one or more to run only the specified
 phase(s):
 
 ``` bash
-nix run .#voom-update -- --agents          # skills only, every guest
-nix run .#voom-update -- --agents my-vm    # skills only, one guest
-nix run .#voom-update -- --nixos --emacs   # skip the skills mirror
+nix run .#voom-update -- --nixos
+nix run .#voom-update -- --emacs my-vm
 ```
 
 Every phase selects VMs the same way: the script ignores guests whose image
@@ -723,21 +720,12 @@ the guest was last switched to, and otherwise derives the target from the VM's
 architecture and image format.
 
 Phases are independent: a failure in one doesn't stop the others, and the
-summary names both the VM and the phases that failed (`failed: my-vm(agents)`).
-
-The `agents` phase exists because [agent skills](#agent-skills) are not part of
-the system configuration flake, and VM guests are not Syncthing peers (only
-physical hosts run the service). `agent-skills-link` comes from the shared
-repository, so a guest still on an older configuration will report `has no
-agent-skills-link: run the nixos phase first`.
+summary names both the VM and the phases that failed (`failed: my-vm(emacs)`).
 
 `voom-update` does not push agent *configuration* (credentials, settings,
 etc.). See [`agent-config-push`](#agent-configuration).
 
 > [!NOTE]
->
-> The `agents` phase is a mirror: it deletes any skill that is in a guest but
-> not on this host. Install skills on a physical host, not inside a VM.
 >
 > The `emacs` phase skips a guest whose `~/.emacs.d` has uncommitted changes,
 > and reports that guest as failed. It pulls from
@@ -1169,49 +1157,6 @@ cloned directly:
 ``` bash
 git clone https://github.com/mjrusso/.emacs.d ~/.emacs.d
 ```
-
-#### Agent Skills
-
-Global agent skills live in `~/.agents/skills/`, installed with `npx skills add
-<source> -g`. Each agent has its own skills directory, with one symlink per
-skill:
-
-``` text
-~/.claude/skills/<name>   ->   ~/.agents/skills/<name>
-~/.codex/skills/<name>    ->   ~/.agents/skills/<name>
-```
-
-[Syncthing](#syncthing) syncs `~/.agents/` between physical hosts, so every
-machine gets the same skills. It does not create the symlinks, which live
-outside `~/.agents/` and differ per machine. Create them with
-[`agent-skills-link`](./scripts/agent-skills-link), on every machine, after
-installing a skill:
-
-``` bash
-agent-skills-link --dry-run    # report what would change
-agent-skills-link
-```
-
-The script is idempotent. It removes a symlink only when that symlink points
-into `~/.agents/skills/` and its target is no longer a skill, so
-`~/.codex/skills/.system` and anything else in an agent's directory survives.
-It exits non-zero if a real file or directory blocked a skill from being
-linked.
-
-A skill is any subdirectory of `~/.agents/skills/` that holds a `SKILL.md`.
-
-Skills can be added manually:
-
-``` bash
-mkdir -p ~/.agents/skills/my-skill
-$EDITOR ~/.agents/skills/my-skill/SKILL.md
-agent-skills-link
-```
-
-...or from a git repository via `npx skills add ...`.
-
-To push skills to VM guests, see the `--agents` phase of
-[`voom-update`](#running-vm-images).
 
 #### Agent Configuration
 

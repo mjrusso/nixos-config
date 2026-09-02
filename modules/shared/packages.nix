@@ -172,12 +172,6 @@ with pkgs; [
     exec ${pkgs.bash}/bin/bash ${../../scripts/home-bootstrap} "$@"
   '')
 
-  # Links global agent skills from `~/.agents/skills/` into each agent's own
-  # skills directory.
-  (pkgs.writeShellScriptBin "agent-skills-link" ''
-    exec ${pkgs.bash}/bin/bash ${../../scripts/agent-skills-link} "$@"
-  '')
-
   # Pushes coding agent (Claude Code, Codex, etc.) configuration (credentials,
   # etc.) from this machine to other SSH destinations.
   (pkgs.writeShellScriptBin "agent-config-push" ''
