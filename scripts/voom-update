@@ -9,7 +9,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: voom-update [--flake PATH] [--dry-run] [--nixos] [--agents] [--emacs] [VM...]
+Usage: voom-update [--flake PATH] [--public-flake PATH] [--dry-run] [--nixos] [--agents] [--emacs] [VM...]
 
 Updates VM guests from this host.
 
@@ -24,6 +24,8 @@ Phases (with no phase flag, all three run, in this order):
 Options:
   --flake PATH        Flake to use for NixOS switches. Defaults to the current
                       directory.
+  --public-flake PATH Override the flake's nixos-config input during NixOS
+                      switches.
   --dry-run           List what would be done, without doing it. The agents
                       phase connects to each guest to itemize the transfer,
                       including the deletions.
@@ -47,6 +49,7 @@ require_cmd() {
 }
 
 FLAKE_ROOT="$(pwd)"
+PUBLIC_FLAKE=""
 AGENTS_DIR="${AGENTS_DIR:-$HOME/.agents}"
 EMACS_REPO_URL="${EMACS_REPO_URL:-https://github.com/mjrusso/.emacs.d}"
 
@@ -61,6 +64,11 @@ while [ $# -gt 0 ]; do
     --flake)
       [ "$#" -ge 2 ] || { echo "--flake requires a path" >&2; exit 1; }
       FLAKE_ROOT="$(cd "$2" && pwd)"
+      shift
+      ;;
+    --public-flake)
+      [ "$#" -ge 2 ] || { echo "--public-flake requires a path" >&2; exit 1; }
+      PUBLIC_FLAKE="$(cd "$2" && pwd)"
       shift
       ;;
     --dry-run) DRY_RUN=1 ;;
@@ -113,6 +121,7 @@ ssh_host_for() {
 
 phase_nixos() {
   local name="$1" info="$2" attr arch image format field
+  local -a rebuild_args=(--sudo)
 
   # A phase runs as the left side of `||`, which disables errexit for the whole
   # function body. Every step that feeds the flake target is therefore checked
@@ -143,7 +152,10 @@ phase_nixos() {
   echo "    nixos: $FLAKE_ROOT#$attr"
   if [ "$DRY_RUN" -eq 1 ]; then return 0; fi
 
-  voom nixos switch "$name" --flake "$FLAKE_ROOT#$attr" -- --sudo
+  if [ -n "$PUBLIC_FLAKE" ]; then
+    rebuild_args+=(--override-input nixos-config "$PUBLIC_FLAKE")
+  fi
+  voom nixos switch "$name" --flake "$FLAKE_ROOT#$attr" -- "${rebuild_args[@]}"
 }
 
 phase_agents() {
