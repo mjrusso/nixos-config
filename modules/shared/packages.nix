@@ -172,12 +172,6 @@ with pkgs; [
     exec ${pkgs.bash}/bin/bash ${../../scripts/home-bootstrap} "$@"
   '')
 
-  # Pushes coding agent (Claude Code, Codex, etc.) configuration (credentials,
-  # etc.) from this machine to other SSH destinations.
-  (pkgs.writeShellScriptBin "agent-config-push" ''
-    exec ${pkgs.bash}/bin/bash ${../../scripts/agent-config-push} "$@"
-  '')
-
   # Scaffolds a new Nix flake project: a nix-direnv `.envrc`, a `flake.nix`
   # with a devShell, and a `justfile`.
   (pkgs.writeShellScriptBin "flake-init" ''
