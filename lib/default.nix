@@ -47,6 +47,16 @@ let
             virtualisation.docker.enable = true;
             users.users.${user}.extraGroups = [ "docker" ];
             time.timeZone = "America/New_York";
+            boot.kernel.sysctl = {
+              "vm.overcommit_memory" = 1;
+              "vm.swappiness" = 10;
+            };
+            swapDevices = [
+              {
+                device = "/swapfile";
+                size = 2048;
+              }
+            ];
           }
         ])
         ++ (nixpkgs.lib.optionals (format != null) [
