@@ -5,8 +5,8 @@ set -euo pipefail
 # with `default` and `ci` devShells, and a `justfile` into a directory.
 #
 # The files come from `templates/<name>/`, which the repo flake also exposes as
-# a flake template, so `nix flake init -t github:mjrusso/nixos-config` writes
-# the same files without going through this script. This script adds
+# a flake template, so `nix flake init -t github:mjrusso/nixos-config#dev-project`
+# writes the same files without going through this script. This script adds
 # --envrc-only, --force, and a target directory, and it skips files that
 # already exist rather than exiting 1 on the ones that differ.
 #
@@ -29,7 +29,7 @@ Options:
   -e, --envrc-only     Write only the .envrc, for a project that already has
                        a flake.
   -f, --force          Overwrite files that already exist.
-  -t, --template NAME  Template to scaffold from (default: default).
+  -t, --template NAME  Template to scaffold from (default: dev-project).
   -h, --help           Show this help.
 EOF
 }
@@ -43,7 +43,7 @@ default_templates_dir() {
   echo "${script_dir}/../templates"
 }
 
-template="default"
+template="dev-project"
 envrc_only=0
 force=0
 target=""
