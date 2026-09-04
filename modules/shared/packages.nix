@@ -1,5 +1,12 @@
 { pkgs }:
 
+let
+  llmAgentsFlake = "github:numtide/llm-agents.nix";
+
+  llmAgent = binary: attribute: pkgs.writeShellScriptBin binary ''
+    exec nix run "${llmAgentsFlake}#${attribute}" -- "$@"
+  '';
+in
 with pkgs; [
   # General packages for development and system management
   _1password-cli
@@ -160,6 +167,36 @@ with pkgs; [
       then "exec killall -9 emacs"
       else "exec pkill -9 -f 'emacs.*daemon'"}
   '')
+
+  # AI coding agents and development tools from numtide/llm-agents.nix.
+  #
+  # This is intentionally unpinned: the upstream programs update frequently
+  # (~daily), so `nix run github:...` is generally preferable to a pinned
+  # flake input that would need a manual `nix flake update` to stay current.
+  # Note that numtide's binary cache is trusted in `modules/shared/caches`,
+  # so programs are substituted, not built from source.
+  #
+  # To bypass the `tarball-ttl` cache (1h by default) and force a fresh
+  # fetch, run the underlying command directly with `--refresh`, for example:
+  # `nix run --refresh github:numtide/llm-agents.nix#claude-code`.
+  #
+  # `claude` and `codex` are executables rather than fish functions because
+  # callers outside fish need them: herdr resumes an agent pane by running
+  # `claude --resume <id>` itself, and herdr popup commands run via `sh`.
+  #
+  # See: <https://github.com/numtide/llm-agents.nix>
+  (pkgs.writeShellScriptBin "llm-agents" ''
+    if [ "$#" -eq 0 ]; then
+      exec nix run "${llmAgentsFlake}"
+    fi
+
+    attribute="$1"
+    shift
+    exec nix run "${llmAgentsFlake}#$attribute" -- "$@"
+  '')
+
+  (llmAgent "claude" "claude-code")
+  (llmAgent "codex" "codex")
 
   # gvproxy provides user-mode networking for VMs: host-side unix sockets for
   # qemu/vfkit and an HTTP forwarder API that is reachable from both the host
