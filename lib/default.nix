@@ -7,6 +7,7 @@ let
     home-manager
     mac-app-util
     nixos-generators
+    nixos-wsl
     nixpkgs
     ;
 
@@ -201,6 +202,41 @@ in
           inherit userInfo;
         } extraSpecialArgs);
       modules = [ ../hosts/linux ] ++ extraHomeModules ++ extraModules;
+    };
+
+  mkWslConfiguration =
+    {
+      system ? "x86_64-linux",
+      userInfo,
+      extraModules ? [ ],
+      extraHomeModules ? [ ],
+      extraSpecialArgs ? { },
+    }:
+    let
+      user = userInfo.user;
+    in
+    nixpkgs.lib.nixosSystem {
+      inherit system;
+      specialArgs =
+        inputs
+        // (mergeArgs {
+          inherit userInfo;
+        } extraSpecialArgs);
+      modules = [
+        nixos-wsl.nixosModules.default
+        home-manager.nixosModules.home-manager
+        {
+          home-manager =
+            (mkHomeManagerSettings {
+              inherit userInfo extraHomeModules extraSpecialArgs;
+            })
+            // {
+              users.${user} = import ../modules/wsl/home-manager.nix;
+            };
+        }
+        ../hosts/wsl
+      ]
+      ++ extraModules;
     };
 
   mkVmConfiguration =

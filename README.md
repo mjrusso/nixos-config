@@ -9,6 +9,7 @@ The shared flake exports the following constructors under `lib`:
 - `mkDarwinConfiguration`
 - `mkNixosConfiguration`
 - `mkHomeConfiguration`
+- `mkWslConfiguration`
 - `mkVmConfiguration`
 - `mkImage`
 
@@ -160,6 +161,301 @@ sudo /sbin/usermod -s ~/.nix-profile/bin/fish $USER
 
 Finally, reboot the system. (Rebooting is required for terminal definitions to
 be properly installed; see `$TERMINFO_DIRS`.)
+
+### Windows 11 with NixOS-WSL
+
+#### Install WSL and NixOS-WSL
+
+From the Windows host, install (or update) NVIDIA's Windows driver normally.
+(The Game Ready and Studio drivers both include WSL CUDA support.) In a regular
+PowerShell window, verify the Windows driver:
+
+``` powershell
+nvidia-smi
+```
+
+Open PowerShell as an administrator. If WSL is not installed, run the first
+command below and restart Windows when prompted. Then open another
+administrator PowerShell window and run the remaining commands. WSL version
+2.4.4 or newer is required.
+
+``` powershell
+wsl --install --no-distribution
+wsl --update
+wsl --version
+```
+
+Download the latest `nixos.wsl` file from [the NixOS-WSL installation
+page](https://nix-community.github.io/NixOS-WSL/install.html). In PowerShell,
+change to the directory that contains the file. Install the distribution,
+confirm that it uses WSL 2, and open it:
+
+``` powershell
+wsl --install --from-file .\nixos.wsl --name NixOS
+wsl --list --verbose
+wsl -d NixOS
+```
+
+The last command opens a shell inside NixOS-WSL as the initial `nixos` user.
+
+#### Apply the system configuration
+
+Run the commands in this section inside NixOS-WSL. Clone your system
+configuration repository into the WSL filesystem and `cd` into it. Configure
+repository access for the initial `nixos` user first if the repository is
+private.
+
+Update the repository's `nixos-config` flake input, then build and apply the
+WSL configuration:
+
+``` bash
+nix --extra-experimental-features 'nix-command flakes' \
+  flake update nixos-config
+nix --extra-experimental-features 'nix-command flakes' run .#build-switch
+```
+
+The applied configuration enables `nix-command` and flakes, so later runs can
+use the shorter `nix run .#build-switch` command.
+
+The initial NixOS-WSL user is named `nixos`. If `user-info.nix` selects a
+different username, the command builds the configuration and prints the
+PowerShell commands needed to activate it. Run the printed commands in
+PowerShell. They stop NixOS-WSL and initialize the configured user. After the
+commands finish, reopen the distribution:
+
+``` powershell
+wsl -d NixOS
+```
+
+The checkout remains in the initial user's home directory. In the new WSL
+shell, move it into the configured user's home directory and change its
+ownership, or clone it again. Then `cd` into the checkout and apply the
+configuration a second time:
+
+``` bash
+nix run .#build-switch
+```
+
+#### Verify GPU access
+
+The WSL configuration enables the Windows GPU driver and installs the
+CUDA-enabled Nixpkgs build of Blender from the Nix community CUDA cache.
+Verify the GPU after applying the configuration:
+
+``` bash
+nvidia-smi
+```
+
+The `nvidia-smi` command is a wrapper around
+`/usr/lib/wsl/lib/nvidia-smi`, so it also works in noninteractive SSH
+sessions. Confirm that Blender detects the OptiX device:
+
+``` bash
+blender --background --python-expr '
+import bpy
+prefs = bpy.context.preferences.addons["cycles"].preferences
+prefs.compute_device_type = "OPTIX"
+prefs.get_devices()
+print([(device.name, device.type) for device in prefs.devices])
+'
+```
+
+For an RTX GPU, render a Cycles scene with OptiX:
+
+``` bash
+blender -b scene.blend -o //renders/frame_ -f 1 -- --cycles-device OPTIX
+```
+
+The scene must use Cycles. Keep source trees and render scratch data in the
+WSL filesystem. Windows drive automount is disabled by this configuration, so
+transfer inputs and outputs over SSH rather than through `/mnt/c`.
+
+#### Remote access through the Windows Tailscale host
+
+Run Tailscale and OpenSSH on Windows. Windows is the tailnet node and recovery
+path. Tailscale does not need to run inside WSL. The WSL SSH server listens on
+port 2222 with key-only authentication and does not permit root login. It also
+disables agent forwarding, TCP forwarding, tunnels, and X11 forwarding.
+
+Install [Tailscale for Windows](https://tailscale.com/download/windows), sign
+in, and configure it to start automatically. Limit access to Windows port 22
+with the tailnet policy and the Windows Firewall rule below.
+
+If the Windows OpenSSH server is not installed, run the following from an
+administrator PowerShell:
+
+``` powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+```
+
+The OpenSSH installation normally creates the `OpenSSH-Server-In-TCP`
+firewall rule. Verify that it exists and restrict its source addresses to the
+Tailscale ranges:
+
+``` powershell
+if (!(Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" `
+    -ErrorAction SilentlyContinue)) {
+  New-NetFirewallRule `
+    -Name "OpenSSH-Server-In-TCP" `
+    -DisplayName "OpenSSH Server (sshd)" `
+    -Enabled True `
+    -Direction Inbound `
+    -Protocol TCP `
+    -Action Allow `
+    -LocalPort 22
+}
+Set-NetFirewallRule -Name "OpenSSH-Server-In-TCP" `
+  -RemoteAddress "100.64.0.0/10","fd7a:115c:a1e0::/48"
+```
+
+This rule permits SSH through Tailscale addresses and blocks direct LAN and
+internet access to port 22. If the host needs another approved management
+network, add its subnet to `-RemoteAddress`.
+
+Add the client public key to the Windows SSH account. For a standard Windows
+account, place it on one line in:
+
+``` text
+C:\Users\<windows-user>\.ssh\authorized_keys
+```
+
+For a Windows account in the Administrators group, the default OpenSSH server
+configuration instead uses:
+
+``` text
+C:\ProgramData\ssh\administrators_authorized_keys
+```
+
+Restrict the administrators key file to Administrators and SYSTEM from an
+administrator PowerShell:
+
+``` powershell
+icacls.exe C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r
+icacls.exe C:\ProgramData\ssh\administrators_authorized_keys `
+  /grant "Administrators:F" /grant "SYSTEM:F"
+```
+
+Edit `C:\ProgramData\ssh\sshd_config` and set these global options before any
+`Match` block:
+
+``` sshconfig
+PubkeyAuthentication yes
+PasswordAuthentication no
+AllowTcpForwarding yes
+```
+
+Validate the configuration and restart the service after changing the file:
+
+``` powershell
+& "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
+Restart-Service sshd
+```
+
+See Microsoft's [OpenSSH server configuration
+reference](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-server-configuration)
+for the configuration and authorized-key file locations.
+
+Test this layer from the client before configuring the WSL jump:
+
+``` bash
+ssh windows-user@windows-host.your-tailnet.ts.net
+```
+
+Configure the client with Windows as an SSH jump host:
+
+``` sshconfig
+Host windows-host
+    HostName windows-host.your-tailnet.ts.net
+    User windows-user
+
+Host windows-wsl
+    HostName localhost
+    Port 2222
+    User linux-user
+    ProxyJump windows-host
+```
+
+Replace the hostnames and usernames with their actual values. Inside WSL,
+check the SSH service and listener:
+
+``` bash
+systemctl status sshd
+ss -tlnp | grep 2222
+```
+
+From Windows PowerShell:
+
+``` powershell
+Test-NetConnection localhost -Port 2222
+```
+
+Windows OpenSSH must permit TCP forwarding because `ProxyJump` uses a
+`direct-tcpip` channel. Connect from the client:
+
+``` bash
+ssh windows-wsl
+```
+
+The connection uses WSL's default NAT and Windows localhost forwarding. It
+does not need Tailscale Serve, mirrored networking, or a `portproxy` rule.
+If WSL stops, connect to Windows:
+
+``` bash
+ssh windows-host
+```
+
+Then start WSL from the Windows SSH session:
+
+``` powershell
+wsl -d NixOS
+```
+
+For unattended availability after a Windows restart, create a Windows
+Scheduled Task under the Windows account that owns the WSL distribution. Use
+an "At log on" trigger for that account and configure these values:
+
+``` text
+Program:   C:\Windows\System32\wsl.exe
+Arguments: -d NixOS --user root --exec /run/current-system/sw/bin/sleep infinity
+```
+
+Replace `NixOS` with the name shown by `wsl --list --verbose`. Set the task to
+restart on failure and disable its execution time limit. The persistent
+process prevents WSL from stopping while systemd manages `sshd`. The task does
+not run until the Windows user signs in. Before that login, use Windows SSH to
+start WSL manually.
+
+#### Security and operation
+
+WSL 2 runs a Linux kernel in a Microsoft-managed utility VM, but its default
+configuration is not a strong isolation boundary from the Windows user. WSL
+can access Windows drives under `/mnt`, run Windows executables, reach Windows
+network services, and use the host GPU. Use a separate conventional VM or
+remote sandbox for untrusted repositories or highly autonomous agents.
+
+This WSL configuration disables automatic Windows drive mounts and Windows
+executable interoperability. These restrictions do not affect the Windows SSH
+jump host, scheduled startup, or GPU access. The configured user remains a
+member of `wheel`, a trusted Nix user, and able to use `sudo`. Treat access to
+that account as root access within WSL, and use it only for trusted or reviewed
+workloads.
+
+For normal development, keep credentials scoped, do not expose SSH through an
+internet router, and keep Windows, WSL, Tailscale, and the NVIDIA driver
+updated. Back up important WSL state (e.g. with `wsl --export`).
+
+#### Troubleshooting
+
+WSL 2 requires hardware virtualization. If Windows reports
+`HCS_E_HYPERV_NOT_INSTALLED`, enable virtualization in the machine firmware.
+The setting is commonly called SVM on AMD systems and Intel Virtualization
+Technology or VT-x on Intel systems.
+
+If the Windows SSH connection works but `ssh windows-wsl` fails, check the WSL
+Scheduled Task, `systemctl status sshd`, the port 2222 listener, Windows
+localhost connectivity, and Windows OpenSSH TCP forwarding in that order.
 
 ### NixOS
 

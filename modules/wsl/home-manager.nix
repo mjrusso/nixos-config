@@ -1,0 +1,53 @@
+{
+  config,
+  lib,
+  osConfig,
+  pkgs,
+  userInfo,
+  ...
+}:
+
+let
+  user = userInfo.user;
+  homeDir = "/home/${user}";
+in
+{
+  home = {
+    username = user;
+    homeDirectory = homeDir;
+    enableNixpkgsReleaseCheck = false;
+    packages = pkgs.callPackage ./packages.nix { };
+    sessionPath = [ "$HOME/.local/bin" ];
+    sessionVariables = {
+      PATH = "$PATH:$HOME/.npm/bin";
+      EDITOR = "ec";
+      TERMINFO_DIRS = lib.concatStringsSep ":" [
+        "$HOME/.nix-profile/share/terminfo"
+        "/etc/profiles/per-user/${user}/share/terminfo"
+        "/run/current-system/sw/share/terminfo"
+      ];
+    };
+    file = import ../shared/files.nix {
+      inherit
+        user
+        config
+        pkgs
+        homeDir
+        ;
+    };
+    stateVersion = "26.05";
+  };
+
+  news.display = "silent";
+  fonts.fontconfig.enable = true;
+
+  programs = import ../shared/home-manager.nix {
+    inherit
+      config
+      osConfig
+      pkgs
+      lib
+      userInfo
+      ;
+  };
+}

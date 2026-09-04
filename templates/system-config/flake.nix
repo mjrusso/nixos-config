@@ -77,7 +77,13 @@
             inherit system userInfo hostInfo;
           }
         )
-        // nixpkgs.lib.foldl' (acc: system: acc // mkVmSystems system) { } linuxSystems;
+        // nixpkgs.lib.foldl' (acc: system: acc // mkVmSystems system) { } linuxSystems
+        // {
+          wsl-x86_64-linux = constructors.mkWslConfiguration {
+            system = "x86_64-linux";
+            inherit userInfo;
+          };
+        };
 
       homeConfigurations = nixpkgs.lib.genAttrs linuxSystems (
         system:
