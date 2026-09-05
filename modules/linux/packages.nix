@@ -3,7 +3,10 @@
 with pkgs;
 let shared-packages = import ../shared/packages.nix { inherit pkgs; }; in
 shared-packages ++ [
-  ncurses
+  # ncurses and ghostty ship different definitions at share/terminfo/g/ghostty.
+  # Ghostty's aliases xterm-ghostty, which is what TERM is set to, so it has to
+  # win the collision.
+  (lib.lowPrio ncurses)
   ghostty
 
   # Sandboxing

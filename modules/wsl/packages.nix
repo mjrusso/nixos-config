@@ -5,6 +5,5 @@ let
 in
 sharedPackages
 ++ [
-  pkgs.ncurses
   pkgs.ghostty.terminfo
 ]
