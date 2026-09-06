@@ -46,11 +46,7 @@
     swap_pane_down = "prefix+shift+down"
 
     # --- Remote (`herdr --remote`) ---
-    # Under --remote, herdr grabs the raw ctrl+v keystroke whenever the local
-    # clipboard holds an image, stealing C-v (scroll-up) from Emacs and
-    # block-visual from vim. Ghostty's own paste (ctrl+shift+v, cmd+v on MacOS)
-    # still bridges clipboard images over SSH.
-    remote_image_paste = ""
+    remote_image_paste = "ctrl+v"
 
     # --- Custom commands ---
     # Popups capture all input and herdr has no dismiss key, so only bind
