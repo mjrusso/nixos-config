@@ -78,6 +78,36 @@ with pkgs; [
   jetbrains-mono
   jq
   yq # Provides `tomlq` (and `xq`, `yq`) binaries
+  (pkgs.writeShellScriptBin "cbcopy" ''
+    if [[ -n "$SSH_CONNECTION" ]]; then
+      exec ${pkgs.osc}/bin/osc copy "$@"
+    fi
+
+    if command -v pbcopy >/dev/null 2>&1; then
+      exec pbcopy "$@"
+    elif [[ -n "$WAYLAND_DISPLAY" ]] && command -v wl-copy >/dev/null 2>&1; then
+      exec wl-copy "$@"
+    elif [[ -n "$DISPLAY" ]] && command -v xclip >/dev/null 2>&1; then
+      exec xclip -selection clipboard "$@"
+    else
+      exec ${pkgs.osc}/bin/osc copy "$@"
+    fi
+  '')
+  (pkgs.writeShellScriptBin "cbpaste" ''
+    if [[ -n "$SSH_CONNECTION" ]]; then
+      exec ${pkgs.osc}/bin/osc paste "$@"
+    fi
+
+    if command -v pbpaste >/dev/null 2>&1; then
+      exec pbpaste "$@"
+    elif [[ -n "$WAYLAND_DISPLAY" ]] && command -v wl-paste >/dev/null 2>&1; then
+      exec wl-paste "$@"
+    elif [[ -n "$DISPLAY" ]] && command -v xclip >/dev/null 2>&1; then
+      exec xclip -selection clipboard -out "$@"
+    else
+      exec ${pkgs.osc}/bin/osc paste "$@"
+    fi
+  '')
   osc
   ripgrep
   fd
