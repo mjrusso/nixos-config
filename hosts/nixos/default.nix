@@ -29,6 +29,7 @@ let
     "node_modules"
     ".direnv"
     "result"
+    ".config/gh"
   ];
 in
 {
@@ -365,6 +366,7 @@ in
           "/home/${user}/.cache"
           "/home/${user}/.npm"
           "/home/${user}/.emacs.d.bak"
+          "/home/${user}/.config/gh"
           "**/node_modules"
           "**/.direnv"
           "**/result"
