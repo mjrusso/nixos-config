@@ -558,6 +558,9 @@ in
     enable = true;
     memoryPercent = 50;
   };
+  # Swap is zram-only, so read-ahead on swap-in only decompresses pages that
+  # may never be used.
+  boot.kernel.sysctl."vm.page-cluster" = 0;
 
   users.users = {
     ${user} = {
