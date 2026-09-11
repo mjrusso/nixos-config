@@ -69,6 +69,7 @@ in
       systemd-boot = {
         enable = true;
         configurationLimit = 42;
+        memtest86.enable = true;
       };
       efi.canTouchEfiVariables = true;
     };
