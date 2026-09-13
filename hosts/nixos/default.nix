@@ -205,7 +205,11 @@ in
     # Let's be able to SSH into this machine
     openssh = {
       enable = true;
-      settings.AcceptEnv = [ "SYSTEM_APPEARANCE" ];
+      settings = {
+        AcceptEnv = [ "SYSTEM_APPEARANCE" ];
+        KbdInteractiveAuthentication = false;
+        PasswordAuthentication = false;
+      };
     };
 
     # Sync state between machines.
