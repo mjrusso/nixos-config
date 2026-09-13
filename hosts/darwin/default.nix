@@ -66,6 +66,11 @@ let user = userInfo.user;
   # Set fish as the default shell
   programs.fish.enable = true;
 
+  services.openssh.extraConfig = ''
+    KbdInteractiveAuthentication no
+    PasswordAuthentication no
+  '';
+
   users.users.${user}.openssh.authorizedKeys.keys = keys ++ backupKeys;
 
   system = {
