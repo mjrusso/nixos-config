@@ -131,6 +131,10 @@ in
   ];
 
   networking.hostName = lib.mkDefault "nixos-container";
+  networking.dhcpcd.extraConfig = ''
+    nooption domain_name
+    nooption domain_search
+  '';
 
   # When running via voom, the guest sits behind gvproxy NAT; nothing can reach
   # the guest except through explicit host-side forwards, which voom installs
