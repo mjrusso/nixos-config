@@ -4,6 +4,12 @@
 #
 # - View defaults:    herdr --default-config
 # - Reload config:    herdr server reload-config
+let
+  # Popups start where the pane's shell last reported being (for an agent
+  # pane, where the agent was launched). Use the directory of the program
+  # running in the pane instead, as `new_cwd = "follow"` does for splits.
+  cdToPaneProgramDir = ''cd "$(herdr pane get "$HERDR_ACTIVE_PANE_ID" 2>/dev/null | jq -r ".result.pane.foreground_cwd // empty")" 2>/dev/null;'';
+in
 {
   text = ''
     onboarding = false
@@ -69,7 +75,7 @@
     [[keys.command]]
     key = "prefix+e"
     type = "popup"
-    command = "fish -c e" # `e` is a fish function; popup commands run via `sh`.
+    command = '${cdToPaneProgramDir} fish -c e' # `e` is a fish function; popup commands run via `sh`.
     description = "emacs (current project)"
     width = "90%"
     height = "90%"
@@ -77,7 +83,7 @@
     [[keys.command]]
     key = "prefix+t"
     type = "popup"
-    command = "fish"
+    command = '${cdToPaneProgramDir} fish'
     description = "terminal (fish shell)"
     width = "60%"
     height = "70%"
