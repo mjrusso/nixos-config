@@ -1,3 +1,5 @@
 \#*
 result
+__pycache__/
+*.py[cod]
 !templates/default/.envrc

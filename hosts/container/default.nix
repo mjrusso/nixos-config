@@ -123,6 +123,7 @@ let
 
     ${pkgs.inetutils}/bin/hostname "$hostname"
   '';
+  voomEgressRun = pkgs.callPackage ../../packages/voom-egress-run.nix { };
 in
 {
   imports = [
@@ -268,6 +269,7 @@ in
     iproute2
     jq
     util-linux
+    voomEgressRun
     ghostty.terminfo
   ];
 

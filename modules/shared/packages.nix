@@ -229,10 +229,6 @@ with pkgs; [
   (llmAgent "claude" "claude-code")
   (llmAgent "codex" "codex")
 
-  # gvproxy provides user-mode networking for VMs: host-side unix sockets for
-  # qemu/vfkit and an HTTP forwarder API that is reachable from both the host
-  # and guest.
-  gvproxy
   nixos-rebuild
 
   # Post-install bootstrap script to perform additional imperative setup.

@@ -37,6 +37,7 @@ in
     ../../modules/nixos/disk-config.nix
     ../../modules/nixos/tailscale.nix
     ../../modules/nixos/caddy.nix
+    ../../modules/nixos/voom-agent-vault.nix
     ../../modules/shared
     ../../modules/shared/caches
   ];
@@ -358,7 +359,12 @@ in
         initialize = true;
         repository = "sftp:${backup.targetUser}@${backup.target}:${backup.repositoryPath}/${hostInfo.nixosHostname}";
         passwordFile = backup.passwordFile;
-        paths = [ "/home/${user}" ];
+        paths = [
+          "/home/${user}"
+        ]
+        ++ lib.optionals config.services.voomAgentVault.enable [
+          "/var/cache/agent-vault-backup"
+        ];
 
         extraOptions = [
           "sftp.command='ssh ${backup.targetUser}@${backup.target} -i ${backup.identityFile} -o IdentitiesOnly=yes -s sftp'"
@@ -371,9 +377,13 @@ in
           "/home/${user}/.npm"
           "/home/${user}/.emacs.d.bak"
           "/home/${user}/.config/gh"
+          "/home/${user}/.agent-vault/session.json"
           "**/node_modules"
           "**/.direnv"
           "**/result"
+        ]
+        ++ lib.optionals config.services.voomAgentVault.enable [
+          "${config.services.voomAgentVault.stateDirectory}/attachments/*/token"
         ];
 
         timerConfig = {
@@ -400,6 +410,13 @@ in
       ZED_DEBUG_LOG = "/var/log/zed.log";
     };
   };
+
+  systemd.services."restic-backups-${hostInfo.nixosHostname}" =
+    lib.mkIf (backup.enable && config.services.voomAgentVault.enable)
+      {
+        wants = [ "voom-agent-vault-database-snapshot.service" ];
+        after = [ "voom-agent-vault-database-snapshot.service" ];
+      };
 
   # Enable sound
   # sound.enable = true;

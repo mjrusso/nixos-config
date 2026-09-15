@@ -29,7 +29,7 @@
 
     voom = {
       # For local development, use `path:../voom` (assuming a sibling checkout).
-      url = "github:mjrusso/voom";
+      url = "github:mjrusso/voom/egress";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -132,6 +132,23 @@
       devShells = forAllSystems devShell;
       apps =
         nixpkgs.lib.genAttrs linuxSystems mkLinuxApps // nixpkgs.lib.genAttrs darwinSystems mkDarwinApps;
+
+      packages = nixpkgs.lib.genAttrs linuxSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          agent-vault = pkgs.callPackage ./packages/agent-vault.nix { };
+          voom-agent-vault = pkgs.callPackage ./packages/voom-agent-vault { };
+          voom-egress-run = pkgs.callPackage ./packages/voom-egress-run.nix { };
+        }
+      );
+
+      checks.x86_64-linux.voom-agent-vault = import ./tests/voom-agent-vault.nix {
+        pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        voomPackage = inputs.voom.packages.x86_64-linux.default;
+      };
 
       # Starting points for new projects.
 

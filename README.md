@@ -1058,6 +1058,335 @@ Then, to run and manage virtual machines that use this base image, use the
 [Voom](https://github.com/mjrusso/voom) CLI. The system configuration installs
 it automatically.
 
+#### Voom Agent Vault
+
+[Agent Vault](https://docs.agent-vault.dev/) is an open-source credential vault
+and HTTP/HTTPS proxy. Agent Vault stores credentials on the host and adds them
+to outbound requests that match configured services. Voom guests send requests
+through the proxy without storing the actual credentials.
+
+The `services.voomAgentVault` module runs one Agent Vault instance for all Voom
+VMs on a host. The manager creates one Agent Vault agent and token for each
+assigned VM. The token stays on the host and grants access to one exact vault.
+
+HAProxy listens on a separate host Unix socket for each VM. Voom attaches that
+socket to the VM, and HAProxy adds the VM's token to requests from the socket.
+The manager binds the attachment to the VM's immutable ID. The VM name selects
+the desired vault from Nix configuration.
+
+Solid arrows show request traffic. Dashed arrows show configuration performed
+by `voom-agent-vault sync`.
+
+``` mermaid
+flowchart LR
+    subgraph Guest["Voom guest"]
+        C["Command"]
+        W["voom-egress-run<br/>sets proxy and CA variables"]
+        C --> W
+    end
+
+    subgraph Host["Trusted host"]
+        N["Nix assignment<br/>VM name to vault"]
+        M["voom-agent-vault sync<br/>binds immutable VM ID"]
+        G["gvproxy<br/>per-VM egress route"]
+        H["HAProxy<br/>per-VM Unix socket"]
+        T["Host-only Agent Vault token"]
+        A["Agent Vault proxy<br/>default 127.0.0.1:14322"]
+
+        G --> H
+        T -.->|"token map"| H
+        H --> A
+    end
+
+    API["External API"]
+
+    W -->|"HTTP(S) proxy<br/>192.168.127.1:3128"| G
+    A -->|"injects service credential"| API
+    N -.-> M
+    M -.->|"configures route"| G
+    M -.->|"renders socket"| H
+    M -.->|"stores token"| T
+    M -.->|"creates agent and exact grant"| A
+```
+
+For the lower-level attachment interface and recovery behavior, see Voom's
+[egress proxy integration](https://github.com/mjrusso/voom/blob/86ce68f9861ed761650be26f3a1e7aca0779f4b3/README.md#egress-proxy-integration).
+
+> [!IMPORTANT]
+>
+> Explicit mode does not block direct guest networking or remove existing
+> guest credentials. After you validate brokered access, remove each
+> guest-held credential. Access to that credential then depends on the proxy.
+
+The shared repository defines this module, but it does not assign VMs. Put the
+module settings and exact VM-to-vault mappings in a host-specific module in
+your system configuration repository:
+
+``` nix
+services.voomAgentVault = {
+  enable = true;
+  user = userInfo.user;
+  assignments = {
+    development = "development";
+    personal = "personal";
+  };
+};
+```
+
+The attribute name is the exact Voom VM name. The value is the exact Agent
+Vault vault name. A changed mapping is a profile change. A removed mapping is
+a detach request on the next authenticated synchronization.
+
+Before you apply the system configuration, inspect the host resolver:
+
+``` bash
+awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf
+ip route get <resolver-address>
+```
+
+If a resolver route starts with `local`, add its exact address to
+`services.voomAgentVault.localDNSAddresses`. The module permits only TCP and
+UDP port 53 to those addresses. Agent Vault refuses to start when it detects
+an unlisted host-local resolver. If the host gets its resolver through DHCP
+or another runtime service, verify `/etc/resolv.conf` after switching instead
+of inferring the address from the Nix configuration.
+
+##### Initial Setup
+
+Apply the system configuration before you start an attached VM. The module
+starts Agent Vault on `127.0.0.1:14321`, its proxy on `127.0.0.1:14322`, and
+the per-user HAProxy bridge through a lingering systemd user manager.
+
+The installation uses two independent passwords:
+
+- The master password for the server encrypts Agent Vault state. NixOS
+  generates 48 random bytes with `openssl rand -base64 48` and stores the
+  result at `/var/lib/voom-agent-vault-secrets/master-password`, readable only
+  by root. Do not use this value to log in to the web interface.
+- The password for the owner account authenticates the administrator. Choose
+  this password during the first registration and store it in the normal
+  operator password manager.
+
+After you apply the system configuration, verify the services before you
+register an owner:
+
+``` bash
+sudo systemctl status agent-vault.service voom-agent-vault-firewall.service \
+  voom-agent-vault-resolver-check.service \
+  voom-agent-vault-firewall-check.timer
+systemctl --user status voom-agent-vault-bridge.service
+curl --fail http://127.0.0.1:14321/health
+```
+
+The first registered account becomes the owner of the Agent Vault instance.
+Register this account once through the CLI or the web interface. The CLI
+prompts for the owner account password:
+
+``` bash
+agent-vault auth register --address http://127.0.0.1:14321 --email <email>
+```
+
+The web interface is available only on the host at
+<http://127.0.0.1:14321>. To administer the host from another machine, create an
+SSH tunnel and open that same local URL in a browser:
+
+``` bash
+ssh -N -L 14321:127.0.0.1:14321 <host>
+```
+
+After registration, create every vault named by an assignment:
+
+``` bash
+agent-vault vault create development
+agent-vault vault create personal
+```
+
+Use Agent Vault commands or its local web interface to configure each vault's
+services and credentials. Keep the operator session on the host. Do not copy it
+into a guest.
+
+After you create the vaults, verify their names against the assignments in the
+same host-specific module. Stop all newly assigned VMs. Then reconcile the
+declarations and tokens as the user that owns the Voom state:
+
+``` bash
+voom-agent-vault sync
+voom-agent-vault status
+```
+
+`sync` processes every assignment and existing attachment and reports partial
+failures. A first attachment and an egress declaration replacement require a
+stopped VM. Token rotation, profile changes, disable, and enable can run while
+the VM is running. `sync` reports an assignment for a missing VM as pending and
+continues with the other assignments.
+
+The default persistent state is
+`~/.local/state/voom-agent-vault`. Runtime sockets and generated HAProxy files
+are under `/run/user/$UID/voom-agent-vault`. Both paths come from the NixOS
+module so the CLI, user service, and backup exclusions cannot select different
+locations. Every process running as the Voom owner can read all VM agent tokens
+and connect to all VM sockets. Other unprivileged local users cannot access
+them.
+
+##### Guest Commands
+
+The guest image includes `voom-egress-run`. Use it for a command that needs
+brokered credentials:
+
+``` bash
+voom-egress-run -- curl https://api.github.com/user
+voom-egress-run -- codex
+```
+
+The helper refuses to start if Voom did not publish an explicit egress
+manifest. The helper sets proxy and CA variables for common HTTP clients.
+Clients with a built-in root store can ignore these variables and require
+separate testing. GitHub CLI also requires a nonempty local `GH_TOKEN`. The
+helper supplies a nonsecret placeholder when the variable is absent. Node's
+environment proxy support requires Node 22.21 or later.
+
+HAProxy allows 10 seconds to establish an upstream connection and applies a
+15-minute idle timeout to clients, servers, CONNECT tunnels, WebSockets, and
+streaming requests. A connection held idle for longer can close. Clients must
+retry by creating a new request or connection.
+
+Voom calls and Agent Vault API requests have a default 60-second timeout. This
+exceeds Voom's 20-second fail-closed runtime shutdown window. The manager kills
+and reaps a timed-out Voom subprocess before it reads Voom state again.
+
+##### Routine Operations
+
+``` bash
+voom-agent-vault status [vm]
+voom-agent-vault sync
+voom-agent-vault rotate <vm>
+voom-agent-vault disable <vm> --reason '<reason>'
+voom-agent-vault enable <vm>
+voom-agent-vault detach <vm>
+```
+
+`disable` is the emergency command. The command does not take the management
+lock and does not need a session for an Agent Vault administrator. `disable`
+writes a durable hold, then disables Voom egress and closes live tunnels.
+`sync` cannot clear the hold. Only `enable` removes the hold after it validates
+the token, vault, CA, bridge configuration, and socket.
+
+If HAProxy is unavailable, an enabled attachment prevents a stopped VM from
+starting because Voom cannot probe its backend socket. Use the emergency
+disable command, start the VM, repair the bridge, and then enable the
+attachment.
+
+Inspect service failures with:
+
+``` bash
+systemctl status agent-vault.service voom-agent-vault-firewall.service
+systemctl status voom-agent-vault-firewall-check.service \
+  voom-agent-vault-resolver-check.service \
+  voom-agent-vault-firewall-check.timer
+systemctl --user status voom-agent-vault-bridge.service
+journalctl -u agent-vault.service \
+  -u voom-agent-vault-firewall.service \
+  -u voom-agent-vault-firewall-check.service \
+  -u voom-agent-vault-resolver-check.service -b
+journalctl --user -u voom-agent-vault-bridge.service -b
+```
+
+The firewall verifier requires the owner-match jump for Agent Vault to be rule
+1 of both filter `OUTPUT` chains. The verifier stops Agent Vault if either IPv4
+or IPv6 protection is missing. The same periodic check rejects an unconfigured
+host-local resolver. Its timer does not depend on or restart the guard. A
+stopped or broken guard produces a failed status check and leaves Agent Vault
+stopped.
+
+After a NixOS firewall or Tailscale change, verify that the service and
+`voom-agent-vault status` remain healthy. Test the host's loopback, LAN,
+Tailscale, link-local, and global IPv6 addresses through both CONNECT and
+plain HTTP proxy requests before removing any guest credential.
+
+Confirm the rule position on the host:
+
+``` bash
+agent_vault_uid=$(id -u agent-vault)
+test "$(sudo iptables -t filter -S OUTPUT | grep '^-A OUTPUT' | head -n 1)" = \
+  "-A OUTPUT -m owner --uid-owner $agent_vault_uid -j VOOM_AGENT_VAULT"
+test "$(sudo ip6tables -t filter -S OUTPUT | grep '^-A OUTPUT' | head -n 1)" = \
+  "-A OUTPUT -m owner --uid-owner $agent_vault_uid -j VOOM_AGENT_VAULT"
+```
+
+Both `test` commands must succeed. Restart Tailscale and repeat these checks.
+Confirm that Caddy remains reachable through the tailnet and unreachable
+through the host's non-tailnet addresses.
+
+From an attached test guest, force requests through the proxy instead of the
+wrapper's loopback bypass:
+
+``` bash
+curl --noproxy '' --proxy http://192.168.127.1:3128 \
+  --connect-timeout 5 http://127.0.0.1:14321/health
+curl --noproxy '' --proxy http://192.168.127.1:3128 \
+  --connect-timeout 5 --insecure https://127.0.0.1:14321/
+```
+
+Both requests must fail closed. Repeat both forms for every current host LAN,
+Tailscale, link-local, and global IPv6 address, `localhost`,
+`169.254.169.254`, `100.100.100.100`, one IPv4 and IPv6 tailnet peer, and a
+test hostname that resolves to a blocked address. Do not migrate a guest-held
+credential until this matrix passes.
+
+Agent Vault retains request logs for seven days, up to 10,000 rows per vault.
+Retention and rate-limit locking are enabled in the system service.
+
+##### Backup and Recovery
+
+The host backup excludes agent tokens, the operator session, and generated
+HAProxy maps. Before each host restic backup, NixOS creates a consistent SQLite
+snapshot and copies Agent Vault's encrypted CA state into
+`/var/cache/agent-vault-backup`. This directory is mode `0700`, and snapshot
+files are mode `0600`, owned by `agent-vault`. A snapshot failure does not
+suppress the rest of the host backup. Restic can use the last successful
+snapshot.
+
+NixOS generates the master password at
+`/var/lib/voom-agent-vault-secrets/master-password`. Store an encrypted copy
+separately from the restic repository. For example, read it as root directly
+into the chosen encryption or password-manager command. Do not copy it through
+the clipboard, shell arguments, or a world-readable temporary file. The
+database and encrypted CA key are not usable without this value.
+
+After restoring the database, CA files, and master password, leave attached
+VMs stopped or disabled. Agent token files are intentionally absent. Log in as
+the operator and run `voom-agent-vault sync`. The command rotates missing
+tokens, rebuilds the bridge, validates each attachment, and enables only
+attachments without an emergency hold.
+
+The module pins Agent Vault to version 0.39.3. The manager refuses
+administrative changes if the installed CLI version or required management
+APIs differ. The package installs Agent Vault's MIT license and upstream README
+in its Nix output.
+
+##### Deployment Validation
+
+The configuration is safe to deploy with an empty assignment map. Complete
+this checklist before you migrate the first guest-held credential. Repeat the
+relevant checks after changes to Voom egress, Agent Vault, the firewall,
+Tailscale, Caddy, or backup and recovery:
+
+1. Verify both firewall jumps, the periodic firewall verifier, the resolver
+   check, Agent Vault, and the user bridge.
+2. Restart the NixOS firewall, the Agent Vault firewall guard, Tailscale, Agent
+   Vault, and the bridge separately. Confirm fail-closed ordering and healthy
+   recovery.
+3. Complete the blocked-destination matrix above for plain HTTP and CONNECT.
+4. Confirm Caddy's tailnet-only exposure after the firewall and Tailscale
+   restarts.
+5. Attach a disposable VM, exercise disable, enable, rotation, profile change,
+   detach, bridge failure, and host reboot, and confirm `status` after each
+   step. During rotation, confirm that Agent Vault 0.39.3 returns HTTP `401`
+   from `/discover` for the invalidated token and HTTP `200` for the replacement
+   token.
+6. Restore the Agent Vault database, encrypted CA state, and master password in
+   an isolated test before relying on the backup.
+
 #### Publishing VM Web Apps Over Tailscale
 
 The NixOS host can optionally publish Voom HTTP(S) forwards as HTTPS-only
