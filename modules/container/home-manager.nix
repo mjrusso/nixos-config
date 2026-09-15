@@ -16,6 +16,7 @@ in {
     ];
     sessionVariables = {
       PATH = "$PATH:$HOME/.npm/bin";
+      EDITOR = "ec";
     };
     file = lib.mkMerge [ sharedFiles additionalFiles ];
     stateVersion = "24.11";
