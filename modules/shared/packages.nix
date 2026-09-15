@@ -114,6 +114,7 @@ with pkgs; [
   socat
   tree
   tmux
+  agent-browser
   herdr
   herdlord
   zoxide

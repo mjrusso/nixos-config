@@ -16,6 +16,7 @@
           my-emacs-with-packages = emacs-flake.packages.${prev.stdenv.hostPlatform.system}.default;
           voom = voom.packages.${prev.stdenv.hostPlatform.system}.default;
           herdlord = herdlord.packages.${prev.stdenv.hostPlatform.system}.default;
+          agent-browser = llm-agents.packages.${prev.stdenv.hostPlatform.system}.agent-browser;
           herdr = llm-agents.packages.${prev.stdenv.hostPlatform.system}.herdr;
         })
       ] ++
