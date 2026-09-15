@@ -19,12 +19,19 @@
     # --- Sessions (tmux session = herdr workspace) ---
     new_workspace = "prefix+shift+c"           # tmux: prefix C (new-session)
     detach = "prefix+d"                        # tmux: prefix d (detach)
+    rename_workspace = ["prefix+shift+w", "prefix+$"] # tmux default $
+    previous_workspace = "prefix+("            # tmux default (
+    next_workspace = "prefix+)"                # tmux default )
+    goto = ["prefix+g", "prefix+s"]            # tmux: prefix s (choose-tree)
 
     # --- Windows (tmux window = herdr tab) ---
     new_tab = "prefix+c"                       # tmux: prefix c (new-window)
     next_tab = "prefix+n"                      # tmux default n
     previous_tab = "prefix+p"                  # tmux default p
     close_tab = "prefix+shift+k"               # tmux: prefix K (kill-window)
+    rename_tab = ["prefix+shift+t", "prefix+comma"] # tmux default ,
+    move_tab_previous = "prefix+<"
+    move_tab_next = "prefix+>"
 
     # Note: switch_tab is prefix+1..9; tabs are 1-indexed, matching tmux base-index 1
 
@@ -42,8 +49,14 @@
     focus_pane_up = "prefix+up"
     focus_pane_right = "prefix+right"
 
+    swap_pane_left = "prefix+shift+left"
+    swap_pane_right = "prefix+shift+right"
     swap_pane_up = "prefix+shift+up"
     swap_pane_down = "prefix+shift+down"
+
+    # --- Agents ---
+    next_agent = "prefix+a"
+    previous_agent = "prefix+shift+a"
 
     # --- Remote (`herdr --remote`) ---
     remote_image_paste = "ctrl+v"
@@ -81,9 +94,13 @@
     pane_scrollbars = false                    # reclaim the column; keeps it out of Ghostty selections
     confirm_close = true
     prompt_new_tab_name = true
+    prompt_new_workspace_name = true
     show_agent_labels_on_pane_borders = true
     hide_tab_bar_when_single_tab = true
     tab_bar_position = "bottom"
+
+    [ui.toast]
+    delivery = "herdr"
 
     [theme]
     name = "terminal"
