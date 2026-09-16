@@ -93,21 +93,21 @@
           '')
         }/bin/${scriptName}";
       };
-      mkRepoScriptApp = scriptName: system: {
+      mkRepoScriptApp = scriptName: system: extraPackages: {
         type = "app";
         program = "${
           (nixpkgs.legacyPackages.${system}.writeShellScriptBin scriptName ''
             export PATH=${
               nixpkgs.lib.makeBinPath (
-                with nixpkgs.legacyPackages.${system};
-                [
+                (with nixpkgs.legacyPackages.${system}; [
                   bash
                   coreutils
                   git
                   jq
                   nix
                   rsync
-                ]
+                ])
+                ++ extraPackages
               )
             }:$PATH
             exec ${self}/scripts/${scriptName} "$@"
@@ -117,14 +117,18 @@
       mkLinuxApps = system: {
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
-        "bake-golden" = mkRepoScriptApp "bake-golden" system;
-        "voom-update" = mkRepoScriptApp "voom-update" system;
+        "bake-golden" = mkRepoScriptApp "bake-golden" system [ ];
+        "voom-update" = mkRepoScriptApp "voom-update" system [
+          inputs.voom.packages.${system}.default
+        ];
       };
       mkDarwinApps = system: {
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
-        "bake-golden" = mkRepoScriptApp "bake-golden" system;
-        "voom-update" = mkRepoScriptApp "voom-update" system;
+        "bake-golden" = mkRepoScriptApp "bake-golden" system [ ];
+        "voom-update" = mkRepoScriptApp "voom-update" system [
+          inputs.voom.packages.${system}.default
+        ];
       };
     in
     {
@@ -142,6 +146,9 @@
           agent-vault = pkgs.callPackage ./packages/agent-vault.nix { };
           voom-agent-vault = pkgs.callPackage ./packages/voom-agent-vault { };
           voom-egress-run = pkgs.callPackage ./packages/voom-egress-run.nix { };
+          voom-shutdown = pkgs.callPackage ./packages/voom-shutdown.nix {
+            voom = inputs.voom.packages.${system}.default;
+          };
         }
       );
 

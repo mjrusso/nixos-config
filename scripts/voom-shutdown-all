@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: voom-shutdown-all
+
+Stop Herdr and then stop every running Voom VM.
+EOF
+}
+
+if [ "$#" -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
+  usage
+  exit 0
+fi
+
+if [ "$#" -ne 0 ]; then
+  usage >&2
+  exit 2
+fi
+
+vm_list=$(voom --output json list)
+if ! jq -e '
+  type == "array" and
+  all(.[]; (.name | type == "string") and (.status | type == "string"))
+' >/dev/null <<<"$vm_list"; then
+  echo "[voom-shutdown-all] Voom returned an invalid VM list" >&2
+  exit 1
+fi
+
+mapfile -t running_vms < <(
+  jq -r '.[] | select(.status == "running") | .name' <<<"$vm_list"
+)
+
+if [ "${#running_vms[@]}" -eq 0 ]; then
+  echo "[voom-shutdown-all] no VMs are running"
+  exit 0
+fi
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+failed_vms=()
+
+for vm in "${running_vms[@]}"; do
+  if ! "$script_dir/voom-shutdown" "$vm"; then
+    failed_vms+=("$vm")
+  fi
+done
+
+if [ "${#failed_vms[@]}" -ne 0 ]; then
+  printf '[voom-shutdown-all] failed to stop:' >&2
+  printf ' %s' "${failed_vms[@]}" >&2
+  printf '\n' >&2
+  exit 1
+fi
+
+echo "[voom-shutdown-all] all running VMs stopped"

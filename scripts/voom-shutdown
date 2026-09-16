@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: voom-shutdown <vm>
+
+Stop every running Herdr session in a Voom VM, then stop the VM.
+EOF
+}
+
+if [ "$#" -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
+  usage
+  exit 0
+fi
+
+if [ "$#" -ne 1 ]; then
+  usage >&2
+  exit 2
+fi
+
+vm="$1"
+vm_info=$(voom --output json info "$vm")
+
+if jq -e '.running == false' >/dev/null <<<"$vm_info"; then
+  echo "[voom-shutdown] $vm is already stopped"
+  exit 0
+fi
+
+if ! jq -e '.running == true' >/dev/null <<<"$vm_info"; then
+  echo "[voom-shutdown] Voom returned an invalid running state for $vm" >&2
+  exit 1
+fi
+
+echo "[voom-shutdown] stopping Herdr sessions in $vm"
+voom ssh "$vm" -- bash -s <<'EOF'
+set -euo pipefail
+
+if ! command -v herdr >/dev/null 2>&1; then
+  echo "[voom-shutdown] Herdr is not installed; continuing"
+  exit 0
+fi
+
+sessions=$(herdr session list --json)
+if ! jq -e '
+  .sessions | type == "array" and
+  all(.[]; (.name | type == "string") and (.running | type == "boolean"))
+' >/dev/null <<<"$sessions"; then
+  echo "[voom-shutdown] Herdr returned an invalid session list" >&2
+  exit 1
+fi
+
+mapfile -t running_sessions < <(
+  jq -r '.sessions[] | select(.running == true) | .name' <<<"$sessions"
+)
+
+if [ "${#running_sessions[@]}" -eq 0 ]; then
+  echo "[voom-shutdown] no Herdr sessions are running"
+  exit 0
+fi
+
+for session in "${running_sessions[@]}"; do
+  echo "[voom-shutdown] stopping Herdr session $session"
+  herdr session stop "$session" --json >/dev/null
+done
+EOF
+
+echo "[voom-shutdown] stopping VM $vm"
+voom stop "$vm"
