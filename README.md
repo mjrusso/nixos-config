@@ -1194,6 +1194,16 @@ SSH tunnel and open that same local URL in a browser:
 ssh -N -L 14321:127.0.0.1:14321 <host>
 ```
 
+Registration through the web interface does not authenticate the Agent Vault
+CLI on the host. Before you run `voom-agent-vault sync`, create the operator
+session as the user that owns the Voom state:
+
+``` bash
+agent-vault auth login --address http://127.0.0.1:14321
+```
+
+Registration through the CLI already creates this session.
+
 After registration, create every vault named by an assignment:
 
 ``` bash
@@ -1204,6 +1214,22 @@ agent-vault vault create personal
 Use Agent Vault commands or its local web interface to configure each vault's
 services and credentials. Keep the operator session on the host. Do not copy it
 into a guest.
+
+For GitHub API access, add a credential named `GITHUB_TOKEN` that contains the
+personal access token. Add one service with these settings:
+
+| Setting          | Value             |
+|------------------|-------------------|
+| Name             | `github`          |
+| Host             | `api.github.com`  |
+| Authentication   | Bearer            |
+| Token credential | `GITHUB_TOKEN`    |
+
+Do not add a substitution or a wildcard host. `voom-egress-run` gives `gh` the
+nonsecret placeholder `GH_TOKEN=__github_token__` because `gh` requires the
+variable. Agent Vault's bearer service replaces the resulting `Authorization`
+header with the stored token. Bearer injection also authenticates clients such
+as `curl` that do not send the placeholder.
 
 After you create the vaults, verify their names against the assignments in the
 same host-specific module. Stop all newly assigned VMs. Then reconcile the
