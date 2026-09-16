@@ -948,14 +948,20 @@ nix run .#bake-golden
 # Optional flags: --system x86_64-linux|aarch64-linux, --format qcow|raw
 ```
 
-Then import the image, and create/start the VM using Voom, and run the
-[`home-bootstrap`](./scripts/home-bootstrap) script:
+Then import the image and create the VM:
 
 ``` bash
 voom image import golden ~/vms/golden-x86_64-linux.qcow2 --meta ~/vms/golden-x86_64-linux.qcow2.meta.json
 
 voom create my-vm --image golden
+```
 
+If the host uses Agent Vault, complete [Attach a New VM](#attach-a-new-vm)
+before you start the VM. A first attachment requires a stopped VM. Otherwise,
+start the VM immediately. After the first start, run the
+[`home-bootstrap`](./scripts/home-bootstrap) script:
+
+``` bash
 voom start my-vm
 
 voom ssh my-vm -- home-bootstrap
@@ -1215,8 +1221,18 @@ Use Agent Vault commands or its local web interface to configure each vault's
 services and credentials. Keep the operator session on the host. Do not copy it
 into a guest.
 
-For GitHub API access, add a credential named `GITHUB_TOKEN` that contains the
-personal access token. Add one service with these settings:
+For GitHub API and Git-over-HTTPS access, add these credentials:
+
+| Credential        | Value                         |
+|-------------------|-------------------------------|
+| `GITHUB_TOKEN`    | The personal access token     |
+| `GITHUB_USERNAME` | The GitHub account user name  |
+
+Create both entries in the vault's Credentials section before you configure
+the services. The Basic-auth service selects `GITHUB_USERNAME` as a credential.
+The field does not accept the user name as a literal value.
+
+Add a service for GitHub API requests:
 
 | Setting          | Value             |
 |------------------|-------------------|
@@ -1225,11 +1241,24 @@ personal access token. Add one service with these settings:
 | Authentication   | Bearer            |
 | Token credential | `GITHUB_TOKEN`    |
 
+Add a second service for Git smart HTTP:
+
+| Setting              | Value               |
+|----------------------|---------------------|
+| Name                 | `github-git`        |
+| Host                 | `github.com`        |
+| Authentication       | Basic               |
+| Username credential  | `GITHUB_USERNAME`   |
+| Password credential  | `GITHUB_TOKEN`      |
+
+Both services are required. The `api.github.com` service authenticates GitHub
+API and `gh` requests. The `github.com` service authenticates Git clone, fetch,
+and push operations over HTTPS. One service does not cover the other host.
+
 Do not add a substitution or a wildcard host. `voom-egress-run` gives `gh` the
 nonsecret placeholder `GH_TOKEN=__github_token__` because `gh` requires the
-variable. Agent Vault's bearer service replaces the resulting `Authorization`
-header with the stored token. Bearer injection also authenticates clients such
-as `curl` that do not send the placeholder.
+variable. The API service replaces its Bearer header with the stored token. The
+Git service replaces Git's Basic header with the user name and stored token.
 
 After you create the vaults, verify their names against the assignments in the
 same host-specific module. Stop all newly assigned VMs. Then reconcile the
@@ -1254,14 +1283,73 @@ locations. Every process running as the Voom owner can read all VM agent tokens
 and connect to all VM sockets. Other unprivileged local users cannot access
 them.
 
+##### Attach a New VM
+
+Complete the one-time [Initial Setup](#initial-setup) first. Then use this
+procedure for each new VM:
+
+1. Create the VM, but do not start it:
+
+   ``` bash
+   voom create my-vm --image golden
+   ```
+
+2. In the private repository for the host, map the exact VM name to a vault
+   that exists in Agent Vault:
+
+   ``` nix
+   services.voomAgentVault.assignments."my-vm" = "development";
+   ```
+
+3. Apply the host configuration. Keep the VM stopped:
+
+   ``` bash
+   nix run .#build-switch
+   ```
+
+4. As the user that owns the Voom state, authenticate the Agent Vault CLI if
+   necessary and reconcile the attachment:
+
+   ``` bash
+   agent-vault auth login --address http://127.0.0.1:14321
+   voom-agent-vault sync
+   voom-agent-vault status my-vm
+   ```
+
+   `status` must report a healthy, enabled attachment. The manager records the
+   VM's immutable ID, creates its Agent Vault agent and token, renders its
+   private bridge socket, and creates the Voom egress declaration.
+
+5. Start and bootstrap the VM:
+
+   ``` bash
+   voom start my-vm
+   voom ssh my-vm -- home-bootstrap
+   ```
+
+6. Run the checks under
+   [Validate an Attachment](#validate-an-attachment) and confirm that the
+   requests appear in the Agent Vault request log. A new VM must not receive a
+   copied GitHub token or forwarded SSH agent. If the image already contains a
+   credential, remove it only after the brokered access checks pass.
+
+All attachments use the same host network boundary. Complete
+[Validate the Host Network Boundary](#validate-the-host-network-boundary) for
+the initial host rollout and repeat it after firewall, Tailscale, or Agent
+Vault network-policy changes. You do not need this validation for each new VM.
+
+If an assignment exists before its VM, `sync` reports it as pending. Create the
+stopped VM and rerun `sync`. If the bridge is unavailable, an enabled
+attachment prevents the VM from starting. Use the recovery procedure under
+[Routine Operations](#routine-operations).
+
 ##### Guest Commands
 
-The guest image includes `voom-egress-run`. Use it for a command that needs
-brokered credentials:
+The guest image includes `voom-egress-run`. Use it directly for a command that
+does not have a guest wrapper:
 
 ``` bash
-voom-egress-run -- curl https://api.github.com/user
-voom-egress-run -- codex
+voom-egress-run -- curl --fail https://api.github.com/user
 ```
 
 The helper refuses to start if Voom did not publish an explicit egress
@@ -1271,14 +1359,83 @@ separate testing. GitHub CLI also requires a nonempty local `GH_TOKEN`. The
 helper supplies a nonsecret placeholder when the variable is absent. Node's
 environment proxy support requires Node 22.21 or later.
 
-HAProxy allows 10 seconds to establish an upstream connection and applies a
-15-minute idle timeout to clients, servers, CONNECT tunnels, WebSockets, and
-streaming requests. A connection held idle for longer can close. Clients must
-retry by creating a new request or connection.
+The Fish configuration in the guest applies `voom-egress-run` automatically
+to `git` and `gh` when the manifest exists. Codex and Claude use executable
+wrappers so Herdr and other non-Fish callers receive the same egress
+environment. The wrappers also run Codex with `--yolo` and Claude Code with
+`--dangerously-skip-permissions`. The VM is the isolation boundary for these
+agents. Host installations keep the agents' normal permission controls.
 
-Voom calls and Agent Vault API requests have a default 60-second timeout. This
-exceeds Voom's 20-second fail-closed runtime shutdown window. The manager kills
-and reaps a timed-out Voom subprocess before it reads Voom state again.
+Run these commands normally:
+
+``` bash
+gh api user --jq .login
+git fetch
+codex
+claude
+```
+
+From a normal Fish shell in the guest, use `command git` or `command gh` to
+bypass the functions. Use this form to inspect or remove a credential stored
+inside the guest. A non-Fish command must use `voom-egress-run -- git ...` or
+`voom-egress-run -- gh ...` for brokered GitHub access unless it inherited the
+environment from an agent wrapper.
+
+HAProxy allows 10 seconds to establish an upstream connection. It applies a
+15-minute idle timeout to clients, servers, CONNECT tunnels, WebSockets, and
+streaming requests. A client must create a new request or connection after an
+idle connection closes.
+
+##### Validate an Attachment
+
+Run these commands after you attach a VM:
+
+``` bash
+gh api user --jq .login
+voom-egress-run -- curl --fail https://api.github.com/user
+git ls-remote https://github.com/<owner>/<private-repository>.git HEAD
+git -C <repository> fetch
+git -C <repository> push --dry-run origin HEAD
+```
+
+All commands must succeed. Use a low-risk repository for the Git tests. Confirm
+that the requests appear under the `github` and `github-git` services in
+the Agent Vault request log. If the VM uses Git LFS or GitHub release uploads,
+test those operations as well. When migrating an existing VM, do not remove its
+guest credential until these checks pass.
+
+##### Migrating an Existing VM
+
+New VMs must not receive a GitHub credential. For an existing VM, first
+[validate its attachment](#validate-an-attachment). Then identify how the guest
+supplies its old credential without printing the credential value:
+
+``` bash
+command gh auth status --hostname github.com
+env | sed 's/=.*//' | grep -E '^(GH_TOKEN|GITHUB_TOKEN)$'
+git config --show-origin --get-regexp '^credential\.' || true
+```
+
+If GitHub CLI stores the credential, remove it with:
+
+``` bash
+command gh auth logout --hostname github.com
+```
+
+Remove tokens supplied by shell configuration, environment files, Git
+credential stores, or other guest secret mechanisms. Then start a new shell.
+
+Verify that direct authenticated access fails:
+
+``` bash
+command gh api user --jq .login                   # must fail
+curl --fail https://api.github.com/user           # must fail with HTTP 401
+env GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/<owner>/<private-repository>.git HEAD # must fail
+```
+
+Repeat [Validate an Attachment](#validate-an-attachment) without `command` or
+`env`; all brokered requests must still succeed and appear under the `github`
+and `github-git` services in the Agent Vault request log.
 
 ##### Routine Operations
 
@@ -1290,6 +1447,10 @@ voom-agent-vault disable <vm> --reason '<reason>'
 voom-agent-vault enable <vm>
 voom-agent-vault detach <vm>
 ```
+
+Voom calls and Agent Vault API requests have a default 60-second timeout. This
+exceeds Voom's 20-second fail-closed runtime shutdown window. The manager kills
+and reaps a timed-out Voom subprocess before it reads Voom state again.
 
 `disable` is the emergency command. The command does not take the management
 lock and does not need a session for an Agent Vault administrator. `disable`
@@ -1325,39 +1486,9 @@ stopped or broken guard produces a failed status check and leaves Agent Vault
 stopped.
 
 After a NixOS firewall or Tailscale change, verify that the service and
-`voom-agent-vault status` remain healthy. Test the host's loopback, LAN,
-Tailscale, link-local, and global IPv6 addresses through both CONNECT and
-plain HTTP proxy requests before removing any guest credential.
-
-Confirm the rule position on the host:
-
-``` bash
-agent_vault_uid=$(id -u agent-vault)
-test "$(sudo iptables -t filter -S OUTPUT | grep '^-A OUTPUT' | head -n 1)" = \
-  "-A OUTPUT -m owner --uid-owner $agent_vault_uid -j VOOM_AGENT_VAULT"
-test "$(sudo ip6tables -t filter -S OUTPUT | grep '^-A OUTPUT' | head -n 1)" = \
-  "-A OUTPUT -m owner --uid-owner $agent_vault_uid -j VOOM_AGENT_VAULT"
-```
-
-Both `test` commands must succeed. Restart Tailscale and repeat these checks.
-Confirm that Caddy remains reachable through the tailnet and unreachable
-through the host's non-tailnet addresses.
-
-From an attached test guest, force requests through the proxy instead of the
-wrapper's loopback bypass:
-
-``` bash
-curl --noproxy '' --proxy http://192.168.127.1:3128 \
-  --connect-timeout 5 http://127.0.0.1:14321/health
-curl --noproxy '' --proxy http://192.168.127.1:3128 \
-  --connect-timeout 5 --insecure https://127.0.0.1:14321/
-```
-
-Both requests must fail closed. Repeat both forms for every current host LAN,
-Tailscale, link-local, and global IPv6 address, `localhost`,
-`169.254.169.254`, `100.100.100.100`, one IPv4 and IPv6 tailnet peer, and a
-test hostname that resolves to a blocked address. Do not migrate a guest-held
-credential until this matrix passes.
+`voom-agent-vault status` remain healthy. Repeat the
+[host network boundary checks](#validate-the-host-network-boundary), including
+the Caddy and Tailscale checks.
 
 Agent Vault retains request logs for seven days, up to 10,000 rows per vault.
 Retention and rate-limit locking are enabled in the system service.
@@ -1393,9 +1524,50 @@ in its Nix output.
 ##### Deployment Validation
 
 The configuration is safe to deploy with an empty assignment map. Complete
-this checklist before you migrate the first guest-held credential. Repeat the
-relevant checks after changes to Voom egress, Agent Vault, the firewall,
-Tailscale, Caddy, or backup and recovery:
+this checklist before you rely on the broker. Repeat the relevant checks after
+changes to Voom egress, Agent Vault, the firewall, Tailscale, Caddy, or backup
+and recovery.
+
+###### Validate the Host Network Boundary
+
+On the host, confirm that the Agent Vault jump is the first rule in both
+`OUTPUT` chains:
+
+``` bash
+agent_vault_uid=$(id -u agent-vault)
+test "$(sudo iptables -t filter -S OUTPUT | grep '^-A OUTPUT' | head -n 1)" = \
+  "-A OUTPUT -m owner --uid-owner $agent_vault_uid -j VOOM_AGENT_VAULT"
+test "$(sudo ip6tables -t filter -S OUTPUT | grep '^-A OUTPUT' | head -n 1)" = \
+  "-A OUTPUT -m owner --uid-owner $agent_vault_uid -j VOOM_AGENT_VAULT"
+```
+
+Both `test` commands must succeed. Restart Tailscale and repeat these checks.
+Confirm that Caddy remains reachable through the tailnet and unreachable
+through the host's non-tailnet addresses.
+
+From an attached test guest, force requests through the proxy instead of the
+wrapper's loopback bypass:
+
+``` bash
+curl --noproxy '' --proxy http://192.168.127.1:3128 \
+  --connect-timeout 5 http://127.0.0.1:14321/health
+curl --noproxy '' --proxy http://192.168.127.1:3128 \
+  --connect-timeout 5 --insecure https://127.0.0.1:14321/
+```
+
+Both requests must fail closed. Repeat both forms for every current host LAN,
+Tailscale, link-local, and global IPv6 address, `localhost`,
+`169.254.169.254`, `100.100.100.100`, one IPv4 and IPv6 tailnet peer, and a
+test hostname that resolves to a blocked address.
+
+Agent Vault can report a blocked or otherwise unreachable upstream as HTTP
+`502`. With `curl --fail`, this response produces exit status 22. This result
+is fail-closed when the destination is reachable from an authorized source,
+brokered GitHub requests succeed, and `voom-agent-vault status` remains
+healthy. A refusal from an unused target port does not prove that Agent Vault
+blocked the destination.
+
+Complete these remaining checks:
 
 1. Verify both firewall jumps, the periodic firewall verifier, the resolver
    check, Agent Vault, and the user bridge.

@@ -87,6 +87,7 @@ writeShellApplication {
     export NODE_USE_ENV_PROXY=1
     export DENO_CERT="$combined"
     export GH_TOKEN="''${GH_TOKEN:-__github_token__}"
+    export VOOM_EGRESS_ACTIVE=1
     exec "$@"
   '';
 }

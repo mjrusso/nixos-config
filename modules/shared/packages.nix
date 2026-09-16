@@ -1,11 +1,28 @@
-{ pkgs }:
+{
+  pkgs,
+  llmAgentPolicy ? {
+    useVoomEgress = false;
+    claudeArguments = [ ];
+    codexArguments = [ ];
+  },
+}:
 
 let
   llmAgentsFlake = "github:numtide/llm-agents.nix";
 
-  llmAgent = binary: attribute: pkgs.writeShellScriptBin binary ''
-    exec nix run "${llmAgentsFlake}#${attribute}" -- "$@"
-  '';
+  llmAgent =
+    binary: attribute: arguments:
+    let
+      escapedArguments = pkgs.lib.escapeShellArgs arguments;
+    in
+    pkgs.writeShellScriptBin binary ''
+      ${pkgs.lib.optionalString llmAgentPolicy.useVoomEgress ''
+        if [ "''${VOOM_EGRESS_ACTIVE:-}" != 1 ] && [ -f /run/voom/egress.json ]; then
+          exec voom-egress-run -- nix run "${llmAgentsFlake}#${attribute}" -- ${escapedArguments} "$@"
+        fi
+      ''}
+      exec nix run "${llmAgentsFlake}#${attribute}" -- ${escapedArguments} "$@"
+    '';
 in
 with pkgs; [
   # General packages for development and system management
@@ -226,8 +243,8 @@ with pkgs; [
     exec nix run "${llmAgentsFlake}#$attribute" -- "$@"
   '')
 
-  (llmAgent "claude" "claude-code")
-  (llmAgent "codex" "codex")
+  (llmAgent "claude" "claude-code" llmAgentPolicy.claudeArguments)
+  (llmAgent "codex" "codex" llmAgentPolicy.codexArguments)
 
   nixos-rebuild
 

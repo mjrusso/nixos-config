@@ -7,29 +7,39 @@ set -euo pipefail
 log() { echo "[home-bootstrap] $*"; }
 
 log_manual_secret_setup() {
+  if [ -r /run/voom/metadata.json ]; then
+    cat <<'EOF'
+[home-bootstrap] Guest credential setup:
+[home-bootstrap]
+[home-bootstrap]   This is a Voom guest. Do **not** run `gh auth login`, do **not** copy
+[home-bootstrap]   a GitHub token into the guest, and do **not** forward the host's ssh-agent.
+[home-bootstrap]
+[home-bootstrap]   GitHub access should come from Agent Vault on the host. If this VM is not
+[home-bootstrap]   attached, stop it and follow the "Attach a New VM" procedure in the
+[home-bootstrap]   nixos-config README.
+[home-bootstrap]
+[home-bootstrap]   Previously, the recommendation was to mint a fine-grained PAT restricted
+[home-bootstrap]   to the exact repos and permissions the agent needs, with a short expiry,
+[home-bootstrap]   piping it in from 1Password on the host (adjusting the op:// reference
+[home-bootstrap]   to match the vault and item names):
+[home-bootstrap]
+[home-bootstrap]       op read "op://Private/github-vm-pat-xxx/credential" \
+[home-bootstrap]         | voom ssh <name> 'gh auth login --with-token'
+[home-bootstrap]
+[home-bootstrap]    However, the current guidance is to **not** put the secret into the guest
+[home-bootstrap]    at all, and to instead allow Agent Vault to inject it at request time.
+
+EOF
+    return
+  fi
+
   cat <<'EOF'
 [home-bootstrap] Manual secret setup:
 [home-bootstrap]
 [home-bootstrap]   GitHub authentication and other secrets are deliberately not handled here.
 [home-bootstrap]
-[home-bootstrap]   For GitHub, authenticate using the gh CLI based on the machine's role:
-[home-bootstrap]
-[home-bootstrap]   - Primary machine: run `gh auth login` and follow the browser/device flow.
-[home-bootstrap]     The OAuth token lands in the OS keyring, and home-manager's programs.gh
-[home-bootstrap]     config has already wired the git credential helper.
-[home-bootstrap]
-[home-bootstrap]   - Ephemeral or agent VM: do not use the `gh auth login` device flow.
-[home-bootstrap]     Instead, mint a fine-grained PAT restricted to the exact repos and
-[home-bootstrap]     permissions the agent needs, with a short expiry, and pipe it in from
-[home-bootstrap]     1Password on the host:
-[home-bootstrap]
-[home-bootstrap]       op read "op://Private/github-vm-pat-xxx/credential" \
-[home-bootstrap]         | voom ssh <name> 'gh auth login --with-token'
-[home-bootstrap]
-[home-bootstrap]     Adjust the op:// reference to match the vault and item names. This requires
-[home-bootstrap]     the 1Password CLI and the 1Password desktop app with CLI integration enabled.
-[home-bootstrap]
-[home-bootstrap]   Do not forward the host's ssh-agent into an ephemeral or agent VM.
+[home-bootstrap]   Run `gh auth login` and follow the browser/device flow. Home Manager has
+[home-bootstrap]   already configured `gh` as Git's credential helper for GitHub.
 EOF
 }
 
