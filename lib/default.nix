@@ -31,6 +31,26 @@ let
     environment.etc."mjr-vm-image-format".text = "${format}\n";
   };
 
+  compatibleDockerImageFormat =
+    {
+      modulesPath,
+      lib,
+      ...
+    }:
+    {
+      imports = [ "${toString modulesPath}/virtualisation/docker-image.nix" ];
+
+      boot.loader.grub.enable = lib.mkForce false;
+      boot.loader.systemd-boot.enable = lib.mkForce false;
+      services.journald.settings.Journal = {
+        ForwardToConsole = true;
+        TTYPath = "/dev/console";
+      };
+
+      formatAttr = "tarball";
+      fileExtension = ".tar.xz";
+    };
+
   mkVmModules =
     {
       system,
@@ -285,6 +305,9 @@ in
     in
     nixos-generators.nixosGenerate {
       inherit system;
+      customFormats = nixpkgs.lib.optionalAttrs (format == "docker") {
+        docker = compatibleDockerImageFormat;
+      };
       specialArgs =
         inputs
         // (mergeArgs {
