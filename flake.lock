@@ -707,16 +707,15 @@
         ]
       },
       "locked": {
-        "lastModified": 1789568080,
-        "narHash": "sha256-rCOQyyvQ1y+FwRM4WmWs7+1IPktHw4yBheurUekSVhE=",
+        "lastModified": 1789614164,
+        "narHash": "sha256-OdZlj/QLP8U2QuL1dg5KDL3ULVpNUxEDkOwtyyNSgaI=",
         "owner": "mjrusso",
         "repo": "voom",
-        "rev": "69f368cefcc62b836899e0532047368185d6751a",
+        "rev": "a864a7d9be6b8b27ed6868bedabb7bc8da5103b0",
         "type": "github"
       },
       "original": {
         "owner": "mjrusso",
-        "ref": "egress",
         "repo": "voom",
         "type": "github"
       }

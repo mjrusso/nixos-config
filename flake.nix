@@ -29,7 +29,7 @@
 
     voom = {
       # For local development, use `path:../voom` (assuming a sibling checkout).
-      url = "github:mjrusso/voom/egress";
+      url = "github:mjrusso/voom";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
