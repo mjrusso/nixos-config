@@ -1364,10 +1364,9 @@ Voom replaces the CA while the guest remains running, refresh the database with
 `sudo systemctl restart voom-egress-trust.service` or restart the VM. Restarting
 the service also removes the old NSS entry when no CA is published.
 
-The Fish configuration in the guest applies `voom-egress-run` automatically
-to `git` and `gh` when the manifest exists. Codex and Claude use executable
-wrappers so Herdr and other non-Fish callers receive the same egress
-environment. The wrappers also run Codex with `--yolo` and Claude Code with
+The guest installs wrapped `git`, `gh`, Codex, and Claude executables. When the
+manifest exists, the wrappers apply `voom-egress-run` from any shell or parent
+process. The agent wrappers also run Codex with `--yolo` and Claude Code with
 `--dangerously-skip-permissions`. The VM is the isolation boundary for these
 agents. Host installations keep the agents' normal permission controls.
 
@@ -1380,11 +1379,23 @@ codex
 claude
 ```
 
-From a normal Fish shell in the guest, use `command git` or `command gh` to
-bypass the functions. Use this form to inspect or remove a credential stored
-inside the guest. A non-Fish command must use `voom-egress-run -- git ...` or
-`voom-egress-run -- gh ...` for brokered GitHub access unless it inherited the
-environment from an agent wrapper.
+From a normal shell, set `VOOM_EGRESS_SKIP=1` for one command to skip automatic
+egress:
+
+``` bash
+VOOM_EGRESS_SKIP=1 gh auth status
+```
+
+If the shell already inherited the proxy environment from Codex, Claude, or
+another `voom-egress-run` process, remove it for one command with:
+
+``` bash
+voom-egress-skip -- gh auth status
+```
+
+`voom-egress-skip` removes the inherited proxy and Agent Vault CA variables,
+removes the nonsecret placeholder `GH_TOKEN`, and sets `VOOM_EGRESS_SKIP=1` for
+the child process. Neither method disables the VM's egress attachment.
 
 HAProxy allows 10 seconds to establish an upstream connection. It applies a
 15-minute idle timeout to clients, servers, CONNECT tunnels, WebSockets, and
@@ -1416,15 +1427,15 @@ New VMs must not receive a GitHub credential. For an existing VM, first
 supplies its old credential without printing the credential value:
 
 ``` bash
-command gh auth status --hostname github.com
-env | sed 's/=.*//' | grep -E '^(GH_TOKEN|GITHUB_TOKEN)$'
-git config --show-origin --get-regexp '^credential\.' || true
+voom-egress-skip -- gh auth status --hostname github.com
+voom-egress-skip -- env | sed 's/=.*//' | grep -E '^(GH_TOKEN|GITHUB_TOKEN)$'
+voom-egress-skip -- git config --show-origin --get-regexp '^credential\.' || true
 ```
 
 If GitHub CLI stores the credential, remove it with:
 
 ``` bash
-command gh auth logout --hostname github.com
+voom-egress-skip -- gh auth logout --hostname github.com
 ```
 
 Remove tokens supplied by shell configuration, environment files, Git
@@ -1433,14 +1444,15 @@ credential stores, or other guest secret mechanisms. Then start a new shell.
 Verify that direct authenticated access fails:
 
 ``` bash
-command gh api user --jq .login                   # must fail
-curl --fail https://api.github.com/user           # must fail with HTTP 401
-env GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/<owner>/<private-repository>.git HEAD # must fail
+voom-egress-skip -- gh api user --jq .login        # must fail
+voom-egress-skip -- curl --fail https://api.github.com/user # must fail with HTTP 401
+voom-egress-skip -- env GIT_TERMINAL_PROMPT=0 \
+  git ls-remote https://github.com/<owner>/<private-repository>.git HEAD # must fail
 ```
 
-Repeat [Validate an Attachment](#validate-an-attachment) without `command` or
-`env`; all brokered requests must still succeed and appear under the `github`
-and `github-git` services in the Agent Vault request log.
+Repeat [Validate an Attachment](#validate-an-attachment) normally. All brokered
+requests must still succeed and appear under the `github` and `github-git`
+services in the Agent Vault request log.
 
 ##### Routine Operations
 

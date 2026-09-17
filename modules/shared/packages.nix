@@ -9,20 +9,26 @@
 
 let
   llmAgentsFlake = "github:numtide/llm-agents.nix";
+  voomEgressRun = pkgs.callPackage ../../packages/voom-egress-run.nix { };
+  mkVoomEgressWrapper = pkgs.callPackage ../../packages/mk-voom-egress-wrapper.nix {
+    inherit voomEgressRun;
+  };
 
   llmAgent =
     binary: attribute: arguments:
     let
       escapedArguments = pkgs.lib.escapeShellArgs arguments;
+      package = pkgs.writeShellScriptBin binary ''
+        exec nix run "${llmAgentsFlake}#${attribute}" -- ${escapedArguments} "$@"
+      '';
     in
-    pkgs.writeShellScriptBin binary ''
-      ${pkgs.lib.optionalString llmAgentPolicy.useVoomEgress ''
-        if [ "''${VOOM_EGRESS_ACTIVE:-}" != 1 ] && [ -f /run/voom/egress.json ]; then
-          exec voom-egress-run -- nix run "${llmAgentsFlake}#${attribute}" -- ${escapedArguments} "$@"
-        fi
-      ''}
-      exec nix run "${llmAgentsFlake}#${attribute}" -- ${escapedArguments} "$@"
-    '';
+    if llmAgentPolicy.useVoomEgress then
+      mkVoomEgressWrapper {
+        inherit package;
+        program = binary;
+      }
+    else
+      package;
 in
 with pkgs; [
   # General packages for development and system management
@@ -227,10 +233,6 @@ with pkgs; [
   # To bypass the `tarball-ttl` cache (1h by default) and force a fresh
   # fetch, run the underlying command directly with `--refresh`, for example:
   # `nix run --refresh github:numtide/llm-agents.nix#claude-code`.
-  #
-  # `claude` and `codex` are executables rather than fish functions because
-  # callers outside fish need them: herdr resumes an agent pane by running
-  # `claude --resume <id>` itself, and herdr popup commands run via `sh`.
   #
   # See: <https://github.com/numtide/llm-agents.nix>
   (pkgs.writeShellScriptBin "llm-agents" ''

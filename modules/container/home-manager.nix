@@ -8,13 +8,10 @@ let
   sharedPrograms = import ../shared/home-manager.nix {
     inherit config osConfig pkgs lib userInfo;
   };
-  voomEgressFunction = command: ''
-    if test "$VOOM_EGRESS_ACTIVE" != 1; and test -r /run/voom/egress.json
-        voom-egress-run -- (command -s ${command}) $argv
-    else
-        command ${command} $argv
-    end
-  '';
+  voomEgressRun = pkgs.callPackage ../../packages/voom-egress-run.nix { };
+  mkVoomEgressWrapper = pkgs.callPackage ../../packages/mk-voom-egress-wrapper.nix {
+    inherit voomEgressRun;
+  };
 in {
   home = {
     username = user;
@@ -35,9 +32,13 @@ in {
   news.display = "silent";
 
   programs = lib.recursiveUpdate sharedPrograms {
-    fish.functions = {
-      gh = voomEgressFunction "gh";
-      git = voomEgressFunction "git";
+    gh.package = mkVoomEgressWrapper {
+      package = pkgs.gh;
+      program = "gh";
+    };
+    git.package = mkVoomEgressWrapper {
+      package = pkgs.git;
+      program = "git";
     };
   };
 }

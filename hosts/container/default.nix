@@ -124,6 +124,7 @@ let
     ${pkgs.inetutils}/bin/hostname "$hostname"
   '';
   voomEgressRun = pkgs.callPackage ../../packages/voom-egress-run.nix { };
+  voomEgressSkip = pkgs.callPackage ../../packages/voom-egress-skip.nix { };
   # Chromium ignores the CA environment variables set by voom-egress-run and
   # reads the per-user NSS database. The egress CA is generated at runtime, so
   # the build-time security.pki options cannot install it.
@@ -318,6 +319,7 @@ in
     jq
     util-linux
     voomEgressRun
+    voomEgressSkip
     ghostty.terminfo
   ];
 
