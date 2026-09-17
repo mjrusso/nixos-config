@@ -124,6 +124,35 @@ let
     ${pkgs.inetutils}/bin/hostname "$hostname"
   '';
   voomEgressRun = pkgs.callPackage ../../packages/voom-egress-run.nix { };
+  # Chromium ignores the CA environment variables set by voom-egress-run and
+  # reads the per-user NSS database. The egress CA is generated at runtime, so
+  # the build-time security.pki options cannot install it.
+  voomEgressTrust = pkgs.writeShellScript "voom-egress-trust" ''
+    set -euo pipefail
+
+    db="$HOME/.pki/nssdb"
+    ca=/run/voom/egress-ca.pem
+
+    remove_trust() {
+      [ -f "$db/cert9.db" ] || return 0
+      ${pkgs.nss.tools}/bin/certutil -d "sql:$db" -L >/dev/null
+      if ${pkgs.nss.tools}/bin/certutil -d "sql:$db" -L \
+        -n voom-egress >/dev/null 2>&1; then
+        ${pkgs.nss.tools}/bin/certutil -d "sql:$db" -D -n voom-egress
+      fi
+    }
+
+    if [ ! -r "$ca" ]; then
+      remove_trust
+      exit 0
+    fi
+
+    ${pkgs.coreutils}/bin/install -d -m 0700 "$db"
+    # certutil -A rejects an existing nickname, so remove the previous CA first.
+    remove_trust
+    ${pkgs.nss.tools}/bin/certutil -d "sql:$db" -A -t "C,," \
+      -n voom-egress -i "$ca"
+  '';
 in
 {
   imports = [
@@ -208,6 +237,25 @@ in
     serviceConfig = {
       Type = "oneshot";
       ExecStart = voomSetHostname;
+      RemainAfterExit = true;
+    };
+  };
+
+  # nofail mounts are not ordered before local-fs.target. Finish the mount
+  # attempt and trust reconciliation before logins can start. A path unit cannot
+  # detect later host-side changes because virtiofs does not report them through
+  # inotify; restart this service or the VM after a live CA replacement.
+  systemd.services.voom-egress-trust = {
+    description = "Trust the voom egress CA in the browser certificate store";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "run-voom.mount" ];
+    after = [ "run-voom.mount" ];
+    before = [ "systemd-user-sessions.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      User = user;
+      Environment = "HOME=/home/${user}";
+      ExecStart = voomEgressTrust;
       RemainAfterExit = true;
     };
   };

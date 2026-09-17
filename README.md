@@ -1359,6 +1359,11 @@ separate testing. GitHub CLI also requires a nonempty local `GH_TOKEN`. The
 helper supplies a nonsecret placeholder when the variable is absent. Node's
 environment proxy support requires Node 22.21 or later.
 
+The guest imports the egress CA into Chromium's NSS database during boot. If
+Voom replaces the CA while the guest remains running, refresh the database with
+`sudo systemctl restart voom-egress-trust.service` or restart the VM. Restarting
+the service also removes the old NSS entry when no CA is published.
+
 The Fish configuration in the guest applies `voom-egress-run` automatically
 to `git` and `gh` when the manifest exists. Codex and Claude use executable
 wrappers so Herdr and other non-Fish callers receive the same egress
