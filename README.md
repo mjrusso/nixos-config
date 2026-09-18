@@ -676,7 +676,7 @@ machines. To access the web UI, forward it over SSH from a machine that has an
 accessible browser:
 
 ``` bash
-ssh -L 8385:localhost:8384 <user>@<host>
+tunnel <user>@<host> 8385:8384
 ```
 
 Then open <http://localhost:8385> in a browser. Substitute the host's Tailscale
@@ -1197,7 +1197,7 @@ The web interface is available only on the host at
 SSH tunnel and open that same local URL in a browser:
 
 ``` bash
-ssh -N -L 14321:127.0.0.1:14321 <host>
+tunnel <user>@<host> 14321
 ```
 
 Registration through the web interface does not authenticate the Agent Vault
