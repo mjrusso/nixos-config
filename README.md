@@ -1221,44 +1221,116 @@ Use Agent Vault commands or its local web interface to configure each vault's
 services and credentials. Keep the operator session on the host. Do not copy it
 into a guest.
 
-For GitHub API and Git-over-HTTPS access, add these credentials:
+GitHub API and Git-over-HTTPS requests require separate services because they
+use different hosts and authentication flows. Choose one of the following
+configurations for each vault. Different vaults can use different
+configurations.
 
-| Credential        | Value                         |
-|-------------------|-------------------------------|
-| `GITHUB_TOKEN`    | The personal access token     |
-| `GITHUB_USERNAME` | The GitHub account user name  |
+###### Single GitHub PAT
 
-Create both entries in the vault's Credentials section before you configure
-the services. The Basic-auth service selects `GITHUB_USERNAME` as a credential.
-The field does not accept the user name as a literal value.
+Use this configuration when one PAT should authenticate all GitHub requests
+from the vault. Add these credentials:
 
-Add a service for GitHub API requests:
+| Credential        | Value                        |
+|-------------------|------------------------------|
+| `GITHUB_TOKEN`    | The personal access token    |
+| `GITHUB_USERNAME` | The GitHub account user name |
 
-| Setting          | Value             |
-|------------------|-------------------|
-| Name             | `github`          |
-| Host             | `api.github.com`  |
-| Authentication   | Bearer            |
-| Token credential | `GITHUB_TOKEN`    |
+Add the API service:
 
-Add a second service for Git smart HTTP:
+| Setting          | Value            |
+|------------------|------------------|
+| Name             | `github-api`     |
+| Host             | `api.github.com` |
+| Authentication   | Bearer           |
+| Token credential | `GITHUB_TOKEN`   |
 
-| Setting              | Value               |
-|----------------------|---------------------|
-| Name                 | `github-git`        |
-| Host                 | `github.com`        |
-| Authentication       | Basic               |
-| Username credential  | `GITHUB_USERNAME`   |
-| Password credential  | `GITHUB_TOKEN`      |
+Add the Git smart HTTP service:
 
-Both services are required. The `api.github.com` service authenticates GitHub
-API and `gh` requests. The `github.com` service authenticates Git clone, fetch,
-and push operations over HTTPS. One service does not cover the other host.
+| Setting             | Value             |
+|---------------------|-------------------|
+| Name                | `github-git`      |
+| Host                | `github.com`      |
+| Authentication      | Basic             |
+| Username credential | `GITHUB_USERNAME` |
+| Password credential | `GITHUB_TOKEN`    |
 
-Do not add a substitution or a wildcard host. `voom-egress-run` gives `gh` the
+The Basic-auth service selects `GITHUB_USERNAME` as a credential. The field
+does not accept the user name as a literal value. Do not add substitutions to
+either service in this configuration. `voom-egress-run` gives `gh` the
 nonsecret placeholder `GH_TOKEN=__github_token__` because `gh` requires the
-variable. The API service replaces its Bearer header with the stored token. The
-Git service replaces Git's Basic header with the user name and stored token.
+variable. The API service replaces the complete Bearer header with the stored
+token. The Git service replaces the complete Basic header with the stored user
+name and token.
+
+###### Multiple GitHub PATs
+
+Use this configuration when different GitHub organizations require different
+PATs. Add one PAT credential per organization and at least one user-name
+credential. For an organization named `some-org`, use names such as:
+
+| Credential                | Value                        |
+|---------------------------|------------------------------|
+| `GITHUB_USERNAME`         | The GitHub account user name |
+| `GITHUB_SOME_ORG_PAT`     | The PAT for `some-org`       |
+| `GITHUB_ANOTHER_ORG_PAT`  | The PAT for `another-org`    |
+
+Credential keys accept uppercase letters, numbers, and underscores. Keep a
+hyphen in the GitHub organization path, but replace it with an underscore in
+the credential key and the recommended placeholder.
+
+Add one API service shared by all of the PATs:
+
+| Setting        | Value            |
+|----------------|------------------|
+| Name           | `github-api`     |
+| Host           | `api.github.com` |
+| Authentication | Passthrough      |
+
+Add one substitution for each PAT:
+
+| Credential               | Placeholder                    | Target |
+|--------------------------|--------------------------------|--------|
+| `GITHUB_SOME_ORG_PAT`    | `__github_some_org_pat__`      | Header |
+| `GITHUB_ANOTHER_ORG_PAT` | `__github_another_org_pat__`   | Header |
+
+The web interface labels these settings **URL Substitutions**. Select only
+**Header** for each substitution. Do not select **Path** or **Query**. The API
+service must use Passthrough authentication; a Bearer service has one fixed
+token credential and overrides the incoming header before this approach can
+select a PAT.
+
+Add one Basic-auth Git service per organization:
+
+| Setting             | Value                     |
+|---------------------|---------------------------|
+| Name                | `github-git-some-org`     |
+| Host                | `github.com/some-org/*`   |
+| Authentication      | Basic                     |
+| Username credential | `GITHUB_USERNAME`         |
+| Password credential | `GITHUB_SOME_ORG_PAT`     |
+
+Repeat that service for each organization and select its corresponding PAT.
+Agent Vault matches the URL path literally and case-sensitively. Do not retain
+an unscoped `github.com` Basic-auth service unless the vault deliberately needs
+a fallback PAT for other owners.
+
+Set the matching nonsecret placeholder in each repository's `.envrc`, or in a
+trusted parent directory that contains repositories for the same organization:
+
+``` bash
+export GH_TOKEN='__github_some_org_pat__'
+```
+
+Run `direnv allow` after reviewing the file. Set `GH_TOKEN`; do not also set
+`GITHUB_TOKEN`. `gh` puts the placeholder in its authorization header, and the
+API service replaces it with the selected PAT. Git does not use this
+substitution. Its organization-specific Basic-auth service selects the PAT
+from the repository URL.
+
+Use fine-grained PAT ownership and repository permissions as the security
+boundary. The organization path only selects which credential Agent Vault
+injects; it does not reduce that credential's GitHub permissions.
 
 After you create the vaults, verify their names against the assignments in the
 same host-specific module. Stop all newly assigned VMs. Then reconcile the
@@ -1356,8 +1428,10 @@ The helper refuses to start if Voom did not publish an explicit egress
 manifest. The helper sets proxy and CA variables for common HTTP clients.
 Clients with a built-in root store can ignore these variables and require
 separate testing. GitHub CLI also requires a nonempty local `GH_TOKEN`. The
-helper supplies a nonsecret placeholder when the variable is absent. Node's
-environment proxy support requires Node 22.21 or later.
+helper supplies the nonsecret placeholder `__github_token__` when the variable
+is absent. This default works with the single-PAT configuration. A multi-PAT
+vault must set its organization-specific placeholder before it runs `gh`.
+Node's environment proxy support requires Node 22.21 or later.
 
 The guest imports the egress CA into Chromium's NSS database during boot. If
 Voom replaces the CA while the guest remains running, refresh the database with
@@ -1369,6 +1443,18 @@ manifest exists, the wrappers apply `voom-egress-run` from any shell or parent
 process. The agent wrappers also run Codex with `--yolo` and Claude Code with
 `--dangerously-skip-permissions`. The VM is the isolation boundary for these
 agents. Host installations keep the agents' normal permission controls.
+
+A Nix development shell can shadow the wrapped `git` or `gh` with an unwrapped
+package from the shell's `PATH`. Do not add plain `pkgs.git` or `pkgs.gh` to a
+guest development shell unless the package is required and wrapped with
+`voom-egress-run`. An authentication failure that occurs only inside one
+directory can indicate that `direnv` activated such a shell. Compare
+`command -v git` inside and outside that directory. To test an unwrapped binary
+explicitly, run:
+
+``` bash
+voom-egress-run -- "$(command -v git)" ls-remote origin
+```
 
 Run these commands normally:
 
@@ -1394,8 +1480,10 @@ voom-egress-skip -- gh auth status
 ```
 
 `voom-egress-skip` removes the inherited proxy and Agent Vault CA variables,
-removes the nonsecret placeholder `GH_TOKEN`, and sets `VOOM_EGRESS_SKIP=1` for
-the child process. Neither method disables the VM's egress attachment.
+removes the helper's default `GH_TOKEN=__github_token__`, and sets
+`VOOM_EGRESS_SKIP=1` for the child process. It leaves a `GH_TOKEN` supplied by
+shell configuration unchanged, including a multi-PAT placeholder. Neither
+method disables the VM's egress attachment.
 
 HAProxy allows 10 seconds to establish an upstream connection. It applies a
 15-minute idle timeout to clients, servers, CONNECT tunnels, WebSockets, and
@@ -1404,7 +1492,7 @@ idle connection closes.
 
 ##### Validate an Attachment
 
-Run these commands after you attach a VM:
+For a vault that uses one PAT, run these commands after you attach a VM:
 
 ``` bash
 gh api user --jq .login
@@ -1414,8 +1502,22 @@ git -C <repository> fetch
 git -C <repository> push --dry-run origin HEAD
 ```
 
-All commands must succeed. Use a low-risk repository for the Git tests. Confirm
-that the requests appear under the `github` and `github-git` services in
+For a vault that uses multiple PATs, enter a repository directory whose
+`.envrc` selects the intended PAT and run:
+
+``` bash
+gh api repos/<owner>/<private-repository> --jq .full_name
+voom-egress-run -- curl --fail \
+  --header "Authorization: Bearer $GH_TOKEN" \
+  https://api.github.com/repos/<owner>/<private-repository>
+git ls-remote https://github.com/<owner>/<private-repository>.git HEAD
+git fetch
+git push --dry-run origin HEAD
+```
+
+Repeat the multi-PAT checks for every configured organization. All commands
+must succeed. Use low-risk repositories for the Git tests. Confirm that each
+request appears under the expected API or organization-specific Git service in
 the Agent Vault request log. If the VM uses Git LFS or GitHub release uploads,
 test those operations as well. When migrating an existing VM, do not remove its
 guest credential until these checks pass.
@@ -1438,8 +1540,9 @@ If GitHub CLI stores the credential, remove it with:
 voom-egress-skip -- gh auth logout --hostname github.com
 ```
 
-Remove tokens supplied by shell configuration, environment files, Git
-credential stores, or other guest secret mechanisms. Then start a new shell.
+Remove real tokens supplied by shell configuration, environment files, Git
+credential stores, or other guest secret mechanisms. Keep a multi-PAT
+placeholder in `.envrc`; it is not a credential. Then start a new shell.
 
 Verify that direct authenticated access fails:
 
@@ -1451,8 +1554,8 @@ voom-egress-skip -- env GIT_TERMINAL_PROMPT=0 \
 ```
 
 Repeat [Validate an Attachment](#validate-an-attachment) normally. All brokered
-requests must still succeed and appear under the `github` and `github-git`
-services in the Agent Vault request log.
+requests must still succeed and appear under the services configured for the
+vault in the Agent Vault request log.
 
 ##### Routine Operations
 
