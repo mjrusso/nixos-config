@@ -18,8 +18,6 @@ writeShellApplication {
     if [[ ''${GH_TOKEN:-} == __github_token__ ]]; then
       unset GH_TOKEN
     fi
-    unset VOOM_EGRESS_ACTIVE
-    export VOOM_EGRESS_SKIP=1
 
     exec "$@"
   '';

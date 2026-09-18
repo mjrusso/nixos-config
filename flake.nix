@@ -153,9 +153,15 @@
         }
       );
 
-      checks.x86_64-linux.voom-agent-vault = import ./tests/voom-agent-vault.nix {
-        pkgs = nixpkgs.legacyPackages.x86_64-linux;
-        voomPackage = inputs.voom.packages.x86_64-linux.default;
+      checks.x86_64-linux = {
+        voom-agent-vault = import ./tests/voom-agent-vault.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          voomPackage = inputs.voom.packages.x86_64-linux.default;
+        };
+        voom-egress = import ./tests/voom-egress.nix {
+          inherit inputs;
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
       };
 
       # Starting points for new projects.

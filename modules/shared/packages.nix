@@ -1,7 +1,6 @@
 {
   pkgs,
   llmAgentPolicy ? {
-    useVoomEgress = false;
     claudeArguments = [ ];
     codexArguments = [ ];
   },
@@ -9,26 +8,14 @@
 
 let
   llmAgentsFlake = "github:numtide/llm-agents.nix";
-  voomEgressRun = pkgs.callPackage ../../packages/voom-egress-run.nix { };
-  mkVoomEgressWrapper = pkgs.callPackage ../../packages/mk-voom-egress-wrapper.nix {
-    inherit voomEgressRun;
-  };
-
   llmAgent =
     binary: attribute: arguments:
     let
       escapedArguments = pkgs.lib.escapeShellArgs arguments;
-      package = pkgs.writeShellScriptBin binary ''
-        exec nix run "${llmAgentsFlake}#${attribute}" -- ${escapedArguments} "$@"
-      '';
     in
-    if llmAgentPolicy.useVoomEgress then
-      mkVoomEgressWrapper {
-        inherit package;
-        program = binary;
-      }
-    else
-      package;
+    pkgs.writeShellScriptBin binary ''
+      exec nix run "${llmAgentsFlake}#${attribute}" -- ${escapedArguments} "$@"
+    '';
 in
 with pkgs; [
   # General packages for development and system management

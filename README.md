@@ -1086,9 +1086,7 @@ by `voom-agent-vault sync`.
 ``` mermaid
 flowchart LR
     subgraph Guest["Voom guest"]
-        C["Command"]
-        W["voom-egress-run<br/>sets proxy and CA variables"]
-        C --> W
+        C["Command<br/>session proxy and CA environment"]
     end
 
     subgraph Host["Trusted host"]
@@ -1106,7 +1104,7 @@ flowchart LR
 
     API["External API"]
 
-    W -->|"HTTP(S) proxy<br/>192.168.127.1:3128"| G
+    C -->|"HTTP(S) proxy<br/>192.168.127.1:3128"| G
     A -->|"injects service credential"| API
     N -.-> M
     M -.->|"configures route"| G
@@ -1228,8 +1226,8 @@ configurations.
 
 ###### Single GitHub PAT
 
-Use this configuration when one PAT should authenticate all GitHub requests
-from the vault. Add these credentials:
+Use this configuration when one PAT authenticates all GitHub requests from the
+vault. Add these credentials:
 
 | Credential        | Value                        |
 |-------------------|------------------------------|
@@ -1257,7 +1255,7 @@ Add the Git smart HTTP service:
 
 The Basic-auth service selects `GITHUB_USERNAME` as a credential. The field
 does not accept the user name as a literal value. Do not add substitutions to
-either service in this configuration. `voom-egress-run` gives `gh` the
+either service in this configuration. The guest session gives `gh` the
 nonsecret placeholder `GH_TOKEN=__github_token__` because `gh` requires the
 variable. The API service replaces the complete Bearer header with the stored
 token. The Git service replaces the complete Basic header with the stored user
@@ -1296,8 +1294,8 @@ Add one substitution for each PAT:
 
 The web interface labels these settings **URL Substitutions**. Select only
 **Header** for each substitution. Do not select **Path** or **Query**. The API
-service must use Passthrough authentication; a Bearer service has one fixed
-token credential and overrides the incoming header before this approach can
+service must use Passthrough authentication. A Bearer service has one fixed
+token credential and overrides the incoming header before a substitution can
 select a PAT.
 
 Add one Basic-auth Git service per organization:
@@ -1311,9 +1309,9 @@ Add one Basic-auth Git service per organization:
 | Password credential | `GITHUB_SOME_ORG_PAT`     |
 
 Repeat that service for each organization and select its corresponding PAT.
-Agent Vault matches the URL path literally and case-sensitively. Do not retain
-an unscoped `github.com` Basic-auth service unless the vault deliberately needs
-a fallback PAT for other owners.
+Keep the organization spelling and case identical to its GitHub URL. Do not
+retain an unscoped `github.com` Basic-auth service unless the vault deliberately
+needs a fallback PAT for other owners.
 
 Set the matching nonsecret placeholder in each repository's `.envrc`, or in a
 trusted parent directory that contains repositories for the same organization:
@@ -1322,7 +1320,7 @@ trusted parent directory that contains repositories for the same organization:
 export GH_TOKEN='__github_some_org_pat__'
 ```
 
-Run `direnv allow` after reviewing the file. Set `GH_TOKEN`; do not also set
+Run `direnv allow` after reviewing the file. Set `GH_TOKEN`. Do not also set
 `GITHUB_TOKEN`. `gh` puts the placeholder in its authorization header, and the
 API service replaces it with the selected PAT. Git does not use this
 substitution. Its organization-specific Basic-auth service selects the PAT
@@ -1330,7 +1328,7 @@ from the repository URL.
 
 Use fine-grained PAT ownership and repository permissions as the security
 boundary. The organization path only selects which credential Agent Vault
-injects; it does not reduce that credential's GitHub permissions.
+injects. It does not reduce that credential's GitHub permissions.
 
 After you create the vaults, verify their names against the assignments in the
 same host-specific module. Stop all newly assigned VMs. Then reconcile the
@@ -1417,44 +1415,51 @@ attachment prevents the VM from starting. Use the recovery procedure under
 
 ##### Guest Commands
 
-The guest image includes `voom-egress-run`. Use it directly for a command that
-does not have a guest wrapper:
+Before user sessions start, the guest validates the Voom egress manifest and
+creates a runtime environment with the proxy and CA settings. Fish shells and
+the systemd user manager load this environment. Commands started by Fish or a
+systemd user service inherit the settings. Commands run inside `nix develop`
+or direnv also inherit them. A development shell, `.envrc`, or program can
+override or remove the inherited variables. Check the effective environment
+when a command does not use the proxy.
+
+An attached VM with an invalid manifest does not permit user sessions. A VM
+without an attachment starts normally without the egress environment.
+
+Use `voom-egress-run` to apply the egress settings explicitly to a command or
+to diagnose its environment:
 
 ``` bash
 voom-egress-run -- curl --fail https://api.github.com/user
 ```
 
-The helper refuses to start if Voom did not publish an explicit egress
-manifest. The helper sets proxy and CA variables for common HTTP clients.
-Clients with a built-in root store can ignore these variables and require
-separate testing. GitHub CLI also requires a nonempty local `GH_TOKEN`. The
-helper supplies the nonsecret placeholder `__github_token__` when the variable
-is absent. This default works with the single-PAT configuration. A multi-PAT
-vault must set its organization-specific placeholder before it runs `gh`.
-Node's environment proxy support requires Node 22.21 or later.
+The helper requires a readable explicit egress manifest and a valid
+`XDG_RUNTIME_DIR`. Clients with a built-in root store can ignore the session CA
+variables and require separate testing. GitHub CLI also requires a nonempty
+local `GH_TOKEN`. The session supplies the nonsecret placeholder
+`__github_token__` when the variable is absent. This default works with the
+single-PAT configuration.
+
+A multi-PAT vault must set its organization-specific placeholder before it
+runs `gh`. Node's environment proxy support requires Node 22.21 or later.
+
+Agent Vault creates its CA when the service first starts. The host module
+publishes only the public certificate at
+`/var/lib/voom-agent-vault-public/ca.pem`. The `voom-agent-vault sync` command
+configures Voom to copy that certificate into the attached guest as
+`/run/voom/egress-ca.pem`. The guest combines it with the standard CA bundle.
+You do not generate or install a separate CA for this integration.
 
 The guest imports the egress CA into Chromium's NSS database during boot. If
 Voom replaces the CA while the guest remains running, refresh the database with
 `sudo systemctl restart voom-egress-trust.service` or restart the VM. Restarting
-the service also removes the old NSS entry when no CA is published.
+the service also regenerates the session CA bundle and removes the old NSS
+entry when `/run/voom/egress-ca.pem` is absent.
 
-The guest installs wrapped `git`, `gh`, Codex, and Claude executables. When the
-manifest exists, the wrappers apply `voom-egress-run` from any shell or parent
-process. The agent wrappers also run Codex with `--yolo` and Claude Code with
-`--dangerously-skip-permissions`. The VM is the isolation boundary for these
-agents. Host installations keep the agents' normal permission controls.
-
-A Nix development shell can shadow the wrapped `git` or `gh` with an unwrapped
-package from the shell's `PATH`. Do not add plain `pkgs.git` or `pkgs.gh` to a
-guest development shell unless the package is required and wrapped with
-`voom-egress-run`. An authentication failure that occurs only inside one
-directory can indicate that `direnv` activated such a shell. Compare
-`command -v git` inside and outside that directory. To test an unwrapped binary
-explicitly, run:
-
-``` bash
-voom-egress-run -- "$(command -v git)" ls-remote origin
-```
+Git and GitHub CLI use their normal packages. The Codex and Claude launchers
+still add `--yolo` and `--dangerously-skip-permissions`, respectively, but do
+not add an egress wrapper. The VM is the isolation boundary for these agents.
+Host installations keep their normal permission controls.
 
 Run these commands normally:
 
@@ -1465,25 +1470,17 @@ codex
 claude
 ```
 
-From a normal shell, set `VOOM_EGRESS_SKIP=1` for one command to skip automatic
-egress:
-
-``` bash
-VOOM_EGRESS_SKIP=1 gh auth status
-```
-
-If the shell already inherited the proxy environment from Codex, Claude, or
-another `voom-egress-run` process, remove it for one command with:
+Remove the session egress environment for one command with:
 
 ``` bash
 voom-egress-skip -- gh auth status
 ```
 
-`voom-egress-skip` removes the inherited proxy and Agent Vault CA variables,
-removes the helper's default `GH_TOKEN=__github_token__`, and sets
-`VOOM_EGRESS_SKIP=1` for the child process. It leaves a `GH_TOKEN` supplied by
-shell configuration unchanged, including a multi-PAT placeholder. Neither
-method disables the VM's egress attachment.
+`voom-egress-skip` removes the inherited proxy and Agent Vault CA variables. It
+also removes the session's default
+`GH_TOKEN=__github_token__`. It leaves a `GH_TOKEN` supplied by shell
+configuration unchanged, including a multi-PAT placeholder. The command does
+not disable the VM's egress attachment.
 
 HAProxy allows 10 seconds to establish an upstream connection. It applies a
 15-minute idle timeout to clients, servers, CONNECT tunnels, WebSockets, and
@@ -1542,7 +1539,8 @@ voom-egress-skip -- gh auth logout --hostname github.com
 
 Remove real tokens supplied by shell configuration, environment files, Git
 credential stores, or other guest secret mechanisms. Keep a multi-PAT
-placeholder in `.envrc`; it is not a credential. Then start a new shell.
+placeholder in `.envrc`. The placeholder is not a credential. Then start a new
+shell.
 
 Verify that direct authenticated access fails:
 
@@ -1666,7 +1664,7 @@ Confirm that Caddy remains reachable through the tailnet and unreachable
 through the host's non-tailnet addresses.
 
 From an attached test guest, force requests through the proxy instead of the
-wrapper's loopback bypass:
+loopback bypass in the session environment:
 
 ``` bash
 curl --noproxy '' --proxy http://192.168.127.1:3128 \
