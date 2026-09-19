@@ -919,11 +919,13 @@ The resulting image will be written to `./result`.
 Note that these images use a minimal NixOS configuration with SSH (key-only
 auth), Fish shell, and CLI development tools (and explicitly no GUI or desktop
 services). Disk-backed VM images (`qcow` and `raw`) also enable Docker and add
-the configured user to the `docker` group. VM guests grant passwordless sudo to
-`wheel` so `voom nixos switch` can activate configurations through the normal
-user. Images are [voom](https://github.com/mjrusso/voom)-compatible
-(`cloud-init` with a `NoCloud` datasource for bootstrap metadata; runtime
-coordination via the `voom-control` virtiofs share mounted at `/run/voom`).
+the configured user to the `docker`, `dialout`, and `plugdev` groups. Their
+udev rules grant `plugdev` access to common embedded debug probes and native
+USB debug interfaces. VM guests grant passwordless sudo to `wheel` so `voom
+nixos switch` can activate configurations through the normal user. Images are
+[voom](https://github.com/mjrusso/voom)-compatible (`cloud-init` with a
+`NoCloud` datasource for bootstrap metadata; runtime coordination via the
+`voom-control` virtiofs share mounted at `/run/voom`).
 
 #### Running VM Images
 

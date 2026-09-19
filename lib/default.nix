@@ -64,9 +64,15 @@ let
       user = userInfo.user;
       imageModules =
         (nixpkgs.lib.optionals (format == "qcow" || format == "raw") [
-          {
+          ({ pkgs, ... }: {
             virtualisation.docker.enable = true;
-            users.users.${user}.extraGroups = [ "docker" ];
+            users.groups.plugdev = { };
+            users.users.${user}.extraGroups = [
+              "docker"
+              "dialout"
+              "plugdev"
+            ];
+            services.udev.packages = [ pkgs.probe-rs-tools ];
             time.timeZone = "America/New_York";
             boot.kernel.sysctl = {
               "vm.overcommit_memory" = 1;
@@ -78,7 +84,7 @@ let
                 size = 2048;
               }
             ];
-          }
+          })
         ])
         ++ (nixpkgs.lib.optionals (format != null) [
           (mkVmImageMarkerModule format)
