@@ -40,7 +40,7 @@ writeShellApplication {
       esac
     done < "$runtime_dir/environment"
 
-    for entry in localhost 127.0.0.1 ::1; do
+    for entry in localhost 127.0.0.1 0.0.0.0 ::1; do
       case ",$no_proxy_value," in
         *",$entry,"*) ;;
         *) no_proxy_value="''${no_proxy_value:+$no_proxy_value,}$entry" ;;

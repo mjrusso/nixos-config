@@ -34,7 +34,7 @@ let
             end
         end < ${voomEgressEnvironment}
 
-        for entry in localhost 127.0.0.1 ::1
+        for entry in localhost 127.0.0.1 0.0.0.0 ::1
             if not contains -- $entry (string split , -- "$voom_no_proxy")
                 set voom_no_proxy (string join , $voom_no_proxy $entry)
             end
