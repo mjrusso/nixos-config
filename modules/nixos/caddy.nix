@@ -625,7 +625,11 @@ let
           routes="$(jq '
             [
               .[]
-              | { handler: "reverse_proxy", upstreams: [ { dial: .dial } ] } as $proxy
+              | {
+                  handler: "reverse_proxy",
+                  stream_close_delay: "1h",
+                  upstreams: [ { dial: .dial } ]
+                } as $proxy
               | (
                   (
                     if (.paths | length) == 0 then
