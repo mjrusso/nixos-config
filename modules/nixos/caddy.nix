@@ -281,6 +281,7 @@ let
                 match: [{host: [$host]}],
                 handle: [{
                   handler: "reverse_proxy",
+                  stream_close_delay: "1h",
                   upstreams: [{dial: $dial}]
                 }]
               }
