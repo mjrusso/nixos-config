@@ -43,6 +43,21 @@ in {
         };
         file = lib.mkMerge [ sharedFiles additionalFiles ];
         stateVersion = "23.11";
+
+        # Open text files in CotEditor instead of Xcode (or whatever app
+        # happens to be registered as the default). Note that CotEditor is
+        # installed manually (using `brew install --cask coteditor`); skip if
+        # it isn't installed on this system.
+        activation.defaultTextEditor = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          if [ -d /Applications/CotEditor.app ]; then
+            for t in public.plain-text public.source-code public.script \
+                     public.shell-script public.python-script public.json \
+                     public.yaml public.xml net.daringfireball.markdown \
+                     .md .nix .toml; do
+              run ${pkgs.duti}/bin/duti -s com.coteditor.CotEditor "$t" all
+            done
+          fi
+        '';
       };
       fonts.fontconfig.enable = true;
       programs = { } // import ../shared/home-manager.nix {
