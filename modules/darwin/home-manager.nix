@@ -53,7 +53,7 @@ in {
             for t in public.plain-text public.source-code public.script \
                      public.shell-script public.python-script public.json \
                      public.yaml public.xml net.daringfireball.markdown \
-                     .md .nix .toml; do
+                     .md .toml; do
               run ${pkgs.duti}/bin/duti -s com.coteditor.CotEditor "$t" all
             done
           fi
