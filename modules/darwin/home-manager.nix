@@ -1,4 +1,4 @@
-{ config, osConfig, pkgs, lib, home-manager, mac-app-util, userInfo, ... }:
+{ config, osConfig, pkgs, lib, home-manager, userInfo, ... }:
 
 let
   user = userInfo.user;
@@ -19,17 +19,6 @@ in {
   home-manager = {
     useGlobalPkgs = true;
     users.${user} = { pkgs, config, osConfig, lib, ... }: {
-      imports = [
-        # Use the `mac-app-util` module to ensure that app launchers (e.g.
-        # Emacs) are properly symlinked (so they can be found via Spotlight,
-        # are pinnable to the Dock, etc.).
-        #
-        # See documentation: https://github.com/hraban/mac-app-util
-        #
-        # Also see: https://github.com/nix-community/home-manager/issues/1341
-        mac-app-util.homeManagerModules.default
-      ];
-
       home = {
         enableNixpkgsReleaseCheck = false;
         packages = pkgs.callPackage ./packages.nix { };
@@ -42,7 +31,7 @@ in {
           LIMA_WORKDIR = "/home/${user}.linux";
         };
         file = lib.mkMerge [ sharedFiles additionalFiles ];
-        stateVersion = "23.11";
+        stateVersion = "25.11";
 
         # Open text files in CotEditor instead of Xcode (or whatever app
         # happens to be registered as the default). Note that CotEditor is

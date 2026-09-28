@@ -5,7 +5,6 @@ let
     darwin
     disko
     home-manager
-    mac-app-util
     nixos-generators
     nixos-wsl
     nixpkgs
@@ -162,7 +161,6 @@ in
           inherit systemType userInfo;
         } extraSpecialArgs);
       modules = [
-        mac-app-util.darwinModules.default
         home-manager.darwinModules.home-manager
         {
           home-manager = {

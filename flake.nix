@@ -19,12 +19,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    mac-app-util = {
-      url = "github:hraban/mac-app-util";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.cl-nix-lite.inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     emacs-flake = {
       url = "github:mjrusso/emacs-flake";
     };
