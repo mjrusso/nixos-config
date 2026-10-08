@@ -1,0 +1,356 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: disk-usage [--top N] [--min SIZE]
+
+Report what is using disk space and print the command that frees each
+reclaimable item. Nothing is deleted.
+
+Options:
+  --top N     Number of home directory entries to list (default 15)
+  --min SIZE  Hide reclaimable items smaller than SIZE, e.g. 50M or 1G
+              (default 100M)
+EOF
+}
+
+top=15
+min=100M
+args=("$@")
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --top)
+      top="${2:?--top requires a value}"
+      shift 2
+      ;;
+    --min)
+      min="${2:?--min requires a value}"
+      shift 2
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+min_bytes=$(numfmt --from=iec "$min")
+
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+  HOME=$(eval echo "~${SUDO_USER}")
+fi
+
+# Prints "bytes<TAB>complete", where complete is 0 if du could not read
+# everything under the path.
+size_bytes() {
+  local bytes complete=1
+  bytes=$(du -sx --block-size=1 "$1" 2>/dev/null | cut -f1) || complete=0
+  [ -n "$bytes" ] && printf '%s\t%s\n' "$bytes" "$complete"
+  return 0
+}
+
+human() {
+  numfmt --to=iec --suffix=B "$1"
+}
+
+echo "== Filesystems"
+df -h "$HOME" / /nix 2>/dev/null | awk 'NR == 1 || !seen[$1]++'
+echo
+
+echo "== Largest entries in $HOME"
+du -x -d 1 --block-size=1 "$HOME" 2>/dev/null |
+  sort -rn |
+  tail -n +2 |
+  head -n "$top" |
+  while IFS=$'\t' read -r bytes path; do
+    printf '%8s  %s\n' "$(human "$bytes")" "$path"
+  done
+echo
+
+if command -v docker >/dev/null &&
+  docker_root=$(timeout 10 docker info --format '{{.DockerRootDir}}' 2>/dev/null); then
+  docker_ok=1
+else
+  docker_ok=0
+fi
+
+candidates=()
+add() {
+  [ -e "$1" ] && candidates+=("$1"$'\t'"$2")
+  return 0
+}
+
+add "$HOME/.cache/uv" "uv cache prune   # or: uv cache clean"
+add "$HOME/.cache/pip" "pip cache purge"
+add "$HOME/.cache/pypoetry" "poetry cache clear PyPI --all"
+add "$HOME/.cache/pre-commit" "pre-commit gc   # or: pre-commit clean"
+add "$HOME/.cache/huggingface" "Remove unused models from ~/.cache/huggingface/hub"
+add "$HOME/.npm" "npm cache clean --force"
+add "$HOME/.local/share/pnpm/store" "pnpm store prune"
+add "$HOME/.cache/yarn" "yarn cache clean"
+add "$HOME/.yarn/berry/cache" "yarn cache clean --mirror"
+add "$HOME/.bun/install/cache" "bun pm cache rm"
+add "$HOME/.cache/deno" "deno clean"
+add "$HOME/.cache/ms-playwright" "npx playwright uninstall --all"
+add "$HOME/.cache/go-build" "go clean -cache"
+add "$HOME/go/pkg/mod" "go clean -modcache"
+add "$HOME/.cargo/registry" "rm -rf ~/.cargo/registry/cache ~/.cargo/registry/src"
+add "$HOME/.cargo/git" "rm -rf ~/.cargo/git/checkouts"
+add "$HOME/.rustup/toolchains" "rustup toolchain list; rustup toolchain uninstall <name>"
+add "$HOME/.gradle/caches" "rm -rf ~/.gradle/caches   # stop daemons first: gradle --stop"
+add "$HOME/.m2/repository" "rm -rf ~/.m2/repository"
+add "$HOME/.hex/packages" "rm -rf ~/.hex/packages"
+add "$HOME/.cache/rebar3" "rm -rf ~/.cache/rebar3"
+add "$HOME/.cabal/packages" "rm -rf ~/.cabal/packages"
+add "$HOME/.stack" "rm -rf ~/.stack/pantry ~/.stack/programs   # reinstalls GHC on next build"
+add "$HOME/.gem" "gem cleanup"
+add "$HOME/.cache/composer" "composer clear-cache"
+add "$HOME/.cache/nix" "rm -rf ~/.cache/nix"
+add "$HOME/Library/Caches" "Clear per-application caches in ~/Library/Caches"
+add /var/log/journal "sudo journalctl --vacuum-size=500M"
+# The Docker section reports this without needing root.
+if [ "$docker_ok" -eq 0 ]; then
+  add /var/lib/docker "docker system prune   # add -a to remove unused images"
+fi
+add "$HOME/Library/Containers/com.docker.docker/Data/vms/0/data" \
+  "Prune in Docker, then lower the disk limit in Docker Desktop settings"
+# The Nix section reports this in more detail.
+if ! command -v nix-store >/dev/null; then
+  add /nix/store "nh clean all   # or: sudo nix-collect-garbage -d"
+fi
+
+while IFS= read -r dir; do
+  case "$dir" in
+    */target)
+      if [ -f "$(dirname "$dir")/Cargo.toml" ]; then
+        add "$dir" "cargo clean --manifest-path $(dirname "$dir")/Cargo.toml"
+      fi
+      ;;
+    */node_modules)
+      add "$dir" "rm -rf $dir"
+      ;;
+  esac
+done < <(
+  find "$HOME" -xdev -type d \( \
+    -name '.*' -prune -o \
+    -name node_modules -prune -print -o \
+    -name target -prune -print \
+  \) 2>/dev/null
+)
+
+rows=$(
+  for candidate in "${candidates[@]}"; do
+    path="${candidate%%$'\t'*}"
+    command="${candidate#*$'\t'}"
+    size=$(size_bytes "$path")
+    [ -n "$size" ] || continue
+    printf '%s\t%s\t%s\n' "$size" "$path" "$command"
+  done | sort -rn
+)
+
+echo "== Reclaimable (at least $min)"
+incomplete=0
+while IFS=$'\t' read -r bytes complete path command; do
+  [ -n "$bytes" ] || continue
+  note=""
+  if [ "$complete" -eq 0 ]; then
+    incomplete=1
+    note="  (incomplete: some files unreadable)"
+  elif [ "$bytes" -lt "$min_bytes" ]; then
+    continue
+  fi
+  printf '%8s  %s%s\n          $ %s\n' "$(human "$bytes")" "$path" "$note" "$command"
+done <<<"$rows"
+
+# Docker prints sizes in SI units, such as "3.454GB" or "32B".
+si_bytes() {
+  numfmt --from=si "${1%B}" 2>/dev/null || echo 0
+}
+
+if [ "$docker_ok" -eq 1 ]; then
+  docker_df=$(timeout 120 docker system df -v --format '{{json .}}' 2>/dev/null || true)
+
+  echo
+  echo "== Docker ($docker_root)"
+  timeout 60 docker system df 2>/dev/null || true
+
+  if [ -n "$docker_df" ]; then
+    echo
+    echo "Images not used by any container (at least $min of unique data):"
+    jq -r '.Images[] | select(.Containers == "0")
+      | [.UniqueSize, .Size, (if .Repository == "<none>" then .ID[7:19]
+          else "\(.Repository):\(.Tag)" end), .CreatedSince] | @tsv' <<<"$docker_df" |
+      while IFS=$'\t' read -r unique size name created; do
+        printf '%s\t%s\t%s\t%s\t%s\n' "$(si_bytes "$unique")" "$unique" "$size" "$name" "$created"
+      done |
+      sort -rn |
+      while IFS=$'\t' read -r bytes unique size name created; do
+        [ "$bytes" -ge "$min_bytes" ] || continue
+        printf '%10s  %s  (total %s, created %s)\n' "$unique" "$name" "$size" "$created"
+        printf '            $ docker image rm %s\n' "$name"
+      done
+
+    stopped=$(jq -r '.Containers[] | select(.State != "running")
+      | "  \(.Names)  (\(.Image), \(.Status))"' <<<"$docker_df")
+    if [ -n "$stopped" ]; then
+      echo
+      echo "Stopped containers:"
+      echo "$stopped"
+      echo '  $ docker container prune'
+    fi
+
+    unused_volumes=$(jq -r '.Volumes[] | select(.Links == "0")
+      | "  \(.Size)  \(.Name)"' <<<"$docker_df")
+    if [ -n "$unused_volumes" ]; then
+      echo
+      echo "Volumes not attached to any container (may hold data you want):"
+      echo "$unused_volumes"
+      echo '  $ docker volume rm <name>   # inspect first: docker volume inspect <name>'
+    fi
+  fi
+
+  cat <<'EOF'
+
+Docker cleanup commands, from least to most destructive:
+  docker container prune            Remove stopped containers
+  docker builder prune              Remove dangling build cache (-a: all unused build cache)
+  docker image prune                Remove dangling (untagged) images
+  docker system prune               All three of the above, plus unused networks
+  docker image prune -a --filter until=720h
+                                    Remove unused images created more than 30 days ago
+  docker system prune -a            Remove every image not used by a container; stopped
+                                    Compose stacks pull their images again on next start
+  docker system prune -a --volumes  Also remove unused volumes and the data in them
+An image used by a stopped container counts as in use; prune containers first.
+EOF
+fi
+
+# Nix emits either an array of objects or an object keyed by path, depending
+# on version.
+nar_sizes() {
+  nix path-info --stdin --json 2>/dev/null |
+    jq -r 'if type == "array" then .[] | [.path, .narSize]
+      else to_entries[] | [.key, .value.narSize] end | @tsv'
+}
+
+nix_section() {
+  local tmp link target i hint
+  local -x LC_ALL=C
+  tmp=$(mktemp -d)
+  # shellcheck disable=SC2064 # $tmp is expanded now, while it is in scope.
+  trap "rm -rf '$tmp'" RETURN
+
+  nix-store --gc --print-roots 2>/dev/null >"$tmp/roots" || return 0
+
+  # Persistent roots are symlinks on disk. Roots under /proc belong to running
+  # processes, and {censored} roots belong to other users' processes.
+  grep -v '^"/proc/' "$tmp/roots" | grep -v '^{' |
+    sed -E 's/^"(.*)" -> (.*)$/\1\t\2/' >"$tmp/persistent"
+  sed -E 's/.* -> //' "$tmp/roots" | sort -u >"$tmp/all-targets"
+
+  i=0
+  while IFS=$'\t' read -r link target; do
+    nix-store -qR "$target" 2>/dev/null | sort -u >"$tmp/closure.$i" || true
+    i=$((i + 1))
+  done <"$tmp/persistent"
+
+  sort -u "$tmp"/closure.* 2>/dev/null >"$tmp/persistent-closure" || true
+  xargs -r nix-store -qR <"$tmp/all-targets" 2>/dev/null | sort -u >"$tmp/live" || true
+  nar_sizes <"$tmp/live" | sort >"$tmp/sizes"
+  nix-store --gc --print-dead 2>/dev/null | nar_sizes >"$tmp/dead" || true
+
+  local dead process_only persistent
+  dead=$(awk -F'\t' '{s += $2} END {print s + 0}' "$tmp/dead")
+  persistent=$(join -t $'\t' "$tmp/sizes" "$tmp/persistent-closure" |
+    awk -F'\t' '{s += $2} END {print s + 0}')
+  process_only=$(join -t $'\t' -v 1 "$tmp/sizes" "$tmp/persistent-closure" |
+    awk -F'\t' '{s += $2} END {print s + 0}')
+
+  echo
+  echo "== Nix store ($(human $((dead + persistent + process_only))) in use or collectable)"
+  printf '%8s  Unreferenced; any garbage collection frees it\n' "$(human "$dead")"
+  printf '%8s  Kept only by running processes (old shells, editors, nix develop)\n' \
+    "$(human "$process_only")"
+  printf '%8s  Kept by the GC roots below\n' "$(human "$persistent")"
+
+  # A path counts toward a root's unique size when no other persistent root
+  # references it, so the figure is what removing that root alone frees.
+  echo
+  echo "Persistent GC roots, by size only that root keeps (at least $min):"
+  cat "$tmp"/closure.* 2>/dev/null | sort | uniq -c |
+    awk '$1 == 1 {print $2}' | sort >"$tmp/single"
+  i=0
+  while IFS=$'\t' read -r link target; do
+    local unique
+    unique=$(join -t $'\t' "$tmp/sizes" "$tmp/single" |
+      join -t $'\t' - "$tmp/closure.$i" |
+      awk -F'\t' '{s += $2} END {print s + 0}')
+    i=$((i + 1))
+    [ "$unique" -ge "$min_bytes" ] || continue
+    case "$link" in
+      /run/booted-system)
+        hint="The system running since boot; a reboot releases it" ;;
+      /run/current-system | */home-manager/gcroots/current-home)
+        hint="Current configuration" ;;
+      */profiles/*-[0-9]*-link)
+        if [ "$(readlink "${link%-*-link}")" = "$(basename "$link")" ]; then
+          hint="Current generation of ${link%-*-link}"
+          case "$link" in
+            */nix/profiles/profile-*) hint="$hint; nix profile list shows what it installs" ;;
+          esac
+        else
+          hint="Old generation; nh clean all removes it unless kept by --keep"
+        fi
+        ;;
+      */result | */result-* | */.direnv/*)
+        hint="Build or dev shell link; rm $link, or nh clean all" ;;
+      *)
+        hint="Remove the link if you no longer need it" ;;
+    esac
+    printf '%s\t%s\t%s\n' "$unique" "$link" "$hint"
+  done <"$tmp/persistent" |
+    sort -rn |
+    while IFS=$'\t' read -r unique link hint; do
+      printf '%8s  %s\n          %s\n' "$(human "$unique")" "$link" "$hint"
+    done
+
+  local generations
+  generations=$(find /nix/var/nix/profiles -maxdepth 1 -name 'system-*-link' 2>/dev/null | wc -l)
+
+  cat <<EOF
+
+Nix cleanup commands (system generations: $generations):
+  nh clean all --dry                Preview which generations and GC roots would go
+  nh clean all                      Delete all but the newest generation of every
+                                    profile, delete result and .direnv GC roots,
+                                    then collect garbage
+  nh clean all --keep 3 --keep-since 7d
+                                    Keep 3 generations and anything from the last
+                                    week, for rollbacks
+  nh clean all --no-direnv          Keep .direnv dev shells (--keep-one: one per project)
+  nh clean all --no-gcroots         Keep all GC roots, including result links
+  sudo nix-collect-garbage -d       Delete old generations and collect garbage; leaves
+                                    GC roots alone
+  nix store optimise                Hard-link identical files in the store
+Space kept by running processes is released when they exit; run nh clean all
+again afterwards. Space kept by /run/booted-system is released by a reboot.
+EOF
+}
+
+if command -v nix-store >/dev/null; then
+  nix_section
+fi
+
+if [ "$incomplete" -eq 1 ] && [ "$(id -u)" -ne 0 ]; then
+  echo
+  echo "Some sizes are incomplete because files could not be read. For full sizes, run:"
+  printf '  sudo %q' "$0"
+  printf ' %q' "${args[@]}"
+  echo
+fi

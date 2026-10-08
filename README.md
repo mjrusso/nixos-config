@@ -2197,8 +2197,10 @@ nh clean all
 
 `nh clean all` works in two phases. First, it scans every profile it can find
 (NixOS system profile, per-user profiles, home-manager generations), removing
-old generations that fall outside of its keep policy. It then runs a store
-garbage collection, freeing the paths those generations were keeping alive.
+old generations that fall outside of its keep policy. It also deletes GC roots,
+such as `result` symlinks and `.direnv` shells. It then runs a store garbage
+collection. Pass `--no-direnv` to keep `.direnv` shells, or `--no-gcroots` to
+keep all GC roots.
 
 To preview what would be removed before committing to it:
 
@@ -2216,6 +2218,29 @@ nh clean all --keep 5 --keep-since 7d
 
 `--keep` sets how many recent generations to retain per profile, and
 `--keep-since` retains anything newer than the given age regardless of count.
+
+### Disk usage
+
+[`disk-usage`](./scripts/disk-usage) lists what uses disk space and prints a
+command to free each item. It does not delete anything. Every host installs
+it. It reports:
+
+- free space and the largest entries in `$HOME`
+- package manager caches, Rust `target` directories, `node_modules`, and the
+  systemd journal
+- stopped Docker containers, and Docker images and volumes that no container
+  uses
+- Nix store paths, grouped by what references them: nothing, a running
+  process, or a GC root
+
+``` bash
+disk-usage
+# Optional flags: --top N (home entries to list), --min SIZE (default 100M)
+```
+
+If it cannot read a directory, it marks that size as incomplete and prints a
+`sudo` command to rerun it. Under `sudo`, it still reports on your home
+directory.
 
 ### Checks
 

@@ -25,6 +25,7 @@ with pkgs; [
   btop
   curl
   coreutils
+  (callPackage ../../packages/disk-usage.nix { })
   fish
   killall
   fastfetch
