@@ -32,6 +32,7 @@ with pkgs; [
   miniserve
   nh # Nix helper; `nh clean all` garbage-collects old generations (see README)
   nixfmt
+  pciutils
   rsync
   sqlite
   wget
