@@ -895,11 +895,13 @@ Every line should correspond to an entry in `disk-config.nix`, except for
 
 The VFIO module binds PCI devices (typically a GPU) to `vfio-pci` at boot so
 that VMs can use them. The host cannot use a bound device. If the device is
-the host's only GPU, the local display goes blank when `vfio-pci` loads during
-boot. The boot menu appears before that, so a previous generation can still be
-selected at the console. Set `nixosDesktop = false` in `host-info.nix` on such
-a host to turn off the X server, display manager, and compositor, which would
-otherwise fail to start.
+the host's only GPU, the local display stops updating when `vfio-pci` loads in
+the initrd. This happens before the ZFS passphrase prompt, so the prompt never
+appears on the display; unlock over SSH as described in [SSH-in-initrd
+unlock](#ssh-in-initrd-unlock). The boot menu appears before `vfio-pci` loads,
+so a previous generation can still be selected at the console. Set
+`nixosDesktop = false` in `host-info.nix` on such a host to turn off the X
+server, display manager, and compositor, which would otherwise fail to start.
 
 Enable the IOMMU in the firmware first. Then check that every function of the
 device is in an IOMMU group and that the group contains nothing else:
