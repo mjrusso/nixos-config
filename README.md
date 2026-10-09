@@ -893,46 +893,60 @@ Every line should correspond to an entry in `disk-config.nix`, except for
 
 #### PCI Passthrough
 
-The VFIO module binds PCI devices (typically a GPU) to `vfio-pci` at boot so
-that VMs can use them. The host cannot use a bound device. If the device is
-the host's only GPU, the local display stops updating when `vfio-pci` loads in
-the initrd. This happens before the ZFS passphrase prompt, so the prompt never
-appears on the display; unlock over SSH as described in [SSH-in-initrd
-unlock](#ssh-in-initrd-unlock). The boot menu appears before `vfio-pci` loads,
-so a previous generation can still be selected at the console. Set
-`nixosDesktop = false` in `host-info.nix` on such a host to turn off the X
-server, display manager, and compositor, which would otherwise fail to start.
+The VFIO module binds PCI devices, typically a GPU, to the `vfio-pci` driver at
+boot so that VMs can use them. The host cannot use a device bound to
+`vfio-pci`.
 
-Enable the IOMMU in the firmware first. Then check that every function of the
-device is in an IOMMU group and that the group contains nothing else:
+1. Enable the IOMMU (AMD-Vi or VT-d) in the firmware.
 
-``` bash
-nix shell nixpkgs#pciutils -c lspci -nnk -d 10de:
-ls /sys/bus/pci/devices/0000:41:00.0/iommu_group/devices
-```
+2. Check that every function of the device is in an IOMMU group, and that the
+   group contains nothing else:
 
-Replace `10de:` with the device's vendor ID and `0000:41:00.0` with its
-address. Then enable the module in your system configuration repository's
-`host-info.nix`:
+   ``` bash
+   nix shell nixpkgs#pciutils -c lspci -nnk -d 10de:
+   ls /sys/bus/pci/devices/0000:41:00.0/iommu_group/devices
+   ```
 
-``` nix
-{
-  nixosVfio = {
-    # Every function of the device, from `lspci -nn`.
-    pciIds = [ "10de:1e84" "10de:10f8" "10de:1ad8" "10de:1ad9" ];
+   Replace `10de:` with the device's vendor ID and `0000:41:00.0` with its
+   address.
 
-    # Drivers that `lspci -nnk` reports for those functions. Each gets a
-    # softdep so that vfio-pci loads first.
-    hostDrivers = [ "nouveau" "snd_hda_intel" "xhci_pci" "i2c_nvidia_gpu" ];
-  };
-}
-```
+3. Enable the module in your system configuration repository's
+   `host-info.nix`:
 
-The module also adds a udev rule that gives the `kvm` group access to
-`/dev/vfio`, and removes the user's memlock limit, since VFIO locks all guest
-RAM. The kernel parameter takes effect after a reboot. Afterward, `lspci -nnk`
-should report `vfio-pci` for every function, and `ulimit -l` in a new SSH
-session should report `unlimited`.
+   ``` nix
+   {
+     nixosVfio = {
+       # The vendor:device ID of every function of the device, from `lspci -nn`.
+       pciIds = [ "10de:1e84" "10de:10f8" "10de:1ad8" "10de:1ad9" ];
+
+       # The "Kernel driver in use" that `lspci -nnk` reports for each
+       # function. The module loads vfio-pci before these drivers, so that
+       # vfio-pci claims the device first.
+       hostDrivers = [ "nouveau" "snd_hda_intel" "xhci_pci" "i2c_nvidia_gpu" ];
+     };
+   }
+   ```
+
+   The module also gives the `kvm` group access to `/dev/vfio`, and removes
+   the user's memlock limit, because VFIO locks all of a VM's memory.
+
+4. Apply the configuration and reboot. The module passes the device IDs to
+   `vfio-pci` on the kernel command line, which takes effect only at boot.
+
+5. Check that `lspci -nnk` reports `vfio-pci` as the driver for every
+   function, and that `ulimit -l` in a new SSH session reports `unlimited`.
+
+If the device is the host's only GPU:
+
+- The display stops updating when `vfio-pci` loads in the initrd, which happens
+  before the ZFS passphrase prompt. Unlock over SSH instead, as described in
+  [SSH-in-initrd unlock](#ssh-in-initrd-unlock).
+- The boot menu still appears, so you can select a previous generation at the
+  console if a change breaks booting.
+- Set `nixosDesktop = false` in `host-info.nix`. Otherwise the X server,
+  display manager, and compositor fail to start.
+
+To assign the GPU to a VM, see [NVIDIA GPU in a VM](#nvidia-gpu-in-a-vm).
 
 ### Container and VM Images
 
@@ -1108,6 +1122,50 @@ summary names both the VM and the phases that failed (`failed: my-vm(emacs)`).
 Then, to run and manage virtual machines that use this base image, use the
 [Voom](https://github.com/mjrusso/voom) CLI. The system configuration installs
 it automatically.
+
+##### NVIDIA GPU in a VM
+
+A VM can have exclusive use of a host NVIDIA GPU, for example for CUDA
+workloads. While the VM runs, the host and other VMs cannot use the GPU.
+
+1. Set up the host as described in [PCI Passthrough](#pci-passthrough).
+
+2. Install the NVIDIA driver in your VMs. In your system configuration
+   repository's `flake.nix`, add this module to the `extraModules` of the
+   x86_64 VM targets:
+
+   ``` nix
+   { hardware.nvidiaGuest.enable = true; }
+   ```
+
+   Add it to the `extraModules` of the `qcow` and `raw` image outputs too, so
+   that VMs created from a newly baked image include the driver. Then update
+   the running VMs with `voom-update`.
+
+   The driver adds about 1 GB to each VM. Its kernel module stays unloaded in
+   VMs without an NVIDIA GPU. Installing it in every VM means you can move the
+   GPU from one VM to another without changing either VM's configuration.
+
+3. Assign the GPU to the VM while the VM is stopped, then start the VM and
+   check that it sees the GPU:
+
+   ``` bash
+   voom pci discover
+   voom stop my-vm
+   voom pci add my-vm gpu 0000:41:00
+   voom start my-vm
+   voom ssh my-vm -- nvidia-smi
+   ```
+
+   `voom pci discover` lists the host's PCI slots and whether each one can be
+   assigned. A slot address, such as `0000:41:00`, assigns all of the GPU's
+   functions. A function address, such as `0000:41:00.0`, assigns only that
+   function; the GPU function alone is enough for compute workloads.
+
+To move the GPU to another VM, stop the VM that it is assigned to, run `voom
+pci remove my-vm gpu`, and then follow step 3 for the other VM. To return the
+GPU to the host, also remove it from `nixosVfio` in `host-info.nix`, apply the
+configuration, and reboot.
 
 #### Voom Agent Vault
 

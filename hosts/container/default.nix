@@ -129,6 +129,7 @@ in
     ../../modules/shared
     ../../modules/shared/caches
     ../../modules/container/voom-egress.nix
+    ../../modules/container/nvidia.nix
   ];
 
   networking.hostName = lib.mkDefault "nixos-container";
