@@ -11,6 +11,7 @@
 let
   user = userInfo.user;
   keys = userInfo.sshKeys;
+  desktop = hostInfo.nixosDesktop or true;
   backup = {
     enable = false;
     target = "";
@@ -164,10 +165,10 @@ in
 
   services = {
     displayManager.defaultSession = "none+bspwm";
-    libinput.enable = true;
+    libinput.enable = desktop;
 
     xserver = {
-      enable = true;
+      enable = desktop;
 
       # Uncomment these for AMD or Nvidia GPU
       # boot.initrd.kernelModules = [ "amdgpu" ];
@@ -184,7 +185,7 @@ in
 
       displayManager = {
         lightdm = {
-          enable = true;
+          enable = desktop;
           greeters.slick.enable = true;
           background = ../../modules/nixos/config/login-wallpaper.png;
         };
@@ -192,7 +193,7 @@ in
 
       # Tiling window manager
       windowManager.bspwm = {
-        enable = true;
+        enable = desktop;
       };
 
       # Turn Caps Lock into Ctrl
@@ -253,7 +254,7 @@ in
     #   terminal and then click on a window of the application in question
     #
     picom = {
-      enable = true;
+      enable = desktop;
       settings = {
         animations = true;
         animation-stiffness = 300.0;
