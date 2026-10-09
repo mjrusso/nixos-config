@@ -891,6 +891,47 @@ zfs get -r -s local -o name,property,value all <pool>
 Every line should correspond to an entry in `disk-config.nix`, except for
 `nixos:shutdown-time`, which the NixOS ZFS module stamps on the pool.
 
+#### PCI Passthrough
+
+The VFIO module binds PCI devices (typically a GPU) to `vfio-pci` at boot so
+that VMs can use them. The host cannot use a bound device. If the device is
+the host's only GPU, the local display goes blank when `vfio-pci` loads during
+boot. The boot menu appears before that, so a previous generation can still be
+selected at the console. Set `nixosDesktop = false` in `host-info.nix` on such
+a host to turn off the X server, display manager, and compositor, which would
+otherwise fail to start.
+
+Enable the IOMMU in the firmware first. Then check that every function of the
+device is in an IOMMU group and that the group contains nothing else:
+
+``` bash
+nix shell nixpkgs#pciutils -c lspci -nnk -d 10de:
+ls /sys/bus/pci/devices/0000:41:00.0/iommu_group/devices
+```
+
+Replace `10de:` with the device's vendor ID and `0000:41:00.0` with its
+address. Then enable the module in your system configuration repository's
+`host-info.nix`:
+
+``` nix
+{
+  nixosVfio = {
+    # Every function of the device, from `lspci -nn`.
+    pciIds = [ "10de:1e84" "10de:10f8" "10de:1ad8" "10de:1ad9" ];
+
+    # Drivers that `lspci -nnk` reports for those functions. Each gets a
+    # softdep so that vfio-pci loads first.
+    hostDrivers = [ "nouveau" "snd_hda_intel" "xhci_pci" "i2c_nvidia_gpu" ];
+  };
+}
+```
+
+The module also adds a udev rule that gives the `kvm` group access to
+`/dev/vfio`, and removes the user's memlock limit, since VFIO locks all guest
+RAM. The kernel parameter takes effect after a reboot. Afterward, `lspci -nnk`
+should report `vfio-pci` for every function, and `ulimit -l` in a new SSH
+session should report `unlimited`.
+
 ### Container and VM Images
 
 Container and VM images can be built using

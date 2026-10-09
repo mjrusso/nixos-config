@@ -39,6 +39,7 @@ in
     ../../modules/nixos/tailscale.nix
     ../../modules/nixos/caddy.nix
     ../../modules/nixos/voom-agent-vault.nix
+    ../../modules/nixos/vfio.nix
     ../../modules/shared
     ../../modules/shared/caches
   ];
@@ -134,6 +135,10 @@ in
 
   services.tailnetCaddy = (hostInfo.nixosTailnetCaddy or { }) // {
     syncUser = user;
+  };
+
+  virtualisation.vfioPassthrough = (hostInfo.nixosVfio or { }) // {
+    inherit user;
   };
 
   # Turn on flag for proprietary software
