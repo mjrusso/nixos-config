@@ -64,7 +64,7 @@ with pkgs; [
 
   # Dictionary
   # https://emacs.stackexchange.com/a/80721
-  (aspellWithDicts (dicts: with dicts; [en en-computers en-science]))
+  (aspellWithDicts (dicts: with dicts; [en]))
 
   # Media-related packages
   ffmpeg
