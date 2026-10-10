@@ -3,7 +3,7 @@
 let
   cfg = config.services.tailnetCaddy;
   caddyCloudflareVersion = "v0.2.4";
-  caddyCloudflareHash = "sha256-dQvk6ezY6TQ1J7PjhCXnThF/SqVgPwBO8/RXzHCY+js=";
+  caddyCloudflareHash = "sha256-xRJ5evsAJ2akg47j3Bt6YDXJOgX88B/rKNP50KSVyNY=";
 
   routeModule = lib.types.submodule {
     options = {
