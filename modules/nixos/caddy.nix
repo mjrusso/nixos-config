@@ -3,6 +3,9 @@
 let
   cfg = config.services.tailnetCaddy;
   caddyCloudflareVersion = "v0.2.4";
+  # The hash covers Caddy's Go modules as well as the plugin's, so it is valid
+  # only for the Caddy version it was computed against.
+  caddyCloudflareHashCaddyVersion = "2.11.7";
   caddyCloudflareHash = "sha256-xRJ5evsAJ2akg47j3Bt6YDXJOgX88B/rKNP50KSVyNY=";
 
   routeModule = lib.types.submodule {
@@ -952,11 +955,18 @@ in {
       # window with no routes; a restart lets partOf re-run the sync afterward.
       enableReload = false;
       environmentFile = cfg.cloudflareEnvironmentFile;
-      package = pkgs.caddy.withPlugins {
-        plugins =
-          [ "github.com/caddy-dns/cloudflare@${caddyCloudflareVersion}" ];
-        hash = caddyCloudflareHash;
-      };
+      package =
+        assert lib.assertMsg (pkgs.caddy.version == caddyCloudflareHashCaddyVersion) ''
+          nixpkgs has Caddy ${pkgs.caddy.version}, but caddyCloudflareHash in
+          modules/nixos/caddy.nix is for Caddy ${caddyCloudflareHashCaddyVersion}.
+          Set caddyCloudflareHashCaddyVersion to "${pkgs.caddy.version}" and
+          caddyCloudflareHash to lib.fakeHash, rebuild, and copy the hash from
+          the "got:" line of the hash mismatch error.'';
+        pkgs.caddy.withPlugins {
+          plugins =
+            [ "github.com/caddy-dns/cloudflare@${caddyCloudflareVersion}" ];
+          hash = caddyCloudflareHash;
+        };
       settings = {
         admin.listen = "localhost:2019";
         apps = {
