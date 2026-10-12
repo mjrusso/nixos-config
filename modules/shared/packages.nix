@@ -57,6 +57,7 @@ with pkgs; [
   vim
 
   # Development tools
+  gcc
   just
   shellcheck
   git-recent # Run: `git recent` to see a list of recent git branches.
