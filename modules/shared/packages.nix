@@ -68,6 +68,7 @@ with pkgs; [
   (aspellWithDicts (dicts: with dicts; [en]))
 
   # Media-related packages
+  espeak-ng
   ffmpeg
   portaudio
 
