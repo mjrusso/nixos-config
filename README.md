@@ -948,6 +948,100 @@ If the device is the host's only GPU:
 
 To assign the GPU to a VM, see [NVIDIA GPU in a VM](#nvidia-gpu-in-a-vm).
 
+#### Streaming an NVIDIA desktop
+
+Use Moonlight to access a Hyprland desktop running on a physical NixOS host or
+VM guest. Sunshine sends video and audio to Moonlight and accepts keyboard and
+mouse input. The desktop runs at 1920x1080 and 60 Hz, with an output named
+`HEADLESS-STREAM`. It needs an NVIDIA GPU, but does not require a monitor or
+dummy plug.
+
+##### Enable the desktop
+
+Enable the [streaming desktop module](./modules/nixos/streaming-desktop.nix)
+through the configuration's `extraModules`. Configure the NVIDIA driver
+separately. For VM guests, set both flags; also include them in the qcow/raw
+image outputs:
+
+``` nix
+{
+  hardware.nvidiaGuest.enable = true;
+  services.streamingDesktop.enable = true;
+}
+```
+
+The desktop option defaults to `false` and configures greetd to log in
+automatically as `userInfo.user`.
+
+Physical hosts must already have NVIDIA graphics configured, including
+`services.xserver.videoDrivers = [ "nvidia" ]` and a choice of
+`hardware.nvidia.open` appropriate for the GPU. Set `nixosDesktop = false` in
+`host-info.nix` to disable the existing local desktop. The two setups cannot
+run together.
+
+Apply the configuration and reboot. For VMs, assign the GPU before booting and
+use the [VM update commands](#running-vm-images). A machine without NVIDIA
+hardware still boots with the driver configuration enabled and accepts SSH
+connections, but does not start the desktop or Sunshine. Software rendering and
+virtual GPUs are unsupported.
+
+##### Connect Moonlight
+
+For a physical host, use its LAN or Tailscale address. For a Voom guest,
+forward the following TCP and UDP ports through the host, using the same port
+numbers on both sides:
+
+| Protocol | Ports                             |
+|----------|-----------------------------------|
+| TCP      | 47984, 47989, 48010               |
+| UDP      | 47998, 47999, 48000, 48002, 48010 |
+
+Bind Voom forwards to the host's Tailscale address and allow these ports on
+that interface. The guest does not need Tailscale. The module opens
+Sunshine's ports in the streaming machine's firewall.
+
+Use `tunnel` to access Sunshine's administration UI from the client:
+
+``` fish
+tunnel <ssh-host> 47990
+```
+
+Open `https://localhost:47990`, accept the self-signed certificate, and create
+administrator credentials. Add the physical host's address or the Voom host's
+Tailscale address in Moonlight. Enter Moonlight's pairing PIN in Sunshine, then
+select **Desktop**. Start at 1080p/60 Hz with H.264 or HEVC.
+
+Sunshine settings and the Desktop entry are defined under `services.sunshine`
+in the [streaming desktop module](./modules/nixos/streaming-desktop.nix).
+Credentials and paired clients are stored in `~/.config/sunshine`.
+
+##### Use the desktop
+
+Enable Moonlight's capture of system keyboard shortcuts so the desktop
+receives the Super key. Open Ghostty with Super+Enter and run applications
+from that terminal.
+
+| Binding                             | Action                                 |
+|-------------------------------------|----------------------------------------|
+| Super+Enter                         | Open Ghostty                           |
+| Super+Q                             | Close the focused window               |
+| Super+V                             | Toggle floating for the focused window |
+| Super+arrow                         | Change window focus                    |
+| Super+1 through Super+9             | Switch workspace                       |
+| Super+Shift+1 through Super+Shift+9 | Move a window to a workspace           |
+| Super+left mouse drag               | Move a window                          |
+| Super+right mouse drag              | Resize a window                        |
+
+If the desktop or stream fails to start, SSH into the streaming machine as
+the configured desktop user and run:
+
+``` bash
+systemctl status greetd
+systemctl --user status sunshine
+hyprctl --instance 0 monitors
+journalctl --user -u sunshine -b
+```
+
 ### Container and VM Images
 
 Container and VM images can be built using
@@ -973,14 +1067,14 @@ nix build .#images.aarch64-linux.qcow
 
 The resulting image will be written to `./result`.
 
-Note that these images use a minimal NixOS configuration with SSH (key-only
-auth), Fish shell, and CLI development tools (and explicitly no GUI or desktop
-services). Disk-backed VM images (`qcow` and `raw`) also enable Docker and add
-the configured user to the `docker`, `dialout`, and `plugdev` groups. Their
-udev rules grant `plugdev` access to common embedded debug probes and native
-USB debug interfaces. VM guests grant passwordless sudo to `wheel` so `voom
-nixos switch` can activate configurations through the normal user. Images are
-[voom](https://github.com/mjrusso/voom)-compatible (`cloud-init` with a
+By default, these images provide SSH (key-only authentication), Fish, and CLI
+development tools. A [streaming desktop](#streaming-an-nvidia-desktop) can be
+enabled separately. Disk-backed VM images (`qcow` and `raw`) also enable Docker
+and add the configured user to the `docker`, `dialout`, and `plugdev` groups.
+Their udev rules grant `plugdev` access to common embedded debug probes and
+native USB debug interfaces. VM guests grant passwordless sudo to `wheel` so
+`voom nixos switch` can activate configurations through the normal user. Images
+are [voom](https://github.com/mjrusso/voom)-compatible (`cloud-init` with a
 `NoCloud` datasource for bootstrap metadata; runtime coordination via the
 `voom-control` virtiofs share mounted at `/run/voom`).
 

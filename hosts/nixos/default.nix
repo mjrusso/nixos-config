@@ -40,6 +40,7 @@ in
     ../../modules/nixos/caddy.nix
     ../../modules/nixos/voom-agent-vault.nix
     ../../modules/nixos/vfio.nix
+    ../../modules/nixos/streaming-desktop.nix
     ../../modules/shared
     ../../modules/shared/caches
   ];
@@ -169,7 +170,7 @@ in
   };
 
   services = {
-    displayManager.defaultSession = "none+bspwm";
+    displayManager.defaultSession = lib.mkIf desktop "none+bspwm";
     libinput.enable = desktop;
 
     xserver = {
