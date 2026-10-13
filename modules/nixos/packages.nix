@@ -45,8 +45,6 @@ shared-packages ++ [
 
   # Testing and development tools
   direnv
-  rofi
-  rofi-calc
   nil # lsp for nix
   postgresql
   libtool # for Emacs vterm
@@ -55,21 +53,17 @@ shared-packages ++ [
   flameshot
 
   # Text and terminal utilities
-  feh # Manage wallpapers
   screenkey
   tree
   unixtools.ifconfig
   unixtools.netstat
   xclip # For the org-download package in Emacs
-  xwininfo # Provides a cursor to click and learn about windows
-  xrandr
 
   # Sandboxing
   bubblewrap
 
   # File and system utilities
   inotify-tools # inotifywait, inotifywatch - For file system events
-  i3lock-fancy-rapid
   libnotify
   pcmanfm # File browser
   sqlite

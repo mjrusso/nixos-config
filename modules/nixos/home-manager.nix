@@ -1,10 +1,32 @@
-{ config, osConfig, pkgs, lib, userInfo, ... }:
+{
+  config,
+  osConfig,
+  pkgs,
+  lib,
+  userInfo,
+  ...
+}:
 
 let
   user = userInfo.user;
-  shared-programs = import ../shared/home-manager.nix { inherit config osConfig pkgs lib userInfo; };
+  shared-programs = import ../shared/home-manager.nix {
+    inherit
+      config
+      osConfig
+      pkgs
+      lib
+      userInfo
+      ;
+  };
   homeDir = "/home/${user}";
-  shared-files = import ../shared/files.nix { inherit user config pkgs homeDir; };
+  shared-files = import ../shared/files.nix {
+    inherit
+      user
+      config
+      pkgs
+      homeDir
+      ;
+  };
 
 in
 {
@@ -12,7 +34,7 @@ in
     enableNixpkgsReleaseCheck = false;
     username = "${user}";
     homeDirectory = "/home/${user}";
-    packages = pkgs.callPackage ./packages.nix {};
+    packages = pkgs.callPackage ./packages.nix { };
     sessionPath = [
       "$HOME/.local/bin"
     ];
@@ -25,11 +47,10 @@ in
         "/run/current-system/sw/share/terminfo"
       ];
     };
-    file = shared-files // import ./files.nix { inherit user; };
+    file = shared-files;
     stateVersion = "21.05";
   };
 
-  # Use a dark theme
   gtk = {
     enable = true;
     iconTheme = {
@@ -43,15 +64,22 @@ in
     gtk4.theme = config.gtk.theme;
   };
 
-  # Screen lock
   services = {
-    screen-locker = {
+    hypridle = lib.mkIf osConfig.services.localDesktop.enable {
       enable = true;
-      inactiveInterval = 10;
-      lockCmd = "${pkgs.i3lock-fancy-rapid}/bin/i3lock-fancy-rapid 10 15";
+      settings = {
+        general = {
+          lock_cmd = "pidof hyprlock || ${lib.getExe config.programs.hyprlock.package}";
+          before_sleep_cmd = "loginctl lock-session";
+        };
+        listener = [
+          {
+            timeout = 600;
+            on-timeout = "loginctl lock-session";
+          }
+        ];
+      };
     };
-
-    # Auto mount devices
     udiskie.enable = true;
 
     dunst = {
@@ -100,6 +128,19 @@ in
     };
   };
 
-  programs = shared-programs // {};
-
+  programs = shared-programs // {
+    hyprlock = lib.mkIf osConfig.services.localDesktop.enable {
+      enable = true;
+      settings = {
+        background = [ { color = "rgb(1a1a1a)"; } ];
+        input-field = [
+          {
+            monitor = "";
+            size = "300, 50";
+            position = "0, -80";
+          }
+        ];
+      };
+    };
+  };
 }

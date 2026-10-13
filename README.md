@@ -943,53 +943,78 @@ If the device is the host's only GPU:
   [SSH-in-initrd unlock](#ssh-in-initrd-unlock).
 - The boot menu still appears, so you can select a previous generation at the
   console if a change breaks booting.
-- Set `nixosDesktop = false` in `host-info.nix`. Otherwise the X server,
-  display manager, and compositor fail to start.
+- Set `nixosDesktop = false` in `host-info.nix`. Otherwise the local
+  desktop fails to start.
 
 To assign the GPU to a VM, see [NVIDIA GPU in a VM](#nvidia-gpu-in-a-vm).
 
-#### Streaming an NVIDIA desktop
+#### Hyprland desktop
 
-Use Moonlight to access a Hyprland desktop running on a physical NixOS host or
-VM guest. Sunshine sends video and audio to Moonlight and accepts keyboard and
-mouse input. The desktop runs at 1920x1080 and 60 Hz, with an output named
-`HEADLESS-STREAM`. It needs an NVIDIA GPU, but does not require a monitor or
-dummy plug.
+The [desktop module](./modules/nixos/desktop.nix) provides local and headless
+Hyprland sessions. Both use the [Hyprland config](./modules/nixos/config/hyprland.nix)
+and PipeWire audio. Enable one session at a time; Sunshine can stream either.
+Set the options below in the configuration's `extraModules`.
 
-##### Enable the desktop
+##### Local session
 
-Enable the [streaming desktop module](./modules/nixos/streaming-desktop.nix)
-through the configuration's `extraModules`. Configure the NVIDIA driver
-separately. For VM guests, set both flags; also include them in the qcow/raw
-image outputs:
+Physical NixOS hosts enable `services.localDesktop.enable` by default, using
+`hostInfo.nixosDesktop` when that field is set. VM and container images leave it
+disabled. Local sessions use connected monitors at their preferred resolution
+and do not require NVIDIA graphics.
+
+Log in at the greetd text prompt with the configured user's password. If the
+user only has SSH keys, set a password first with `sudo passwd <user>` over SSH.
+Hyprlock locks the session after ten minutes of inactivity and before suspend.
+Set `services.localDesktop.enable = false` to disable the local session.
+
+##### Headless session
+
+`services.headlessDesktop.enable` defaults to `false`. It starts Hyprland
+without a monitor or dummy plug, with a persistent `HEADLESS-STREAM` output at
+1920x1080 and 60 Hz. greetd logs in automatically as `userInfo.user`.
+
+The headless session requires NVIDIA graphics configured separately. For VM
+guests, enable the driver and desktop in both the VM configuration and its
+qcow/raw image outputs:
 
 ``` nix
 {
   hardware.nvidiaGuest.enable = true;
-  services.streamingDesktop.enable = true;
+  services.headlessDesktop.enable = true;
 }
 ```
 
-The desktop option defaults to `false` and configures greetd to log in
-automatically as `userInfo.user`.
+The guest driver uses NVIDIA's open kernel modules, which require Turing
+(RTX 20 series) or newer hardware.
 
-Physical hosts must already have NVIDIA graphics configured, including
-`services.xserver.videoDrivers = [ "nvidia" ]` and a choice of
-`hardware.nvidia.open` appropriate for the GPU. Set `nixosDesktop = false` in
-`host-info.nix` to disable the existing local desktop. The two setups cannot
-run together.
+Physical hosts must set `services.localDesktop.enable = false` and configure
+the NVIDIA driver, including `services.xserver.videoDrivers = [ "nvidia" ]`
+and a choice of `hardware.nvidia.open` appropriate for the GPU.
 
 Apply the configuration and reboot. For VMs, assign the GPU before booting and
-use the [VM update commands](#running-vm-images). A machine without NVIDIA
-hardware still boots with the driver configuration enabled and accepts SSH
-connections, but does not start the desktop or Sunshine. Software rendering and
-virtual GPUs are unsupported.
+use the [VM update commands](#running-vm-images). Without NVIDIA hardware, the
+headless desktop stays stopped and SSH remains available. Software rendering
+and virtual GPUs are unsupported for headless sessions.
 
-##### Connect Moonlight
+##### Stream with Sunshine
 
-For a physical host, use its LAN or Tailscale address. For a Voom guest,
-forward the following TCP and UDP ports through the host, using the same port
-numbers on both sides:
+To stream either session, also set:
+
+``` nix
+{
+  services.sunshine.enable = true;
+}
+```
+
+Sunshine defaults to disabled. It starts with the graphical session, so log in
+locally before connecting to a local desktop. For headless sessions, it waits
+for the virtual output and captures that output and the virtual audio sink.
+Local sessions use Sunshine's default display and audio sink. NVIDIA sessions
+use NVENC; other local sessions use Sunshine's automatic encoder selection.
+
+Use Moonlight on the client. For a physical host, connect to its LAN or
+Tailscale address. For a Voom guest, forward these ports through the host,
+using the same port numbers on both sides:
 
 | Protocol | Ports                             |
 |----------|-----------------------------------|
@@ -997,29 +1022,39 @@ numbers on both sides:
 | UDP      | 47998, 47999, 48000, 48002, 48010 |
 
 Bind Voom forwards to the host's Tailscale address and allow these ports on
-that interface. The guest does not need Tailscale. The module opens
-Sunshine's ports in the streaming machine's firewall.
+that interface. The guest does not need Tailscale. Enabling Sunshine opens
+its ports in the streaming machine's firewall.
 
-Use `tunnel` to access Sunshine's administration UI from the client:
+Use `tunnel` on the client to reach the administration UI:
 
 ``` fish
 tunnel <ssh-host> 47990
 ```
 
+The SSH connection must reach the machine running Sunshine. For a guest whose
+SSH port is forwarded as `<guest-ssh-port>` on the Voom host, use:
+
+``` fish
+tunnel <guest-user>@<voom-host> 47990 -- -p <guest-ssh-port>
+```
+
 Open `https://localhost:47990`, accept the self-signed certificate, and create
 administrator credentials. Add the physical host's address or the Voom host's
-Tailscale address in Moonlight. Enter Moonlight's pairing PIN in Sunshine, then
-select **Desktop**. Start at 1080p/60 Hz with H.264 or HEVC.
+Tailscale address in Moonlight. Enter Moonlight's pairing PIN in Sunshine,
+then select **Desktop**. For the headless session, use 1080p/60 Hz with H.264
+or HEVC.
 
-Sunshine settings and the Desktop entry are defined under `services.sunshine`
-in the [streaming desktop module](./modules/nixos/streaming-desktop.nix).
-Credentials and paired clients are stored in `~/.config/sunshine`.
+Edit `services.sunshine.settings` and `services.sunshine.applications.apps`
+in the [desktop module](./modules/nixos/desktop.nix) to change settings or
+applications. These files are managed by Nix and cannot be edited through
+Sunshine's web UI. Credentials and paired clients are stored in the desktop
+user's `~/.config/sunshine`.
 
-##### Use the desktop
+##### Keybindings
 
-Enable Moonlight's capture of system keyboard shortcuts so the desktop
-receives the Super key. Open Ghostty with Super+Enter and run applications
-from that terminal.
+Super+Enter opens Ghostty; run applications from that terminal. When streaming,
+enable Moonlight's capture of system keyboard shortcuts so Hyprland receives
+the Super key.
 
 | Binding                             | Action                                 |
 |-------------------------------------|----------------------------------------|
@@ -1032,14 +1067,22 @@ from that terminal.
 | Super+left mouse drag               | Move a window                          |
 | Super+right mouse drag              | Resize a window                        |
 
-If the desktop or stream fails to start, SSH into the streaming machine as
-the configured desktop user and run:
+##### Troubleshooting
+
+SSH into the streaming machine as the desktop user and run:
 
 ``` bash
 systemctl status greetd
 systemctl --user status sunshine
 hyprctl --instance 0 monitors
 journalctl --user -u sunshine -b
+```
+
+For a headless session, also check display creation:
+
+``` bash
+systemctl --user status headless-display
+journalctl --user -u headless-display -b
 ```
 
 ### Container and VM Images
@@ -1068,7 +1111,7 @@ nix build .#images.aarch64-linux.qcow
 The resulting image will be written to `./result`.
 
 By default, these images provide SSH (key-only authentication), Fish, and CLI
-development tools. A [streaming desktop](#streaming-an-nvidia-desktop) can be
+development tools. A [Hyprland desktop](#hyprland-desktop) can be
 enabled separately. Disk-backed VM images (`qcow` and `raw`) also enable Docker
 and add the configured user to the `docker`, `dialout`, and `plugdev` groups.
 Their udev rules grant `plugdev` access to common embedded debug probes and
