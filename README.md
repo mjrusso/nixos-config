@@ -1129,6 +1129,13 @@ journalctl -u greetd -b
 journalctl --user -u sunshine -b
 ```
 
+If greetd is running but `hyprctl` reports `no such instance`, check UWSM's
+compositor startup logs:
+
+``` bash
+journalctl --user -u wayland-wm-env@Hyprland.service -u wayland-wm@Hyprland.service -b
+```
+
 For a headless session, also check display creation:
 
 ``` bash

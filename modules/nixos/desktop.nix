@@ -18,7 +18,8 @@ let
       (import ./config/hyprland.nix {
         output = if headless then output else null;
       }).text;
-  sessionCommand = "${config.programs.uwsm.package}/bin/uwsm start -F -- ${config.security.wrapperDir}/Hyprland --config ${hyprlandConfig}";
+  # UWSM rejects execute-only wrapper paths, including those resolved by -F.
+  sessionCommand = "${config.programs.uwsm.package}/bin/uwsm start -- Hyprland --config ${hyprlandConfig}";
 in
 {
   options.services = {
