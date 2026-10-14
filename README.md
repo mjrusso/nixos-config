@@ -1940,6 +1940,10 @@ the Caddy and Tailscale checks.
 
 Agent Vault retains request logs for seven days, up to 10,000 rows per vault.
 Retention and rate-limit locking are enabled in the system service.
+The host service sets proxy limits to 200 requests per second, a burst of
+2,000, and 256 concurrent requests per agent and vault across all hosts.
+Other tiers retain the `default` profile's limits. The rate-limit lock
+prevents changes through the web interface.
 
 ##### Backup and Recovery
 
