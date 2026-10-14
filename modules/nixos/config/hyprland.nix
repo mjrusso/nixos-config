@@ -13,9 +13,33 @@
     hl.config({
       input = { kb_layout = "us", kb_options = "ctrl:nocaps" },
       general = { layout = "dwindle" },
-      misc = { disable_hyprland_logo = true, force_default_wallpaper = -1 },
+      misc = {
+        disable_hyprland_logo = true,
+        disable_splash_rendering = true,
+        force_default_wallpaper = -1,
+      },
+    })
+    hl.animation({ leaf = "global", enabled = true, speed = 2, bezier = "default" })
+    hl.layer_rule({
+      name = "noctalia",
+      match = { namespace = "^noctalia-(bar-.+|notification|dock|panel|attached-panel|osd|window-switcher)$" },
+      no_anim = true,
     })
     hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("uwsm app -- ghostty"))
+    hl.bind("SUPER + SHIFT + F", hl.dsp.exec_cmd("uwsm app -- nautilus --new-window"))
+    hl.bind("SUPER + SPACE", hl.dsp.exec_cmd("noctalia msg panel-toggle launcher"))
+    hl.bind("ALT + TAB", hl.dsp.exec_cmd("noctalia msg window-switcher hold"))
+    hl.bind("SUPER + S", hl.dsp.exec_cmd("noctalia msg panel-toggle control-center"))
+    hl.bind("SUPER + comma", hl.dsp.exec_cmd("noctalia msg settings-toggle"))
+    hl.bind("SUPER + CTRL + V", hl.dsp.exec_cmd("noctalia msg panel-toggle clipboard"))
+    hl.bind("PRINT", hl.dsp.exec_cmd("noctalia msg screenshot-region"))
+    hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("noctalia msg volume-up"))
+    hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("noctalia msg volume-down"))
+    hl.bind("XF86AudioMute", hl.dsp.exec_cmd("noctalia msg volume-mute"))
+    if not output then
+      hl.bind("SUPER + L", hl.dsp.exec_cmd("noctalia msg session lock"))
+    end
+    hl.window_rule({ match = { class = "dev.noctalia.Noctalia" }, float = true })
     hl.bind("SUPER + Q", hl.dsp.window.close())
     hl.bind("SUPER + V", hl.dsp.window.float({ action = "toggle" }))
     hl.bind("SUPER + left", hl.dsp.focus({ direction = "left" }))
@@ -25,9 +49,12 @@
     hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
     hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), { mouse = true })
     for workspace = 1, 9 do
-      if output then
-        hl.workspace_rule({ workspace = workspace, monitor = output, default = workspace == 1 })
-      end
+      hl.workspace_rule({
+        workspace = workspace,
+        monitor = output,
+        persistent = true,
+        default = output and workspace == 1,
+      })
       hl.bind("SUPER + " .. workspace, hl.dsp.focus({ workspace = workspace }))
       hl.bind("SUPER + SHIFT + " .. workspace, hl.dsp.window.move({ workspace = workspace }))
     end

@@ -60,12 +60,28 @@ in
         pulse.enable = true;
       };
       security.rtkit.enable = true;
-      environment.systemPackages = [ pkgs.ghostty ];
+      environment.systemPackages = [
+        pkgs.ghostty
+        pkgs.nautilus
+      ];
+      services.gvfs.enable = true;
+      xdg.mime.defaultApplications."inode/directory" = "org.gnome.Nautilus.desktop";
       users.users.${user}.extraGroups = [
         "video"
         "render"
       ];
-      programs.hyprlock.enable = local;
+      programs.noctalia = {
+        enable = true;
+        systemd.enable = true;
+      };
+      home-manager.users.${user} = {
+        programs.noctalia = {
+          enable = true;
+          package = config.programs.noctalia.package;
+          settings = import ./config/noctalia.nix { inherit local; };
+        };
+        home.file."Pictures/Wallpapers/GNOME".source = "${pkgs.gnome-backgrounds}/share/backgrounds/gnome";
+      };
     })
     (lib.mkIf headless {
       assertions = [

@@ -952,7 +952,9 @@ To assign the GPU to a VM, see [NVIDIA GPU in a VM](#nvidia-gpu-in-a-vm).
 
 The [desktop module](./modules/nixos/desktop.nix) provides local and headless
 Hyprland sessions. Both use the [Hyprland config](./modules/nixos/config/hyprland.nix)
-and PipeWire audio. Enable one session at a time; Sunshine can stream either.
+and PipeWire audio. Noctalia provides the top bar, application launcher,
+notifications, clipboard history, screenshots, and desktop controls.
+Enable one session at a time; Sunshine can stream either.
 Set the options below in the configuration's `extraModules`.
 
 ##### Local session
@@ -964,7 +966,7 @@ and do not require NVIDIA graphics.
 
 Log in at the greetd text prompt with the configured user's password. If the
 user only has SSH keys, set a password first with `sudo passwd <user>` over SSH.
-Hyprlock locks the session after ten minutes of inactivity and before suspend.
+Noctalia locks the session after ten minutes of inactivity and before suspend.
 Set `services.localDesktop.enable = false` to disable the local session.
 
 ##### Headless session
@@ -1100,15 +1102,42 @@ applications. These files are managed by Nix and cannot be edited through
 Sunshine's web UI. Credentials and paired clients are stored in the desktop
 user's `~/.config/sunshine`.
 
+##### Desktop settings
+
+Open Noctalia settings with Super+comma to customize the bar, appearance,
+notifications, and idle behavior. Super+S opens the control center for audio
+controls and the wallpaper picker. Window and workspace animations take 200 ms.
+
+The GNOME wallpapers are managed by Nix in `~/Pictures/Wallpapers/GNOME`.
+Add your own images alongside that folder in `~/Pictures/Wallpapers`, then
+choose a background in the picker. Noctalia also supports favorites and
+automatic rotation.
+
+Defaults live in [noctalia.nix](./modules/nixos/config/noctalia.nix); changes made
+in the settings UI are saved in `~/.local/state/noctalia/settings.toml` and
+override those defaults. Hyprland keybindings and window behavior live in
+[hyprland.nix](./modules/nixos/config/hyprland.nix). Headless sessions disable
+session locking and idle locking by default.
+
 ##### Keybindings
 
-Super+Enter opens Ghostty; run applications from that terminal. When streaming,
-enable Moonlight's capture of system keyboard shortcuts so Hyprland receives
-the Super key.
+When streaming, enable Moonlight's capture of system keyboard shortcuts so
+Alt+Tab and Super shortcuts reach the guest. Files (Nautilus) is the default
+file manager; Ctrl+L lets you enter a path. Workspaces 1–9 remain visible in
+the bar even when empty.
 
 | Binding                             | Action                                 |
 |-------------------------------------|----------------------------------------|
+| Super+Space                         | Open the application launcher          |
+| Alt+Tab                             | Switch windows through Noctalia         |
+| Super+S                             | Open the control center                |
+| Super+comma                         | Open Noctalia settings                 |
+| Super+Ctrl+V                        | Open clipboard history                 |
+| Print                               | Capture a screen region                |
+| Super+L (local sessions)            | Lock the session                       |
+| Volume keys                         | Raise, lower, or mute audio             |
 | Super+Enter                         | Open Ghostty                           |
+| Super+Shift+F                       | Open Files (Nautilus)                   |
 | Super+Q                             | Close the focused window               |
 | Super+V                             | Toggle floating for the focused window |
 | Super+arrow                         | Change window focus                    |
@@ -1123,10 +1152,10 @@ SSH into the streaming machine as the desktop user and run:
 
 ``` bash
 systemctl status greetd
-systemctl --user status sunshine
+systemctl --user status noctalia sunshine
 hyprctl --instance 0 monitors
 journalctl -u greetd -b
-journalctl --user -u sunshine -b
+journalctl --user -u noctalia -u sunshine -b
 ```
 
 If greetd is running but `hyprctl` reports `no such instance`, check UWSM's

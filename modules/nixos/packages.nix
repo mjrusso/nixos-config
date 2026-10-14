@@ -5,7 +5,8 @@ let
   shared-packages = import ../shared/packages.nix { inherit pkgs; };
   voom-shutdown = pkgs.callPackage ../../packages/voom-shutdown.nix { };
 in
-shared-packages ++ [
+shared-packages
+++ [
 
   alacritty
   ghostty
@@ -65,7 +66,6 @@ shared-packages ++ [
   # File and system utilities
   inotify-tools # inotifywait, inotifywatch - For file system events
   libnotify
-  pcmanfm # File browser
   sqlite
   xdg-utils
 
