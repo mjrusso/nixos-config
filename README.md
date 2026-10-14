@@ -991,14 +991,33 @@ Physical hosts must set `services.localDesktop.enable = false` and configure
 the NVIDIA driver, including `services.xserver.videoDrivers = [ "nvidia" ]`
 and a choice of `hardware.nvidia.open` appropriate for the GPU.
 
-Apply the configuration and reboot. For VMs, assign the GPU before booting and
-use the [VM update commands](#running-vm-images). Without NVIDIA hardware, the
-headless desktop stays stopped and SSH remains available. Software rendering
-and virtual GPUs are unsupported for headless sessions.
+For streaming, also [enable Sunshine](#stream-with-sunshine) before applying
+the configuration. Apply the configuration and reboot. For VMs, assign the GPU
+before booting and use the [VM update commands](#running-vm-images). For Voom,
+run `voom restart <vm>` on the host to restart the guest and its host helpers,
+including gvproxy. Rebooting from inside the guest does not restart gvproxy.
+
+Without NVIDIA hardware, the headless desktop stays stopped and SSH remains
+available. Software rendering and virtual GPUs are unsupported for headless
+sessions.
+
+After restarting, SSH into the headless machine as the desktop user and check:
+
+``` bash
+nvidia-smi
+systemctl status greetd
+systemctl --user status headless-display
+hyprctl --instance 0 monitors
+```
+
+`nvidia-smi` should list the assigned GPU. Expect greetd to be running and
+headless-display to be `active (exited)`, meaning display creation completed.
+The monitor list should include `HEADLESS-STREAM` at 1920x1080.
 
 ##### Stream with Sunshine
 
-To stream either session, also set:
+To stream either session, set this alongside the desktop options before
+applying the configuration and rebooting:
 
 ``` nix
 {
@@ -1012,6 +1031,13 @@ for the virtual output and captures that output and the virtual audio sink.
 Local sessions use Sunshine's default display and audio sink. NVIDIA sessions
 use NVENC; other local sessions use Sunshine's automatic encoder selection.
 
+SSH into the streaming machine as the desktop user and confirm Sunshine is
+running:
+
+``` bash
+systemctl --user status sunshine
+```
+
 Use Moonlight on the client. For a physical host, connect to its LAN or
 Tailscale address. For a Voom guest, forward these ports through the host,
 using the same port numbers on both sides:
@@ -1021,9 +1047,33 @@ using the same port numbers on both sides:
 | TCP      | 47984, 47989, 48010               |
 | UDP      | 47998, 47999, 48000, 48002, 48010 |
 
-Bind Voom forwards to the host's Tailscale address and allow these ports on
-that interface. The guest does not need Tailscale. Enabling Sunshine opens
-its ports in the streaming machine's firewall.
+On the Voom host, add the forwards in Fish, replacing `your-vm` with the VM
+name:
+
+``` fish
+set vm_name your-vm
+
+for port in 47984 47989 48010
+    voom forward add $vm_name $port --protocol tcp --lan
+end
+
+for port in 47998 47999 48000 48002 48010
+    voom forward add $vm_name $port --protocol udp --lan
+end
+
+voom forward list $vm_name
+```
+
+`--lan` binds to `0.0.0.0`, including the host's LAN and Tailscale addresses.
+To listen only on Tailscale, replace `--lan` with
+`--bind (tailscale ip -4)`. Voom's default binding, `127.0.0.1`, is reachable
+only from the host and cannot accept a direct Moonlight connection from
+another machine. Forwards survive VM restarts.
+
+The host firewall must allow the streaming ports on the interface used by the
+client. This repo's NixOS host configuration trusts `tailscale0`, so Tailscale
+connections need no additional firewall rules. Enabling Sunshine opens its
+ports in the guest firewall; the guest does not need Tailscale.
 
 Use `tunnel` on the client to reach the administration UI:
 
@@ -1075,6 +1125,7 @@ SSH into the streaming machine as the desktop user and run:
 systemctl status greetd
 systemctl --user status sunshine
 hyprctl --instance 0 monitors
+journalctl -u greetd -b
 journalctl --user -u sunshine -b
 ```
 
