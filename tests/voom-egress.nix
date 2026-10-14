@@ -2,6 +2,7 @@
 
 let
   system = pkgs.stdenv.hostPlatform.system;
+  noProxy = pkgs.lib.concatStringsSep "," (import ../packages/voom-egress-no-proxy.nix);
   testPkgs = import inputs.nixpkgs {
     inherit system;
     config = {
@@ -146,8 +147,8 @@ testPkgs.testers.runNixOSTest {
     attached.succeed(
       "runuser -u operator -- env HOME=/home/operator fish -c "
       "'test \"$HTTP_PROXY\" = http://192.168.127.1:3128; "
-      "test \"$NO_PROXY\" = localhost,127.0.0.1,0.0.0.0,::1; "
-      "test \"$no_proxy\" = localhost,127.0.0.1,0.0.0.0,::1; "
+      "test \"$NO_PROXY\" = ${noProxy}; "
+      "test \"$no_proxy\" = ${noProxy}; "
       "test \"$SSL_CERT_FILE\" = /run/voom-egress/ca-bundle.pem; "
       "test \"$GH_TOKEN\" = __github_token__'"
     )
@@ -168,7 +169,7 @@ testPkgs.testers.runNixOSTest {
     )
     attached.succeed(
       "runuser -u operator -- env XDG_RUNTIME_DIR=/run/user/1000 "
-      "systemctl --user show-environment | grep -Fx 'NO_PROXY=localhost,127.0.0.1,0.0.0.0,::1'"
+      "systemctl --user show-environment | grep -Fx 'NO_PROXY=${noProxy}'"
     )
 
     attached.succeed(
@@ -198,7 +199,7 @@ testPkgs.testers.runNixOSTest {
       "runuser -u operator -- env HOME=/home/operator XDG_RUNTIME_DIR=/run/user/1000 "
       "GH_TOKEN=__github_some_org_pat__ voom-egress-run -- sh -c "
       "'test \"$HTTPS_PROXY\" = http://192.168.127.1:3128; "
-      "test \"$NO_PROXY\" = localhost,127.0.0.1,0.0.0.0,::1; "
+      "test \"$NO_PROXY\" = ${noProxy}; "
       "test \"$GH_TOKEN\" = __github_some_org_pat__'"
     )
     attached.succeed(

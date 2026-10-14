@@ -1,9 +1,11 @@
 {
   callPackage,
+  lib,
   writeShellApplication,
 }:
 
 let
+  noProxy = import ./voom-egress-no-proxy.nix;
   voomEgressPrepare = callPackage ./voom-egress-prepare.nix { };
 in
 writeShellApplication {
@@ -40,7 +42,7 @@ writeShellApplication {
       esac
     done < "$runtime_dir/environment"
 
-    for entry in localhost 127.0.0.1 0.0.0.0 ::1; do
+    for entry in ${lib.escapeShellArgs noProxy}; do
       case ",$no_proxy_value," in
         *",$entry,"*) ;;
         *) no_proxy_value="''${no_proxy_value:+$no_proxy_value,}$entry" ;;

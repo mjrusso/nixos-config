@@ -1762,13 +1762,16 @@ voom-egress-run -- curl --fail https://api.github.com/user
 
 The helper requires a readable explicit egress manifest and a valid
 `XDG_RUNTIME_DIR`. Clients with a built-in root store can ignore the session CA
-variables and require separate testing. GitHub CLI also requires a nonempty
-local `GH_TOKEN`. The session supplies the nonsecret placeholder
-`__github_token__` when the variable is absent. This default works with the
-single-PAT configuration.
+variables.
 
-A multi-PAT vault must set its organization-specific placeholder before it
-runs `gh`. Node's environment proxy support requires Node 22.21 or later.
+Proxy exclusions are defined in
+[`packages/voom-egress-no-proxy.nix`](./packages/voom-egress-no-proxy.nix).
+Excluded hosts receive no proxy-injected credentials.
+
+GitHub CLI also requires a nonempty local `GH_TOKEN`. The session supplies the
+nonsecret placeholder `__github_token__` when the variable is absent. This
+default works with the single-PAT configuration. A multi-PAT vault must set its
+organization-specific placeholder before it runs `gh`.
 
 Agent Vault creates its CA when the service first starts. The host module
 publishes only the public certificate at

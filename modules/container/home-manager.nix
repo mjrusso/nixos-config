@@ -9,6 +9,7 @@ let
     inherit config osConfig pkgs lib userInfo;
   };
   voomEgressEnvironment = "/run/voom-egress/environment";
+  voomEgressNoProxy = import ../../packages/voom-egress-no-proxy.nix;
   voomEgressFishInit = ''
     if test -r ${voomEgressEnvironment}
         set -l voom_no_proxy
@@ -34,7 +35,7 @@ let
             end
         end < ${voomEgressEnvironment}
 
-        for entry in localhost 127.0.0.1 0.0.0.0 ::1
+        for entry in ${lib.escapeShellArgs voomEgressNoProxy}
             if not contains -- $entry (string split , -- "$voom_no_proxy")
                 set voom_no_proxy (string join , $voom_no_proxy $entry)
             end

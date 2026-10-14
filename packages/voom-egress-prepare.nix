@@ -2,8 +2,13 @@
   cacert,
   coreutils,
   jq,
+  lib,
   writeShellApplication,
 }:
+
+let
+  noProxyValue = lib.concatStringsSep "," (import ./voom-egress-no-proxy.nix);
+in
 
 writeShellApplication {
   name = "voom-egress-prepare";
@@ -95,15 +100,13 @@ writeShellApplication {
     chmod 0644 "$combined_temp"
 
     node_ca="''${ca_path:-$combined}"
-    # Prefer localhost in client URLs; some dev servers publish their 0.0.0.0
-    # bind address instead, so we include it in NO_PROXY too.
     printf '%s\n' \
       "HTTP_PROXY=$http_proxy_url" \
       "HTTPS_PROXY=$https_proxy_url" \
       "http_proxy=$http_proxy_url" \
       "https_proxy=$https_proxy_url" \
-      "NO_PROXY=localhost,127.0.0.1,0.0.0.0,::1" \
-      "no_proxy=localhost,127.0.0.1,0.0.0.0,::1" \
+      "NO_PROXY=${noProxyValue}" \
+      "no_proxy=${noProxyValue}" \
       "SSL_CERT_FILE=$combined" \
       "CURL_CA_BUNDLE=$combined" \
       "REQUESTS_CA_BUNDLE=$combined" \
