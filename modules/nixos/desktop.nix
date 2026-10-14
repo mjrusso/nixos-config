@@ -61,11 +61,47 @@ in
       };
       security.rtkit.enable = true;
       environment.systemPackages = [
+        pkgs.evince
+        pkgs.gedit
         pkgs.ghostty
+        pkgs.imv
+        pkgs.loupe
+        pkgs.mpv
         pkgs.nautilus
       ];
       services.gvfs.enable = true;
-      xdg.mime.defaultApplications."inode/directory" = "org.gnome.Nautilus.desktop";
+      xdg.mime.defaultApplications = {
+        "application/pdf" = "org.gnome.Evince.desktop";
+        "text/plain" = "org.gnome.gedit.desktop";
+        "inode/directory" = "org.gnome.Nautilus.desktop";
+      }
+      // lib.genAttrs [
+        "image/png"
+        "image/jpeg"
+        "image/gif"
+        "image/webp"
+        "image/bmp"
+        "image/tiff"
+        "image/svg+xml"
+        "image/avif"
+      ] (_: "org.gnome.Loupe.desktop")
+      // lib.genAttrs [
+        "video/mp4"
+        "video/x-msvideo"
+        "video/x-matroska"
+        "video/x-flv"
+        "video/x-ms-wmv"
+        "video/mpeg"
+        "video/ogg"
+        "video/webm"
+        "video/quicktime"
+        "video/3gpp"
+        "video/3gpp2"
+        "video/x-ms-asf"
+        "video/x-ogm+ogg"
+        "video/x-theora+ogg"
+        "application/ogg"
+      ] (_: "mpv.desktop");
       users.users.${user}.extraGroups = [
         "video"
         "render"
