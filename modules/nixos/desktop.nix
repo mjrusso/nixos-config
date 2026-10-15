@@ -169,6 +169,7 @@ in
       };
       systemd.user.services.headless-display = {
         description = "Create the headless Hyprland display";
+        wants = lib.optional config.services.sunshine.enable "sunshine.service";
         wantedBy = [ "graphical-session.target" ];
         after = [ "graphical-session.target" ];
         partOf = [ "graphical-session.target" ];
