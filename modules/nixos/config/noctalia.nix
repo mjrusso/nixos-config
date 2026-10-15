@@ -1,6 +1,18 @@
 { local }:
 
 {
+  bar.default.start = [
+    "launcher"
+    "wallpaper"
+    "displays"
+    "workspaces"
+  ];
+  widget.displays = {
+    type = "custom_button";
+    glyph = "device-desktop";
+    tooltip = "Display settings";
+    actions.left = "exec uwsm app -- nwg-displays";
+  };
   shell.launch_apps_custom_command = "uwsm app -- $CMD";
   wallpaper.directory = "~/Pictures/Wallpapers";
   lockscreen = {

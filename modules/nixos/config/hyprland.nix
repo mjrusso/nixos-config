@@ -2,13 +2,22 @@
   output ? null,
 }:
 
+let
+  monitorDefaults =
+    if output == null then
+      ''hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })''
+    else
+      ''hl.monitor({ output = ${builtins.toJSON output}, mode = "3840x2160@60", position = "0x0", scale = 1.5 })'';
+in
 {
+  inherit monitorDefaults;
   text = ''
     local output = ${if output == null then "nil" else builtins.toJSON output}
-    if output then
-      hl.monitor({ output = output, mode = "1920x1080@60", position = "0x0", scale = 1 })
-    else
-      hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+    ${monitorDefaults}
+    local config_home = os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")
+    local monitors = package.searchpath("monitors", config_home .. "/hypr/?.lua")
+    if monitors then
+      require(monitors)
     end
     hl.config({
       input = { kb_layout = "us", kb_options = "ctrl:nocaps" },
@@ -41,6 +50,7 @@
     end
     hl.window_rule({ match = { class = "dev.noctalia.Noctalia" }, float = true })
     hl.bind("SUPER + Q", hl.dsp.window.close())
+    hl.bind("SUPER + F", hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" }))
     hl.bind("SUPER + V", hl.dsp.window.float({ action = "toggle" }))
     hl.bind("SUPER + left", hl.dsp.focus({ direction = "left" }))
     hl.bind("SUPER + right", hl.dsp.focus({ direction = "right" }))

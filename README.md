@@ -972,8 +972,8 @@ Set `services.localDesktop.enable = false` to disable the local session.
 ##### Headless session
 
 `services.headlessDesktop.enable` defaults to `false`. It starts Hyprland
-without a monitor or dummy plug, with a persistent `HEADLESS-STREAM` output at
-1920x1080 and 60 Hz. greetd logs in automatically as `userInfo.user`.
+without a monitor or dummy plug, with a persistent `HEADLESS-STREAM` output.
+greetd logs in automatically as `userInfo.user`.
 
 The headless session requires NVIDIA graphics configured separately. For VM
 guests, enable the driver and desktop in both the VM configuration and its
@@ -1014,7 +1014,7 @@ hyprctl --instance 0 monitors
 
 `nvidia-smi` should list the assigned GPU. Expect greetd to be running and
 headless-display to be `active (exited)`, meaning display creation completed.
-The monitor list should include `HEADLESS-STREAM` at 1920x1080.
+The monitor list should include `HEADLESS-STREAM`.
 
 ##### Stream with Sunshine
 
@@ -1093,8 +1093,8 @@ tunnel <guest-user>@<voom-host> 47990 -- -p <guest-ssh-port>
 Open `https://localhost:47990`, accept the self-signed certificate, and create
 administrator credentials. Add the physical host's address or the Voom host's
 Tailscale address in Moonlight. Enter Moonlight's pairing PIN in Sunshine,
-then select **Desktop**. For the headless session, use 1080p/60 Hz with H.264
-or HEVC.
+then select **Desktop**. For the headless session, set Moonlight to 4K/60 Hz
+with H.264 or HEVC.
 
 Edit `services.sunshine.settings` and `services.sunshine.applications.apps`
 in the [desktop module](./modules/nixos/desktop.nix) to change settings or
@@ -1106,16 +1106,20 @@ user's `~/.config/sunshine`.
 
 Open Noctalia settings with Super+comma to customize the bar, appearance,
 notifications, and idle behavior. Super+S opens the control center for audio
-controls and the wallpaper picker. Window and workspace animations take 200 ms.
+controls and the wallpaper picker.
 
-The GNOME wallpapers are managed by Nix in `~/Pictures/Wallpapers/GNOME`.
-Add your own images alongside that folder in `~/Pictures/Wallpapers`, then
-choose a background in the picker. Noctalia also supports favorites and
-automatic rotation.
+Click the monitor icon in the bar to open **Displays Settings** (nwg-displays).
+Click **Apply**, then **Keep**, to save changes to
+`~/.config/hypr/monitors.lua`. Rebuilds preserve this file.
 
-Defaults live in [noctalia.nix](./modules/nixos/config/noctalia.nix); changes made
-in the settings UI are saved in `~/.local/state/noctalia/settings.toml` and
-override those defaults. Hyprland keybindings and window behavior live in
+The GNOME wallpapers are managed by Nix in `~/Pictures/Wallpapers/GNOME`. Add
+your own images alongside that folder in `~/Pictures/Wallpapers`, then choose a
+background in the picker. Noctalia also supports favorites and automatic
+rotation.
+
+Defaults live in [noctalia.nix](./modules/nixos/config/noctalia.nix); changes
+made in the settings UI are saved in `~/.local/state/noctalia/settings.toml`
+and override those defaults. Hyprland keybindings and window behavior live in
 [hyprland.nix](./modules/nixos/config/hyprland.nix). Headless sessions disable
 session locking and idle locking by default.
 
@@ -1126,25 +1130,26 @@ Alt+Tab and Super shortcuts reach the guest. Files (Nautilus) is the default
 file manager; Ctrl+L lets you enter a path. Workspaces 1–9 remain visible in
 the bar even when empty.
 
-| Binding                             | Action                                 |
-|-------------------------------------|----------------------------------------|
-| Super+Space                         | Open the application launcher          |
+| Binding                             | Action                                  |
+|-------------------------------------|-----------------------------------------|
+| Super+Space                         | Open the application launcher           |
 | Alt+Tab                             | Switch windows through Noctalia         |
-| Super+S                             | Open the control center                |
-| Super+comma                         | Open Noctalia settings                 |
-| Super+Ctrl+V                        | Open clipboard history                 |
-| Print                               | Capture a screen region                |
-| Super+L (local sessions)            | Lock the session                       |
+| Super+S                             | Open the control center                 |
+| Super+comma                         | Open Noctalia settings                  |
+| Super+Ctrl+V                        | Open clipboard history                  |
+| Print                               | Capture a screen region                 |
+| Super+L (local sessions)            | Lock the session                        |
 | Volume keys                         | Raise, lower, or mute audio             |
-| Super+Enter                         | Open Ghostty                           |
+| Super+Enter                         | Open Ghostty                            |
 | Super+Shift+F                       | Open Files (Nautilus)                   |
-| Super+Q                             | Close the focused window               |
-| Super+V                             | Toggle floating for the focused window |
-| Super+arrow                         | Change window focus                    |
-| Super+1 through Super+9             | Switch workspace                       |
-| Super+Shift+1 through Super+Shift+9 | Move a window to a workspace           |
-| Super+left mouse drag               | Move a window                          |
-| Super+right mouse drag              | Resize a window                        |
+| Super+Q                             | Close the focused window                |
+| Super+F                             | Toggle window maximization              |
+| Super+V                             | Toggle floating for the focused window  |
+| Super+arrow                         | Change window focus                     |
+| Super+1 through Super+9             | Switch workspace                        |
+| Super+Shift+1 through Super+Shift+9 | Move a window to a workspace            |
+| Super+left mouse drag               | Move a window                           |
+| Super+right mouse drag              | Resize a window or adjust a tiled split |
 
 ##### Troubleshooting
 

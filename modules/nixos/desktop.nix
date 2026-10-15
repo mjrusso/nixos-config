@@ -13,11 +13,11 @@ let
   nvidia = builtins.elem "nvidia" config.services.xserver.videoDrivers;
   user = userInfo.user;
   output = "HEADLESS-STREAM";
-  hyprlandConfig =
-    pkgs.writeText "hyprland.lua"
-      (import ./config/hyprland.nix {
-        output = if headless then output else null;
-      }).text;
+  hyprlandSettings = import ./config/hyprland.nix {
+    output = if headless then output else null;
+  };
+  hyprlandConfig = pkgs.writeText "hyprland.lua" hyprlandSettings.text;
+  monitorDefaults = pkgs.writeText "hyprland-monitors.lua" hyprlandSettings.monitorDefaults;
   # UWSM rejects execute-only wrapper paths, including those resolved by -F.
   sessionCommand = "${config.programs.uwsm.package}/bin/uwsm start -- Hyprland --config ${hyprlandConfig}";
 in
@@ -68,6 +68,7 @@ in
         pkgs.loupe
         pkgs.mpv
         pkgs.nautilus
+        pkgs.nwg-displays
       ];
       services.gvfs.enable = true;
       xdg.mime.defaultApplications = {
@@ -110,7 +111,14 @@ in
         enable = true;
         systemd.enable = true;
       };
-      home-manager.users.${user} = {
+      home-manager.users.${user} = { lib, ... }: {
+        home.activation.initializeDisplaySettings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          display_file="${config.home-manager.users.${user}.xdg.configHome}/hypr/monitors.lua"
+          # nwg-displays cannot revert Apply when its previous Lua file is empty.
+          if [[ ! -s "$display_file" ]]; then
+            run install -Dm644 ${monitorDefaults} "$display_file"
+          fi
+        '';
         programs.noctalia = {
           enable = true;
           package = config.programs.noctalia.package;
@@ -175,13 +183,13 @@ in
           fi
           for attempt in {1..50}; do
             if ${config.programs.hyprland.package}/bin/hyprctl monitors -j \
-              | ${pkgs.jq}/bin/jq -e 'any(.[]; .name == "${output}" and .width == 1920 and .height == 1080)' >/dev/null; then
+              | ${pkgs.jq}/bin/jq -e 'any(.[]; .name == "${output}" and .width > 0 and .height > 0)' >/dev/null; then
               ${config.programs.hyprland.package}/bin/hyprctl dispatch 'hl.dsp.focus({ monitor = "${output}" })'
               exit 0
             fi
             ${pkgs.coreutils}/bin/sleep 0.1
           done
-          echo "Hyprland did not create the ${output} display at 1920x1080" >&2
+          echo "Hyprland did not create the ${output} display" >&2
           exit 1
         '';
       };
