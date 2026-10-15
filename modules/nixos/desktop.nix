@@ -19,7 +19,7 @@ let
   hyprlandConfig = pkgs.writeText "hyprland.lua" hyprlandSettings.text;
   monitorDefaults = pkgs.writeText "hyprland-monitors.lua" hyprlandSettings.monitorDefaults;
   # UWSM rejects execute-only wrapper paths, including those resolved by -F.
-  sessionCommand = "${config.programs.uwsm.package}/bin/uwsm start -- Hyprland --config ${hyprlandConfig}";
+  sessionCommand = "${config.programs.uwsm.package}/bin/uwsm start -- Hyprland --config /etc/xdg/hypr/hyprland.lua";
 in
 {
   options.services = {
@@ -43,6 +43,7 @@ in
         enable = true;
         withUWSM = true;
       };
+      environment.etc."xdg/hypr/hyprland.lua".source = hyprlandConfig;
       services.greetd = {
         enable = true;
         useTextGreeter = true;
