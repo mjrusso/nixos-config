@@ -1287,7 +1287,9 @@ after key access is established. It is not included in the exported bundle.
 
 The command snapshots the source through Nix, transfers that snapshot to the
 guest, and builds with lock updates disabled. Inputs must be remote locked
-inputs; local path inputs are rejected. Git flakes include tracked files, so
+inputs or relative paths within their containing source tree. Host-local
+absolute paths are rejected. Relative path inputs require Nix 2.26 or later
+on both the host and guest. Git flakes include tracked files, so
 add new configuration files to Git before baking. Downloads are cached under
 `~/Library/Caches/bake-macos` and checked against their hashes on every use.
 The installer is compiled with the selected host Apple toolchain outside the

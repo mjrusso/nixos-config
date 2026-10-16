@@ -46,10 +46,14 @@ def load_configuration(flake):
             text=True,
         )
     )
-    for node in metadata["locks"]["nodes"].values():
-        if node.get("locked", {}).get("type") == "path":
+    for name, node in metadata["locks"]["nodes"].items():
+        locked = node.get("locked", {})
+        if locked.get("type") == "path" and (
+            Path(locked["path"]).is_absolute() or "parent" not in node
+        ):
             raise ValueError(
-                "Image builds require remote locked flake inputs; local path inputs cannot be transferred to the guest"
+                f"Input {name!r} uses a host-local path that cannot be transferred to the guest. "
+                "Use a remote locked input or a relative path input within its containing source tree."
             )
     try:
         configuration = subprocess.check_output(
