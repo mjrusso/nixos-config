@@ -1,4 +1,4 @@
-{ config, osConfig, pkgs, lib, home-manager, userInfo, ... }:
+{ config, osConfig, pkgs, lib, home-manager, userInfo, systemType, ... }:
 
 let
   user = userInfo.user;
@@ -21,7 +21,7 @@ in {
     users.${user} = { pkgs, config, osConfig, lib, ... }: {
       home = {
         enableNixpkgsReleaseCheck = false;
-        packages = pkgs.callPackage ./packages.nix { };
+        packages = pkgs.callPackage ./packages.nix { inherit systemType; };
         sessionPath = [
           "$HOME/.local/bin"
         ];

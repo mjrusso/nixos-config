@@ -1,8 +1,8 @@
-{ pkgs }:
+{ pkgs, systemType }:
 
 with pkgs;
 let shared-packages = import ../shared/packages.nix { inherit pkgs; }; in
-shared-packages ++ [
+shared-packages ++ lib.optionals (systemType != "vm") [
   lima
   colima
   docker
