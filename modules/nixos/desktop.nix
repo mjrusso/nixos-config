@@ -17,9 +17,13 @@ let
     output = if headless then output else null;
   };
   hyprlandConfig = pkgs.writeText "hyprland.lua" hyprlandSettings.text;
+  # Hyprland canonicalizes --config paths; this loader must stay constant across rebuilds.
+  hyprlandLoader = pkgs.writeText "hyprland-startup.lua" ''
+    require("/etc/xdg/hypr/hyprland.lua")
+  '';
   monitorDefaults = pkgs.writeText "hyprland-monitors.lua" hyprlandSettings.monitorDefaults;
   # UWSM rejects execute-only wrapper paths, including those resolved by -F.
-  sessionCommand = "${config.programs.uwsm.package}/bin/uwsm start -- Hyprland --config /etc/xdg/hypr/hyprland.lua";
+  sessionCommand = "${config.programs.uwsm.package}/bin/uwsm start -- Hyprland --config ${hyprlandLoader}";
 in
 {
   options.services = {
@@ -44,6 +48,18 @@ in
         withUWSM = true;
       };
       environment.etc."xdg/hypr/hyprland.lua".source = hyprlandConfig;
+      systemd.user.services.hyprland-config-reload = {
+        description = "Reload the installed Hyprland configuration";
+        wantedBy = [ "graphical-session.target" ];
+        after = [ "graphical-session.target" ];
+        partOf = [ "graphical-session.target" ];
+        restartTriggers = [ hyprlandConfig ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = "${config.programs.hyprland.package}/bin/hyprctl reload";
+        };
+      };
       services.greetd = {
         enable = true;
         useTextGreeter = true;
@@ -112,13 +128,50 @@ in
         enable = true;
         systemd.enable = true;
       };
-      home-manager.users.${user} = { lib, ... }: {
-        home.activation.initializeDisplaySettings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          display_file="${config.home-manager.users.${user}.xdg.configHome}/hypr/monitors.lua"
+      home-manager.users.${user} = home: {
+        home.activation.initializeDisplaySettings = home.lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          display_file="${home.config.xdg.configHome}/hypr/monitors.lua"
           # nwg-displays cannot revert Apply when its previous Lua file is empty.
           if [[ ! -s "$display_file" ]]; then
             run install -Dm644 ${monitorDefaults} "$display_file"
           fi
+        '';
+        home.activation.resetNoctaliaOverrides = home.lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          run ${pkgs.python3.withPackages (ps: [ ps.tomli-w ])}/bin/python3 - \
+            "${home.config.xdg.stateHome}/noctalia/settings.toml" \
+            ${pkgs.writeText "noctalia-settings.json" (builtins.toJSON home.config.programs.noctalia.settings)} <<'PY'
+          import copy
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          import tempfile
+          import tomllib
+          import tomli_w
+
+          def remove_overrides(saved, managed):
+              for key, value in managed.items():
+                  if isinstance(value, dict) and isinstance(saved.get(key), dict):
+                      remove_overrides(saved[key], value)
+                      if not saved[key]:
+                          del saved[key]
+                  else:
+                      saved.pop(key, None)
+
+          path = Path(sys.argv[1]).resolve()
+          if path.is_file():
+              saved = tomllib.loads(path.read_text())
+              original = copy.deepcopy(saved)
+              remove_overrides(saved, json.loads(Path(sys.argv[2]).read_text()))
+              if saved != original:
+                  with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+                      try:
+                          tomli_w.dump(saved, temporary)
+                          temporary.close()
+                          os.replace(temporary.name, path)
+                      finally:
+                          Path(temporary.name).unlink(missing_ok=True)
+          PY
         '';
         programs.noctalia = {
           enable = true;

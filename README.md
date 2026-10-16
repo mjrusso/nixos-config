@@ -960,13 +960,16 @@ Set the options below in the configuration's `extraModules`.
 ##### Local session
 
 Physical NixOS hosts enable `services.localDesktop.enable` by default, using
-`hostInfo.nixosDesktop` when that field is set. VM and container images leave it
-disabled. Local sessions use connected monitors at their preferred resolution
-and do not require NVIDIA graphics.
+`hostInfo.nixosDesktop` when that field is set. VM and container images leave
+it disabled. Local sessions initially use connected monitors at their preferred
+resolution and do not require NVIDIA graphics. Saved display settings take
+precedence.
 
 Log in at the greetd text prompt with the configured user's password. If the
-user only has SSH keys, set a password first with `sudo passwd <user>` over SSH.
-Noctalia locks the session after ten minutes of inactivity and before suspend.
+user only has SSH keys, set a password first with `sudo passwd <user>` over
+SSH. By default, Noctalia locks the session after ten minutes of inactivity and
+before suspend.
+
 Set `services.localDesktop.enable = false` to disable the local session.
 
 ##### Headless session
@@ -1092,8 +1095,8 @@ tunnel <guest-user>@<voom-host> 47990 -- -p <guest-ssh-port>
 
 Open `https://localhost:47990`, accept the self-signed certificate, and create
 administrator credentials. Add the physical host's address or the Voom host's
-Tailscale address in Moonlight. Enter Moonlight's pairing PIN in Sunshine,
-then select **Desktop**. For the headless session, set Moonlight to 4K/60 Hz
+Tailscale address in Moonlight. Enter Moonlight's pairing PIN in Sunshine, then
+select **Desktop**. For the default headless display, set Moonlight to 4K/60 Hz
 with H.264 or HEVC.
 
 Edit `services.sunshine.settings` and `services.sunshine.applications.apps`
@@ -1112,16 +1115,29 @@ Click the monitor icon in the bar to open **Displays Settings** (nwg-displays).
 Click **Apply**, then **Keep**, to save changes to
 `~/.config/hypr/monitors.lua`. Rebuilds preserve this file.
 
+The headless display defaults to 3840×2160 at 60 Hz with 150% scaling.
+nwg-displays changes the guest desktop's resolution and scaling. Moonlight
+keeps its configured video resolution and scales the desktop to fit.
+
 The GNOME wallpapers are managed by Nix in `~/Pictures/Wallpapers/GNOME`. Add
 your own images alongside that folder in `~/Pictures/Wallpapers`, then choose a
 background in the picker. Noctalia also supports favorites and automatic
 rotation.
 
-Defaults live in [noctalia.nix](./modules/nixos/config/noctalia.nix); changes
-made in the settings UI are saved in `~/.local/state/noctalia/settings.toml`
-and override those defaults. Hyprland keybindings and window behavior live in
-[hyprland.nix](./modules/nixos/config/hyprland.nix). Headless sessions disable
-session locking and idle locking by default.
+Home Manager activation clears GUI overrides for settings declared in
+[noctalia.nix](./modules/nixos/config/noctalia.nix), including the bar's start
+widgets and session locking. GUI changes to these settings last until the next
+activation. Other preferences, including wallpaper and theme choices, persist
+in `~/.local/state/noctalia/settings.toml`. Hyprland keybindings and window
+behavior live in [hyprland.nix](./modules/nixos/config/hyprland.nix). Headless
+sessions disable session locking and idle locking by default.
+
+Applying a changed Hyprland configuration reloads it automatically without
+closing windows. To reload it manually:
+
+``` bash
+hyprctl --instance 0 reload
+```
 
 ##### Keybindings
 
