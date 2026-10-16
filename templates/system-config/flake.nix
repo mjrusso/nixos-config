@@ -55,6 +55,22 @@
       apps = nixos-config.apps;
       devShells = nixos-config.devShells;
 
+      macosImage = {
+        ipsw = {
+          url = "https://REPLACE-WITH-APPLE-IPSW-URL";
+          sha256 = "REPLACE-WITH-64-CHARACTER-SHA256";
+        };
+        nix = {
+          url = "https://releases.nixos.org/nix/REPLACE-WITH-VERSION/nix-REPLACE-WITH-VERSION-aarch64-darwin.tar.xz";
+          sha256 = "REPLACE-WITH-64-CHARACTER-SHA256";
+        };
+        target = "aarch64-darwin@vm";
+        sdkVersion = "27.0";
+        cpuCount = 4;
+        memoryMiB = 8192;
+        diskGiB = 100;
+      };
+
       darwinConfigurations = {
         "aarch64-darwin@desktop" = constructors.mkDarwinConfiguration {
           systemType = "desktop";

@@ -1229,6 +1229,129 @@ are [voom](https://github.com/mjrusso/voom)-compatible (`cloud-init` with a
 `NoCloud` datasource for bootstrap metadata; runtime coordination via the
 `voom-control` virtiofs share mounted at `/run/voom`).
 
+#### macOS VM Images
+
+[`bake-macos`](./scripts/bake-macos) installs macOS from an Apple IPSW,
+creates a user account, enables SSH, installs Nix, and applies a nix-darwin
+and Home Manager configuration. It then boots the image with vfkit and
+validates the guest before saving the bundle.
+
+The builder requires:
+
+- An Apple Silicon Mac running macOS 27 or later.
+- A logged-in graphical session.
+- An Xcode toolchain with a macOS 27 SDK.
+- An SSH identity that works without prompting, directly or through ssh-agent.
+
+##### Configure and build
+
+Define `macosImage` next to `darwinConfigurations` in your system configuration
+flake. The included template provides this output with placeholder URLs and
+checksums:
+
+``` nix
+macosImage = {
+  ipsw = {
+    url = "https://.../UniversalMac_27_..._Restore.ipsw";
+    sha256 = "<64-character SHA-256>";
+  };
+  nix = {
+    url = "https://releases.nixos.org/nix/<version>/nix-<version>-aarch64-darwin.tar.xz";
+    sha256 = "<64-character SHA-256>";
+  };
+  target = "aarch64-darwin@vm";
+  sdkVersion = "27.0";
+  cpuCount = 4;
+  memoryMiB = 8192;
+  diskGiB = 100;
+};
+```
+
+Choose a macOS 27 or later IPSW and an official Nix binary distribution, and
+set their URLs and SHA-256 checksums. Nix 2.26 or later is required on both
+host and guest when using relative path inputs. Both downloads also accept
+absolute `file://` URLs. Set `sdkVersion` to the exact version reported by
+`xcrun --sdk macosx --show-sdk-version`; use `DEVELOPER_DIR` to select Xcode.
+Commit the configuration and `flake.lock`.
+
+Run from the system configuration directory, or pass `--flake PATH`:
+
+``` bash
+nix run .#bake-macos -- --check
+nix run .#bake-macos -- --identity ~/.ssh/id_ed25519
+```
+
+`--check` evaluates and validates `macosImage`. It may fetch flake inputs,
+but does not download the IPSW or Nix archive or start a VM.
+
+The template selects `darwinConfigurations."aarch64-darwin@vm"`. That
+configuration grants the user passwordless sudo, disables computer sleep,
+sets Fish as the login shell, and installs Ghostty terminal definitions.
+The builder authorizes the public key in the `.pub` file beside `--identity`.
+It creates a random account password and deletes the host's temporary password
+file once SSH key access is established. The guest account retains that
+password; the exported bundle contains no plaintext password file.
+
+The builder transfers a Nix snapshot of the source to the guest and builds
+with lock updates disabled. Inputs must be locked remote sources or relative
+paths within their containing source tree; host-local absolute paths are
+rejected. Git flakes include tracked files, so add new files to Git before
+baking. Downloads are cached under `~/Library/Caches/bake-macos` and checked
+against their hashes on every use.
+
+##### Boot validation
+
+After applying the configuration, the builder shuts down the guest and boots
+it with standalone vfkit using NAT networking.
+
+The final boot checks SSH key access, macOS version, Nix, system activation,
+passwordless sudo, Fish, and Ghostty terminal support.
+
+Run `home-bootstrap` manually after creating a VM. The bake does not clone
+`.emacs.d` or Wingman or warm Emacs.
+
+##### Output and replacement
+
+The default output is `$VMS_DIR/golden-aarch64-darwin`, with `VMS_DIR`
+defaulting to `~/vms`. Use `--output` to choose another directory.
+
+The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
+`AuxiliaryStorage`, `image.json`, `restore.json`, `toolchain.json`, and boot
+logs. Keep the disk and platform files together.
+`restore.json` records Apple's minimum CPU count and minimum memory size
+(in bytes). Voom uses these limits when creating VMs; older bundles use their
+baked allocation as the minimum.
+
+A successful bake atomically replaces an existing bundle after validation.
+Keep the old bundle shut down during replacement. The builder locks its
+storage files and swaps the directories; this requires filesystem support
+for macOS directory swaps, such as APFS. Failed builds and failed swaps leave
+the existing bundle intact. Unrelated directories and symlink outputs are
+rejected.
+
+Between VM processes, the builder waits up to two minutes for Apple's VM
+helper to release storage locks. The native installer is compiled outside the
+Nix build sandbox with the selected Apple SDK. The SDK version, Swift compiler,
+and vfkit version are recorded in the bundle. The installed disk is not
+expected to be bit-for-bit reproducible. See `--help` for other options.
+
+##### Test the image with Voom
+
+macOS bundles require Voom's `macos-guests` branch; this repository's Voom pin
+has not been updated yet.
+To import a bundle and create a VM with that Voom version:
+
+``` bash
+voom image import macos "$HOME/vms/golden-aarch64-darwin" \
+  --ssh-identity "$HOME/.ssh/id_ed25519"
+voom create macos-dev --image macos
+voom start macos-dev
+```
+
+The bake uses vfkit's native NAT. Voom's gvproxy networking requires
+separate validation. Configuration checks and unit tests can run on Linux;
+installation and boot validation require a Mac.
+
 #### Running VM Images
 
 Additional tooling is provided that makes it easy to build and run VM images:
@@ -1245,7 +1368,8 @@ Additional tooling is provided that makes it easy to build and run VM images:
 - [`voom-update`](./scripts/voom-update) brings every running NixOS guest up to
   date with this host: the system configuration and `~/.emacs.d`.
 
-From the system configuration repository, bake (produce) a golden image:
+To create a Linux VM, bake a golden image from the system configuration
+repository:
 
 ``` bash
 nix run .#bake-golden
@@ -1274,7 +1398,7 @@ voom ssh my-vm -- home-bootstrap
 _(In this example, the image is named `golden`, and the VM is named `my-vm`;
 both names are arbitrary)._
 
-Later, to rebuild and switch an existing VM in place after changing the system
+To rebuild and switch an existing NixOS VM after changing the system
 configuration flake, run:
 
 ``` bash

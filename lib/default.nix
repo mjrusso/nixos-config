@@ -171,6 +171,7 @@ in
         }
         ../hosts/darwin
       ]
+      ++ nixpkgs.lib.optionals (systemType == "vm") [ ../modules/darwin/vm.nix ]
       ++ extraModules;
     };
 
