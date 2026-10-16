@@ -76,11 +76,18 @@ def checksum(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def fetch(artifact, cache):
+def fetch(artifact, cache, suffix=""):
     expected = artifact["sha256"].lower()
-    destination = cache / expected
-    if destination.exists() and checksum(destination) == expected:
-        return destination
+    destination = cache / (expected + suffix)
+    legacy = cache / expected
+    if suffix and not destination.exists() and legacy.exists():
+        legacy.replace(destination)
+    if destination.exists():
+        print(f"Verifying cached download: {artifact['url']}", flush=True)
+        if checksum(destination) == expected:
+            print("Cached download verified", flush=True)
+            return destination
+        print("Cached checksum mismatch; downloading again", flush=True)
     print(f"Downloading {artifact['url']}", flush=True)
     descriptor, name = tempfile.mkstemp(prefix=expected + ".", suffix=".partial", dir=cache)
     os.close(descriptor)
@@ -90,10 +97,31 @@ def fetch(artifact, cache):
             urllib.request.urlopen(artifact["url"], timeout=60) as response,
             partial.open("wb") as stream,
         ):
-            shutil.copyfileobj(response, stream, 1024 * 1024)
+            total = int(response.headers.get("Content-Length") or 0)
+            received = 0
+            started = last_report = time.monotonic()
+            if total > 0:
+                print(f"Download size: {total / 2**30:.2f} GiB", flush=True)
+            while chunk := response.read(1024 * 1024):
+                stream.write(chunk)
+                received += len(chunk)
+                now = time.monotonic()
+                if now - last_report >= 5:
+                    rate = received / (now - started)
+                    progress = f"{received / 2**20:.1f} MiB"
+                    if total > 0:
+                        progress += f" / {total / 2**20:.1f} MiB ({received / total:.1%})"
+                    progress += f", {rate / 2**20:.1f} MiB/s"
+                    if total > 0:
+                        minutes, seconds = divmod(max(0, round((total - received) / rate)), 60)
+                        progress += f", ETA {minutes}m {seconds:02d}s"
+                    print(f"Downloaded {progress}", flush=True)
+                    last_report = now
+        print(f"Downloaded {received / 2**20:.1f} MiB. Verifying SHA-256...", flush=True)
         if checksum(partial) != expected:
             raise ValueError(f"SHA-256 mismatch for {artifact['url']}")
         partial.replace(destination)
+        print("Download verified", flush=True)
     finally:
         partial.unlink(missing_ok=True)
     return destination
@@ -360,7 +388,7 @@ def bake(args, metadata, recipe):
             )
             + "\n"
         )
-        ipsw = fetch(recipe["ipsw"], cache)
+        ipsw = fetch(recipe["ipsw"], cache, suffix=".ipsw")
         nix_archive = fetch(recipe["nix"], cache)
         subprocess.check_call([native, "install", bundle, ipsw], timeout=args.install_timeout)
         password_file = temporary / "password"

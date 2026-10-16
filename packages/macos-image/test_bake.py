@@ -1,7 +1,10 @@
 import hashlib
+import io
+import itertools
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,6 +23,58 @@ RECIPE = {
 
 
 class BakeTests(unittest.TestCase):
+    def test_ipsw_cache_keeps_its_extension_and_reuses_existing_downloads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            contents = b"pinned restore image"
+            digest = hashlib.sha256(contents).hexdigest()
+            legacy = cache / digest
+            legacy.write_bytes(contents)
+            inode = legacy.stat().st_ino
+            artifact = {"url": "https://example.com/download", "sha256": digest}
+            with patch("bake.urllib.request.urlopen", side_effect=AssertionError("downloaded again")):
+                destination = bake.fetch(artifact, cache, suffix=".ipsw")
+                self.assertEqual(bake.fetch(artifact, cache, suffix=".ipsw"), destination)
+            self.assertEqual(destination.suffix, ".ipsw")
+            self.assertEqual(destination.read_bytes(), contents)
+            self.assertEqual(destination.stat().st_ino, inode)
+            self.assertFalse(legacy.exists())
+
+    def test_download_reports_progress_before_completion_with_or_without_a_size(self):
+        contents = b"x" * (2 * 1024 * 1024)
+        for known_size in (True, False):
+            with self.subTest(known_size=known_size), tempfile.TemporaryDirectory() as directory:
+                response = io.BytesIO(contents)
+                response.headers = {"Content-Length": str(len(contents))} if known_size else {}
+                output = io.StringIO()
+                read = response.read
+
+                def read_chunk(size):
+                    if response.tell():
+                        self.assertIn("Downloaded ", output.getvalue())
+                    return read(size)
+
+                artifact = {
+                    "url": "https://example.com/restore.ipsw",
+                    "sha256": hashlib.sha256(contents).hexdigest(),
+                }
+                with (
+                    patch("bake.urllib.request.urlopen", return_value=response),
+                    patch.object(response, "read", side_effect=read_chunk),
+                    patch("bake.time.monotonic", side_effect=itertools.count(0, 6)),
+                    redirect_stdout(output),
+                ):
+                    destination = bake.fetch(artifact, Path(directory))
+                self.assertEqual(destination.read_bytes(), contents)
+                self.assertIn("MiB/s", output.getvalue())
+                self.assertIn("Verifying SHA-256", output.getvalue())
+                if known_size:
+                    self.assertIn("%", output.getvalue())
+                    self.assertIn("ETA", output.getvalue())
+                else:
+                    self.assertNotIn("%", output.getvalue())
+                    self.assertNotIn("ETA", output.getvalue())
+
     def test_configuration_accepts_relative_inputs_and_rejects_host_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             flake = Path(directory)
