@@ -18,7 +18,7 @@ struct BuildError: LocalizedError {
 @available(macOS 27.0, *)
 @MainActor
 @main
-final class Installer: NSObject, VZVirtualMachineDelegate {
+final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
     private var virtualMachine: VZVirtualMachine?
     private var window: NSWindow?
 
@@ -32,7 +32,7 @@ final class Installer: NSObject, VZVirtualMachineDelegate {
         let platform = VZMacPlatformConfiguration()
         platform.hardwareModel = hardware
         platform.machineIdentifier = identifier
-        platform.auxiliaryStorage = VZMacAuxiliaryStorage(contentsOfURL: bundle.appendingPathComponent("AuxiliaryStorage"))
+        platform.auxiliaryStorage = VZMacAuxiliaryStorage(url: bundle.appendingPathComponent("AuxiliaryStorage"))
 
         let config = VZVirtualMachineConfiguration()
         config.platform = platform
