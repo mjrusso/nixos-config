@@ -150,6 +150,8 @@ class Guest:
         self.user = user
         self.address = None
         self.options = [
+            "-F",
+            "/dev/null",
             "-oUserKnownHostsFile=" + json.dumps(str(temporary / "known_hosts")),
             "-oStrictHostKeyChecking=accept-new",
             "-oConnectTimeout=5",
@@ -185,7 +187,9 @@ class Guest:
         )
 
     def wait(self, process, mac, password_env=None, timeout=900):
-        deadline = time.monotonic() + timeout
+        started = next_report = time.monotonic()
+        deadline = started + timeout
+        failure = None
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise RuntimeError(
@@ -202,12 +206,23 @@ class Guest:
                         "true",
                         password_env,
                         stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
                         timeout=15,
                     )
+                    print(f"SSH login ready at {self.address}", flush=True)
                     return
-                except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                    pass
+                except subprocess.CalledProcessError as error:
+                    failure = error.stderr.strip().splitlines()[-1] if error.stderr else str(error)
+                except subprocess.TimeoutExpired:
+                    failure = "SSH command timed out"
+            now = time.monotonic()
+            if now >= next_report:
+                elapsed = int(now - started)
+                status = f"Waiting for SSH login at {self.address}" if self.address else "Waiting for a DHCP lease"
+                print(f"{status} ({elapsed // 60}m {elapsed % 60}s elapsed)", flush=True)
+                if self.address and failure:
+                    print(f"Last SSH error: {failure}", flush=True)
+                next_report = now + 15
             time.sleep(3)
         raise TimeoutError("Timed out waiting for the VM's DHCP lease and SSH login")
 
