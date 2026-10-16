@@ -321,7 +321,7 @@ def bake(args, metadata, recipe):
                 "swiftc",
                 "-parse-as-library",
                 "-swift-version",
-                "5",
+                "6",
                 "-target",
                 "arm64-apple-macos27.0",
                 "-framework",
