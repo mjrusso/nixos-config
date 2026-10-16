@@ -99,7 +99,22 @@ final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
             let vm = VZVirtualMachine(configuration: try Self.configuration(bundle: bundle, image: image))
             let installer = VZMacOSInstaller(virtualMachine: vm, restoringFromImageAt: ipsw)
             print("Installing macOS \(versionString) (\(restore.buildVersion))...")
+            fflush(stdout)
+            let progress = installer.progress
+            let started = ProcessInfo.processInfo.systemUptime
+            let progressTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    let percent = String(format: "%.1f", progress.fractionCompleted * 100)
+                    let elapsed = Int(ProcessInfo.processInfo.systemUptime - started)
+                    print("macOS installation: \(percent)% (\(elapsed / 60)m \(elapsed % 60)s elapsed)")
+                    fflush(stdout)
+                    try await Task.sleep(for: .seconds(5))
+                }
+            }
+            defer { progressTask.cancel() }
             try await installer.install()
+            print("macOS installation completed")
+            fflush(stdout)
             exit(EXIT_SUCCESS)
         }
 

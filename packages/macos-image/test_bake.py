@@ -1,3 +1,4 @@
+import fcntl
 import hashlib
 import io
 import itertools
@@ -23,6 +24,38 @@ RECIPE = {
 
 
 class BakeTests(unittest.TestCase):
+    def test_storage_handoff_waits_for_each_file_and_releases_its_own_locks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            files = [bundle / name for name in ("AuxiliaryStorage", "disk.raw")]
+            for path in files:
+                path.write_bytes(b"storage")
+            for path in files:
+                with self.subTest(path=path.name), path.open("r+b") as holder:
+                    fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    output = io.StringIO()
+                    with (
+                        patch("bake.time.sleep", side_effect=lambda _: fcntl.flock(holder, fcntl.LOCK_UN)) as sleep,
+                        redirect_stdout(output),
+                    ):
+                        bake.wait_for_storage(bundle)
+                    sleep.assert_called_once()
+                    self.assertIn(path.name, output.getvalue())
+                    for released in files:
+                        with released.open("r+b") as stream:
+                            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def test_storage_handoff_times_out_when_a_lock_is_not_released(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            path = bundle / "AuxiliaryStorage"
+            path.write_bytes(b"storage")
+            with path.open("r+b") as holder:
+                fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with patch("bake.time.monotonic", side_effect=[0, 1]):
+                    with self.assertRaisesRegex(TimeoutError, "AuxiliaryStorage"):
+                        bake.wait_for_storage(bundle, timeout=1)
+
     def test_ipsw_cache_keeps_its_extension_and_reuses_existing_downloads(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)

@@ -1298,7 +1298,9 @@ Swift compiler and vfkit versions are recorded with the image. The installed
 disk is not expected to be bit-for-bit reproducible.
 
 The builder shuts down the configured guest and boots it again with
-standalone vfkit using NAT networking. It checks SSH key access, macOS version,
+standalone vfkit using NAT networking. After installation and shutdown, it
+waits up to two minutes for Apple's VM helper to release storage locks before
+starting the next VM process. It checks SSH key access, macOS version,
 Nix, the activated system, and passwordless sudo before shutting it down and
 saving `~/vms/golden-aarch64-darwin` (or `$VMS_DIR/golden-aarch64-darwin`).
 Use `--output` to choose another directory; existing outputs are never

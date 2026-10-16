@@ -1,4 +1,5 @@
 import argparse
+import fcntl
 import hashlib
 import ipaddress
 import json
@@ -15,6 +16,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from contextlib import ExitStack
 from pathlib import Path
 
 RESOURCES = Path(__file__).resolve().parent
@@ -237,6 +239,27 @@ def stop_process(process):
             process.wait()
 
 
+def wait_for_storage(bundle, timeout=120):
+    next_report = time.monotonic()
+    deadline = next_report + timeout
+    while True:
+        try:
+            with ExitStack() as locks:
+                for name in ("AuxiliaryStorage", "disk.raw"):
+                    path = bundle / name
+                    stream = locks.enter_context(path.open("r+b"))
+                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            now = time.monotonic()
+            if now >= deadline:
+                raise TimeoutError(f"Timed out waiting for VM storage lock: {path.name}") from None
+            if now >= next_report:
+                print(f"Waiting for VM storage to be released: {path.name}", flush=True)
+                next_report = now + 5
+            time.sleep(1)
+
+
 def vfkit_arguments(bundle, image):
     return [
         "vfkit",
@@ -391,6 +414,7 @@ def bake(args, metadata, recipe):
         ipsw = fetch(recipe["ipsw"], cache, suffix=".ipsw")
         nix_archive = fetch(recipe["nix"], cache)
         subprocess.check_call([native, "install", bundle, ipsw], timeout=args.install_timeout)
+        wait_for_storage(bundle)
         password_file = temporary / "password"
         password_file.write_text(secrets.token_urlsafe(32))
         password_file.chmod(0o600)
@@ -458,6 +482,7 @@ def bake(args, metadata, recipe):
                     timeout=args.provision_timeout,
                 )
                 guest.shutdown(process)
+            wait_for_storage(bundle)
             print("Booting the installed bundle under standalone vfkit...", flush=True)
             with (temporary / "vfkit.log").open("w") as log:
                 process = subprocess.Popen(vfkit_arguments(bundle, image), stdout=log, stderr=log)
