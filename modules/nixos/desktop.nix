@@ -129,6 +129,11 @@ in
         systemd.enable = true;
       };
       home-manager.users.${user} = home: {
+        home.activation.startHyprlandConfigReload = home.lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
+          if ${pkgs.systemd}/bin/systemctl --user --quiet is-active graphical-session.target; then
+            run ${pkgs.systemd}/bin/systemctl --user start hyprland-config-reload.service
+          fi
+        '';
         home.activation.initializeDisplaySettings = home.lib.hm.dag.entryAfter [ "writeBoundary" ] ''
           display_file="${home.config.xdg.configHome}/hypr/monitors.lua"
           # nwg-displays cannot revert Apply when its previous Lua file is empty.
