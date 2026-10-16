@@ -1229,6 +1229,68 @@ are [voom](https://github.com/mjrusso/voom)-compatible (`cloud-init` with a
 `NoCloud` datasource for bootstrap metadata; runtime coordination via the
 `voom-control` virtiofs share mounted at `/run/voom`).
 
+#### macOS VM Images
+
+[`bake-macos`](./scripts/bake-macos) installs macOS from an Apple IPSW,
+creates an account and enables SSH through Apple's
+[`VZMacGuestProvisioningOptions`](https://developer.apple.com/documentation/virtualization/vzmacguestprovisioningoptions),
+then installs Nix and applies the selected nix-darwin and Home Manager
+configuration. It requires an Apple Silicon Mac running macOS 27 or later,
+a logged-in graphical session, and an Xcode toolchain with the macOS 27 SDK.
+Apple currently documents the provisioning API as beta.
+
+The system configuration template includes
+[`macos-image.json`](./templates/system-config/macos-image.json). Copy it
+into an existing system configuration repository if needed. Replace both
+artifact URLs and SHA-256 checksums with pinned releases: an Apple macOS 27
+or later restore image and an official
+`nix-<version>-aarch64-darwin.tar.xz` binary distribution. Both artifacts also
+accept absolute `file://` URLs for local downloads. Set `sdkVersion` to the
+exact installed SDK version reported by
+`xcrun --sdk macosx --show-sdk-version`; use `DEVELOPER_DIR` to select Xcode.
+Commit the recipe alongside `flake.lock`.
+
+From the system configuration repository:
+
+``` bash
+nix run .#bake-macos -- --check
+nix run .#bake-macos -- --identity ~/.ssh/id_ed25519
+```
+
+The default target is `darwinConfigurations."aarch64-darwin@vm"`, already
+provided by the system configuration template. The VM configuration grants
+the configured user passwordless sudo and disables computer sleep. The
+builder authorizes the public key next to `--identity` and requires the
+private key to be usable without a prompt, directly or through ssh-agent.
+The initial account password is random, temporary on the host, and discarded
+after key access is established. It is not included in the exported bundle.
+
+The command snapshots the source through Nix, transfers that snapshot to the
+guest, and builds with lock updates disabled. Inputs must be remote locked
+inputs; local path inputs are rejected. Git flakes include tracked files, so
+add new configuration files to Git before baking. Downloads are cached under
+`~/Library/Caches/bake-macos` and checked against their hashes on every use.
+The installer is compiled with the selected host Apple toolchain outside the
+Nix build sandbox. The SDK version is checked against the recipe, and the
+Swift compiler and vfkit versions are recorded with the image. The installed
+disk is not expected to be bit-for-bit reproducible.
+
+The builder shuts down the configured guest and boots it again with
+standalone vfkit using NAT networking. It checks SSH key access, macOS version,
+Nix, the activated system, and passwordless sudo before shutting it down and
+saving `~/vms/golden-aarch64-darwin` (or `$VMS_DIR/golden-aarch64-darwin`).
+Use `--output` to choose another directory; existing outputs are never
+overwritten. Failed builds leave no final bundle. `--help` lists the cache,
+recipe, flake, and timeout options. The recipe checker and unit tests
+can run on Linux, but installation and boot validation require macOS hardware.
+
+The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
+`AuxiliaryStorage`, `image.json`, `restore.json`, toolchain metadata, and boot
+logs. Keep the disk and platform files together. This is the proposed macOS
+image format for Voom; Voom does not yet import or run it. The boot check uses
+vfkit's native NAT, so Voom's gvproxy networking still needs separate
+validation. Shares and automatic port reporting are not enabled.
+
 #### Running VM Images
 
 Additional tooling is provided that makes it easy to build and run VM images:

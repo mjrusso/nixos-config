@@ -122,6 +122,14 @@
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
         "bake-golden" = mkRepoScriptApp "bake-golden" system [ ];
+        "bake-macos" = mkRepoScriptApp "bake-macos" system (
+          with nixpkgs.legacyPackages.${system};
+          [
+            python3
+            openssh
+            vfkit
+          ]
+        );
         "voom-update" = mkRepoScriptApp "voom-update" system [
           inputs.voom.packages.${system}.default
         ];
@@ -151,6 +159,22 @@
       );
 
       checks.x86_64-linux = {
+        macos-image =
+          let
+            pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          in
+          pkgs.runCommand "check-macos-image"
+            {
+              nativeBuildInputs = [
+                pkgs.python3
+                pkgs.shellcheck
+              ];
+            }
+            ''
+              python3 -m unittest discover -s ${./packages/macos-image} -p 'test_*.py'
+              shellcheck ${./packages/macos-image/provision.sh} ${./scripts/bake-macos}
+              touch $out
+            '';
         voom-agent-vault = import ./tests/voom-agent-vault.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
           voomPackage = inputs.voom.packages.x86_64-linux.default;
