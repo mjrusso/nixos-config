@@ -1239,26 +1239,46 @@ configuration. It requires an Apple Silicon Mac running macOS 27 or later,
 a logged-in graphical session, and an Xcode toolchain with the macOS 27 SDK.
 Apple currently documents the provisioning API as beta.
 
-The system configuration template includes
-[`macos-image.json`](./templates/system-config/macos-image.json). Copy it
-into an existing system configuration repository if needed. Replace both
-artifact URLs and SHA-256 checksums with pinned releases: an Apple macOS 27
-or later restore image and an official
-`nix-<version>-aarch64-darwin.tar.xz` binary distribution. Both artifacts also
-accept absolute `file://` URLs for local downloads. Set `sdkVersion` to the
-exact installed SDK version reported by
-`xcrun --sdk macosx --show-sdk-version`; use `DEVELOPER_DIR` to select Xcode.
-Commit the recipe alongside `flake.lock`.
+Define a `macosImage` output in your personal system configuration flake,
+next to `darwinConfigurations`. The system configuration template includes
+this output:
 
-From the system configuration repository:
+``` nix
+macosImage = {
+  ipsw = {
+    url = "https://.../UniversalMac_27_..._Restore.ipsw";
+    sha256 = "<64-character SHA-256>";
+  };
+  nix = {
+    url = "https://releases.nixos.org/nix/<version>/nix-<version>-aarch64-darwin.tar.xz";
+    sha256 = "<64-character SHA-256>";
+  };
+  target = "aarch64-darwin@vm";
+  sdkVersion = "27.0";
+  cpuCount = 4;
+  memoryMiB = 8192;
+  diskGiB = 100;
+};
+```
+
+Set the artifact URLs and checksums to pinned releases: an Apple macOS 27 or
+later IPSW and an official Nix binary distribution. Both artifacts accept
+absolute `file://` URLs for local downloads. Set `sdkVersion` to the exact
+installed SDK version reported by `xcrun --sdk macosx --show-sdk-version`;
+use `DEVELOPER_DIR` to select Xcode. Commit the configuration alongside
+`flake.lock`.
+
+Run these commands from that flake's directory, or pass `--flake PATH`.
+`--check` evaluates and validates `macosImage` without downloading VM artifacts
+or starting a VM. Nix may fetch flake inputs during evaluation. No separate
+recipe file is needed.
 
 ``` bash
 nix run .#bake-macos -- --check
 nix run .#bake-macos -- --identity ~/.ssh/id_ed25519
 ```
 
-The default target is `darwinConfigurations."aarch64-darwin@vm"`, already
-provided by the system configuration template. The VM configuration grants
+The template selects `darwinConfigurations."aarch64-darwin@vm"`. Its VM configuration grants
 the configured user passwordless sudo and disables computer sleep. The
 builder authorizes the public key next to `--identity` and requires the
 private key to be usable without a prompt, directly or through ssh-agent.
@@ -1281,8 +1301,8 @@ Nix, the activated system, and passwordless sudo before shutting it down and
 saving `~/vms/golden-aarch64-darwin` (or `$VMS_DIR/golden-aarch64-darwin`).
 Use `--output` to choose another directory; existing outputs are never
 overwritten. Failed builds leave no final bundle. `--help` lists the cache,
-recipe, flake, and timeout options. The recipe checker and unit tests
-can run on Linux, but installation and boot validation require macOS hardware.
+flake, and timeout options. Configuration checking and the unit tests can
+run on Linux, but installation and boot validation require macOS hardware.
 
 The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
 `AuxiliaryStorage`, `image.json`, `restore.json`, toolchain metadata, and boot

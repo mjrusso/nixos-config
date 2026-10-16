@@ -20,8 +20,7 @@ from pathlib import Path
 RESOURCES = Path(__file__).resolve().parent
 
 
-def read_recipe(path):
-    recipe = json.loads(path.read_text())
+def parse_recipe(recipe):
     for name in ("ipsw", "nix"):
         artifact = recipe[name]
         if urllib.parse.urlparse(artifact["url"]).scheme not in ("https", "file"):
@@ -36,6 +35,36 @@ def read_recipe(path):
     if not re.fullmatch(r"27\.\d+(?:\.\d+)?", recipe["sdkVersion"]):
         raise ValueError("sdkVersion must select an exact macOS 27 SDK version")
     return recipe
+
+
+def load_configuration(flake):
+    if not (flake / "flake.lock").is_file():
+        raise ValueError("The system configuration flake must have a flake.lock")
+    metadata = json.loads(
+        subprocess.check_output(
+            ["nix", "flake", "metadata", "--json", "--no-update-lock-file", flake],
+            text=True,
+        )
+    )
+    for node in metadata["locks"]["nodes"].values():
+        if node.get("locked", {}).get("type") == "path":
+            raise ValueError(
+                "Image builds require remote locked flake inputs; local path inputs cannot be transferred to the guest"
+            )
+    try:
+        configuration = subprocess.check_output(
+            ["nix", "eval", "--json", "--no-update-lock-file", f"{metadata['path']}#macosImage"],
+            text=True,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as error:
+        raise ValueError(
+            f"Cannot evaluate macosImage in {flake}.\n"
+            "Define macosImage in your system configuration flake's outputs.\n"
+            f"{error.stderr.strip()}"
+        ) from error
+    recipe = parse_recipe(json.loads(configuration))
+    return metadata, recipe
 
 
 def checksum(path):
@@ -206,12 +235,12 @@ def vfkit_arguments(bundle, image):
     ]
 
 
-def bake(args, recipe):
+def bake(args, metadata, recipe):
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise ValueError("bake-macos requires an Apple Silicon Mac running macOS 27 or later")
     if int(platform.mac_ver()[0].split(".")[0]) < 27:
         raise ValueError("bake-macos requires macOS 27 or later")
-    for command in ("nix", "ssh", "scp", "ssh-keygen", "vfkit"):
+    for command in ("ssh", "scp", "ssh-keygen", "vfkit"):
         if not shutil.which(command):
             raise ValueError(f"Missing required command: {command}")
     sdk = subprocess.check_output(
@@ -229,21 +258,7 @@ def bake(args, recipe):
         ["ssh-keygen", "-l", "-f", str(identity) + ".pub"],
         stdout=subprocess.DEVNULL,
     )
-    flake = args.flake.expanduser().resolve()
-    if not (flake / "flake.lock").is_file():
-        raise ValueError("The system configuration flake must have a flake.lock")
-    metadata = json.loads(
-        subprocess.check_output(
-            ["nix", "flake", "metadata", "--json", "--no-update-lock-file", flake],
-            text=True,
-        )
-    )
     snapshot = Path(metadata["path"])
-    for node in metadata["locks"]["nodes"].values():
-        if node.get("locked", {}).get("type") == "path":
-            raise ValueError(
-                "Image builds require remote locked flake inputs; local path inputs cannot be transferred to the guest"
-            )
     target = "darwinConfigurations." + json.dumps(recipe["target"]) + ".config"
     user = json.loads(
         subprocess.check_output(
@@ -446,8 +461,12 @@ def main():
         prog="bake-macos",
         description="Install and configure a macOS 27 VM, then validate it under vfkit.",
     )
-    parser.add_argument("--recipe", type=Path, default=Path("macos-image.json"))
-    parser.add_argument("--flake", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "--flake",
+        type=Path,
+        default=Path.cwd(),
+        help="system configuration flake containing macosImage (default: current directory)",
+    )
     parser.add_argument("--identity", type=Path, default=Path("~/.ssh/id_ed25519"))
     parser.add_argument(
         "--output",
@@ -460,15 +479,15 @@ def main():
     parser.add_argument(
         "--check",
         action="store_true",
-        help="validate the recipe without downloading or starting a VM",
+        help="evaluate and validate the flake's macosImage output without downloading VM artifacts or starting a VM",
     )
     args = parser.parse_args()
     try:
-        recipe = read_recipe(args.recipe)
+        metadata, recipe = load_configuration(args.flake.expanduser().resolve())
         if args.check:
             print("Recipe is valid")
         else:
-            bake(args, recipe)
+            bake(args, metadata, recipe)
     except (
         OSError,
         ValueError,

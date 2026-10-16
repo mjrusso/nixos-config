@@ -1,5 +1,4 @@
 import hashlib
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -44,20 +43,15 @@ class BakeTests(unittest.TestCase):
             "memoryMiB": 8192,
             "diskGiB": 100,
         }
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "recipe.json"
-            path.write_text(json.dumps(recipe))
-            bake.read_recipe(path)
-            for changes in (
-                {"ipsw": {**recipe["ipsw"], "sha256": "latest"}},
-                {"diskGiB": -1},
-                {"cpuCount": True},
-                {"sdkVersion": "latest"},
-            ):
-                with self.subTest(changes=changes):
-                    path.write_text(json.dumps({**recipe, **changes}))
-                    with self.assertRaises(ValueError):
-                        bake.read_recipe(path)
+        bake.parse_recipe(recipe)
+        for changes in (
+            {"ipsw": {**recipe["ipsw"], "sha256": "latest"}},
+            {"diskGiB": -1},
+            {"cpuCount": True},
+            {"sdkVersion": "latest"},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                bake.parse_recipe({**recipe, **changes})
 
     def test_dhcp_matches_the_vm_with_unpadded_mac_and_ignores_other_leases(self):
         leases = """{
