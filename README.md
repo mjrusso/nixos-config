@@ -1315,7 +1315,16 @@ within the guest home are recorded in `image.json` under
 different commits. Voom preserves `image.json` as `bundle.json` on import.
 
 The final boot checks SSH key access, macOS version, Nix, system activation,
-passwordless sudo, Fish, and Ghostty terminal support.
+passwordless sudo, Fish, and Ghostty terminal support. Temporary shares check
+host-to-guest reads, guest-to-host writes, and a read-only guest mount. The
+builder also requires a fresh SSH listener report from the guest service
+before advertising `controlShare`, `guestShareMount`, and `guestPortReport`
+in `image.json`.
+
+The guest service runs as root under launchd with the label
+`org.voom.guest-services`. It mounts `voom-control` at `/var/run/voom`, mounts
+user shares, and reports TCP listeners every two seconds. Its guest log is
+`/var/log/voom-guest-services.log`.
 
 Linux image baking does not boot the image. Run `home-bootstrap` manually
 after a Linux VM's first start. macOS VMs created from a bootstrapped image
@@ -1389,7 +1398,8 @@ expected to be bit-for-bit reproducible. See `--help` for other options.
 ##### Test the image with Voom
 
 macOS bundles require Voom's `macos-guests` branch; this repository's Voom pin
-has not been updated yet.
+has not been updated yet. Bake and import a new image to use its guest
+services. Updating Voom alone does not add those services to an existing image.
 To import a bundle and create a VM with that Voom version:
 
 ``` bash
@@ -1398,6 +1408,12 @@ voom image import macos "$HOME/vms/golden-aarch64-darwin" \
 voom create macos-dev --image macos
 voom start macos-dev
 ```
+
+Configure shares while the VM is stopped, using a writable guest path such as
+`/Volumes/project`. macOS's sealed root prevents creating arbitrary `/mnt`
+directories. Enable automatic forwarding with `voom forward auto enable NAME`.
+It forwards wildcard TCP listeners and excludes SSH and guest-loopback-only
+listeners.
 
 The bake uses vfkit's native NAT. Voom's gvproxy networking requires
 separate validation. Configuration checks and unit tests can run on Linux;

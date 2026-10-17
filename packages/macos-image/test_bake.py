@@ -28,6 +28,40 @@ RECIPE = {
 
 
 class BakeTests(unittest.TestCase):
+    def test_guest_service_probe_checks_roundtrip_and_removes_its_mounts(self):
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shares = bake.prepare_guest_service_check(root)
+            args = bake.vfkit_arguments(root, {"cpuCount": 4, "memoryMiB": 8192, "macAddress": "02:00:00:00:00:01"}, shares)
+            self.assertTrue(any("mountTag=voom-control" in argument for argument in args))
+            (root / "voom-share-check" / "from-guest").write_text("guest-write\n")
+            report = {"schemaVersion": 1, "generatedAt": datetime.now(timezone.utc).isoformat(), "listeners": [{"proto": "tcp", "port": 22}]}
+            (root / "voom-control" / "ports.json").write_text(json.dumps(report))
+            guest = Mock()
+            bake.verify_guest_services(guest, root)
+            self.assertEqual(json.loads((root / "voom-control" / "mounts.json").read_text()), [])
+            self.assertIn("umount", guest.ssh.call_args.args[0])
+
+    def test_guest_service_probe_rejects_failed_readonly_enforcement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bake.prepare_guest_service_check(root)
+            (root / "voom-share-check" / "from-guest").write_text("guest-write\n")
+            (root / "voom-share-check" / "forbidden-write").touch()
+            with self.assertRaisesRegex(ValueError, "share validation"):
+                bake.verify_guest_services(Mock(), root)
+
+    def test_guest_capabilities_require_the_installed_service_contract(self):
+        guest = Mock()
+        capabilities = {"controlShare": True, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
+        guest.ssh.return_value = subprocess.CompletedProcess([], 0, json.dumps({"schemaVersion": 1, "capabilities": capabilities}))
+        self.assertEqual(bake.guest_capabilities(guest), capabilities)
+        for services in ({}, {"schemaVersion": 2, "capabilities": capabilities}, {"schemaVersion": 1, "capabilities": {"controlShare": True}}):
+            guest.ssh.return_value.stdout = json.dumps(services)
+            with self.subTest(services=services), self.assertRaises(ValueError):
+                bake.guest_capabilities(guest)
+
     def test_bootstrap_records_git_revisions_from_guest(self):
         guest = Mock()
         guest.ssh.side_effect = [
