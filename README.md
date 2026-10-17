@@ -1299,16 +1299,26 @@ rejected. Git flakes include tracked files, so add new files to Git before
 baking. Downloads are cached under `~/Library/Caches/bake-macos` and checked
 against their hashes on every use.
 
-##### Boot validation
+##### Bootstrap and validation
 
 After applying the configuration, the builder shuts down the guest and boots
-it with standalone vfkit using NAT networking.
+it with standalone vfkit using NAT networking. It runs `home-bootstrap` as
+the guest user to clone `.emacs.d` and Wingman and warm Emacs when available.
+The output is saved as `bootstrap.log`. A bootstrap failure fails the bake;
+`--provision-timeout` controls its timeout. Bootstrap does not sign in to
+GitHub or install credentials.
+
+Bootstrap clones the repositories' current HEADs. Their commit IDs and paths
+within the guest home are recorded in `image.json` under
+`bootstrap.repositories`. These IDs describe the image; later bakes may clone
+different commits. Voom preserves `image.json` as `bundle.json` on import.
 
 The final boot checks SSH key access, macOS version, Nix, system activation,
 passwordless sudo, Fish, and Ghostty terminal support.
 
-Run `home-bootstrap` manually after creating a VM. The bake does not clone
-`.emacs.d` or Wingman or warm Emacs.
+Linux image baking does not boot the image. Run `home-bootstrap` manually
+after a Linux VM's first start. macOS VMs created from a bootstrapped image
+already contain the clones; rerunning `home-bootstrap` skips existing clones.
 
 ##### Output and replacement
 
@@ -1317,7 +1327,7 @@ defaulting to `~/vms`. Use `--output` to choose another directory.
 
 The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
 `AuxiliaryStorage`, `image.json`, `restore.json`, `toolchain.json`, and boot
-logs. Keep the disk and platform files together.
+and bootstrap logs. Keep the disk and platform files together.
 `restore.json` records Apple's minimum CPU count and minimum memory size
 (in bytes). Voom uses these limits when creating VMs; older bundles use their
 baked allocation as the minimum.
@@ -1386,7 +1396,7 @@ voom create my-vm --image golden
 
 For a Linux guest on a host using Agent Vault, complete
 [Attach a New VM](#attach-a-new-vm) before starting the VM. A first attachment
-requires a stopped VM. Otherwise, start the VM immediately. Guests need
+requires a stopped VM. Otherwise, start the VM immediately. Linux guests need
 the [`home-bootstrap`](./scripts/home-bootstrap) script after their first start:
 
 ``` bash
@@ -1394,6 +1404,9 @@ voom start my-vm
 
 voom ssh my-vm -- home-bootstrap
 ```
+
+macOS images baked with `bake-macos` already include the bootstrap results;
+start the VM without the additional `home-bootstrap` command.
 
 _(In this example, the image is named `golden`, and the VM is named `my-vm`;
 both names are arbitrary)._
@@ -2508,7 +2521,8 @@ home-bootstrap
 
 The [`home-bootstrap`](./scripts/home-bootstrap) script performs a limited
 number of imperative steps, mostly for operations that are awkward to implement
-with _home-manager_.
+with _home-manager_. `bake-macos` runs it inside the guest before publishing the
+image; Linux baking leaves it as a manual step after the VM's first start.
 
 #### SSH Key Passphrase
 

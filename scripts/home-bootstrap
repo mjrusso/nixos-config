@@ -7,27 +7,17 @@ set -euo pipefail
 log() { echo "[home-bootstrap] $*"; }
 
 log_manual_secret_setup() {
-  if [ -r /run/voom/metadata.json ]; then
+  if [ -r /run/voom/metadata.json ] || [ -e /etc/mjr-vm-guest ]; then
     cat <<'EOF'
 [home-bootstrap] Guest credential setup:
 [home-bootstrap]
-[home-bootstrap]   This is a Voom guest. Do **not** run `gh auth login`, do **not** copy
-[home-bootstrap]   a GitHub token into the guest, and do **not** forward the host's ssh-agent.
+[home-bootstrap]   This script does not configure guest credentials. Do not copy GitHub
+[home-bootstrap]   tokens into the guest or forward the host's ssh-agent.
 [home-bootstrap]
-[home-bootstrap]   GitHub access should come from Agent Vault on the host. If this VM is not
-[home-bootstrap]   attached, stop it and follow the "Attach a New VM" procedure in the
-[home-bootstrap]   nixos-config README.
+[home-bootstrap]   Linux guests: use Agent Vault on the host. Stop the VM and follow
+[home-bootstrap]   "Attach a New VM" in the nixos-config README.
 [home-bootstrap]
-[home-bootstrap]   Previously, the recommendation was to mint a fine-grained PAT restricted
-[home-bootstrap]   to the exact repos and permissions the agent needs, with a short expiry,
-[home-bootstrap]   piping it in from 1Password on the host (adjusting the op:// reference
-[home-bootstrap]   to match the vault and item names):
-[home-bootstrap]
-[home-bootstrap]       op read "op://Private/github-vm-pat-xxx/credential" \
-[home-bootstrap]         | voom ssh <name> 'gh auth login --with-token'
-[home-bootstrap]
-[home-bootstrap]    However, the current guidance is to **not** put the secret into the guest
-[home-bootstrap]    at all, and to instead allow Agent Vault to inject it at request time.
+[home-bootstrap]   macOS guests: this configuration does not support Agent Vault attachment.
 
 EOF
     return

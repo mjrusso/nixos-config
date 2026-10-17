@@ -245,6 +245,29 @@ class Guest:
             raise RuntimeError(f"VM shutdown failed (status {process.returncode})")
 
 
+def bootstrap_home(guest, timeout, log):
+    guest.ssh(
+        "/run/current-system/sw/bin/fish --login --command home-bootstrap",
+        timeout=timeout,
+        stdout=log,
+        stderr=log,
+    )
+    repositories = {}
+    for name, directory in (("emacs", ".emacs.d"), ("wingman", "git/github.com/mjrusso/wingman")):
+        command = f'git -C "$HOME/{directory}" rev-parse --verify HEAD'
+        result = guest.ssh(
+            shlex.join(["/run/current-system/sw/bin/fish", "--login", "--command", command]),
+            stdout=subprocess.PIPE,
+            stderr=log,
+            timeout=60,
+        )
+        revision = result.stdout.strip()
+        if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", revision):
+            raise ValueError(f"Invalid bootstrap Git revision for {name}: {revision!r}")
+        repositories[name] = {"directory": directory, "revision": revision}
+    return {"repositories": repositories}
+
+
 def stop_process(process):
     if process is not None and process.poll() is None:
         process.terminate()
@@ -551,6 +574,10 @@ def bake(args, metadata, recipe):
             with (temporary / "vfkit.log").open("w") as log:
                 process = subprocess.Popen(vfkit_arguments(bundle, image), stdout=log, stderr=log)
                 guest.wait(process, image["macAddress"])
+                print("Running home-bootstrap in the configured guest...", flush=True)
+                with (temporary / "bootstrap.log").open("w") as bootstrap_log:
+                    image["bootstrap"] = bootstrap_home(guest, args.provision_timeout, bootstrap_log)
+                (bundle / "image.json").write_text(json.dumps(image, indent=2) + "\n")
                 guest.ssh("""set -eu
 test "$(sw_vers -productVersion | cut -d. -f1)" -ge 27
 test -e /etc/mjr-vm-guest
@@ -567,11 +594,11 @@ chmod -R u+w ~/macos-image-build/source
 rm -rf ~/macos-image-build
 """)
                 guest.shutdown(process)
-            for name in ("provision.log", "vfkit.log"):
+            for name in ("provision.log", "vfkit.log", "bootstrap.log"):
                 shutil.copyfile(temporary / name, bundle / name)
             publish_bundle(bundle, destination)
         except BaseException:
-            for name in ("provision.log", "vfkit.log"):
+            for name in ("provision.log", "vfkit.log", "bootstrap.log"):
                 path = temporary / name
                 if path.exists():
                     print(
