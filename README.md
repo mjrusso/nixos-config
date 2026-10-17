@@ -1378,10 +1378,68 @@ snapshot. Guest rendering and font discovery still need validation on the Mac.
 
 The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
 `AuxiliaryStorage`, `image.json`, `restore.json`, toolchain metadata, and boot
-logs. Keep the disk and platform files together. The `macos-guests` branch of
+logs. `restore.json` also records Apple's `minimumCPUCount` and
+`minimumMemorySize` in bytes, separately from the recipe's CPU/memory defaults.
+Voom uses these values to permit smaller supported VMs, rounding the memory
+minimum up to MiB. Older bundles retain their baked allocation as the minimum.
+Keep the disk and platform files together. The `macos-guests` branch of
 Voom supports these bundles; the pinned Voom dependency has not yet been updated.
 The bake's boot check uses vfkit's native NAT. Voom's gvproxy networking is
-validated separately. Shares and automatic port reporting are not enabled.
+validated separately.
+
+The Darwin VM configuration includes `org.voom.guest-services`, a root launchd
+service that mounts `voom-control` at `/var/run/voom`, mounts declared user
+shares, and publishes TCP listeners every two seconds. Logs are in
+`/var/log/voom-guest-services.log` inside the guest. During the standalone bake
+check, temporary shares verify host-to-guest reads, guest-to-host writes, a
+read-only guest mount, and a fresh SSH listener report. Only after these checks
+pass does `image.json` advertise `controlShare`, `guestShareMount`, and
+`guestPortReport`. This remains a native-NAT check; Voom forwarding needs its
+own Mac acceptance.
+
+Using these features requires the corresponding Voom changes on `macos-guests`
+and a newly baked and imported image. Existing images do not gain capabilities
+from a Voom upgrade. Configure shares while the VM is stopped, using a writable
+guest path such as `/Volumes/project`; macOS's sealed root cannot create
+arbitrary `/mnt` directories. Enable automatic forwarding with
+`voom forward auto enable NAME`. It forwards wildcard TCP listeners and excludes
+SSH and guest-loopback-only listeners, matching Linux behavior. Read-only host
+exports require Voom's patched vfkit; the baker's guest mount check does not
+establish that host enforcement.
+
+To test the exported image through Voom, use the optional acceptance command
+from this checkout:
+
+``` bash
+nix build path:../voom#voom --out-link /tmp/voom-under-test
+nix run path:.#verify-macos-voom -- \
+  --voom /tmp/voom-under-test/bin/voom \
+  --bundle "$HOME/vms/golden-aarch64-darwin" \
+  --identity "$HOME/.ssh/id_ed25519"
+```
+
+`--voom` selects the package to test; it must include vfkit, gvproxy, and the
+identity helper beside its executable. The command clears `VOOM_*` overrides,
+sets private state/config/cache/runtime directories, and verifies the resolved
+helpers through `voom debug helpers`. It records the Voom/vfkit versions,
+helper capabilities and SHA-256 hashes, command output, and guest evidence.
+It does not use the standalone baker's vfkit or modify dependency pins.
+
+Acceptance imports a disposable image, creates a VM, verifies SSH/Nix,
+writable/read-only shares, and automatic TCP forwarding and removal, then
+checks persistence and repeats share/forwarding checks after restart. It
+removes its registered VM and image on success or failure, retaining logs and
+`evidence/result.json` under the printed `/tmp/voom-accept-*` directory. If
+stopping or cleanup fails, it retains state for recovery and exits nonzero.
+The original bundle must be stopped and remains unchanged. Allow disk space for
+both the imported image and VM copy, and run from a graphical login session.
+The SSH identity must work without prompting, directly or through ssh-agent.
+
+Use `--work-dir /tmp/voom-check-01` to select a new evidence directory and
+`--timeout SECONDS` to change the per-stage timeout (default 600). This command
+is separate from `bake-macos`, so a Voom acceptance failure does not replace or
+discard an already baked image. Interactive GUI and wider network acceptance
+remain separate checks.
 
 #### Running VM Images
 

@@ -124,7 +124,8 @@
           }
           ''
             python3 -m unittest discover -s ${./packages/macos-image} -p 'test_*.py'
-            shellcheck ${./packages/macos-image/provision.sh} ${./scripts/bake-macos} ${./scripts/home-bootstrap}
+            python3 -m unittest discover -s ${./packages/voom-macos-guest} -p 'test_*.py'
+            shellcheck ${./scripts/verify-macos-voom} ${./packages/macos-image/provision.sh} ${./scripts/bake-macos} ${./scripts/home-bootstrap}
             touch $out
           '';
       mkVoomUpdateCheck =
@@ -168,6 +169,10 @@
             vfkit
           ]
         );
+        "verify-macos-voom" = mkRepoScriptApp "verify-macos-voom" system [
+          nixpkgs.legacyPackages.${system}.python3
+          nixpkgs.legacyPackages.${system}.openssh
+        ];
         "voom-update" = mkRepoScriptApp "voom-update" system [
           inputs.voom.packages.${system}.default
           nixpkgs.legacyPackages.${system}.openssh
