@@ -124,7 +124,7 @@
           }
           ''
             python3 -m unittest discover -s ${./packages/macos-image} -p 'test_*.py'
-            shellcheck ${./packages/macos-image/provision.sh} ${./scripts/bake-macos}
+            shellcheck ${./packages/macos-image/provision.sh} ${./scripts/bake-macos} ${./scripts/home-bootstrap}
             touch $out
           '';
       mkVoomUpdateCheck =

@@ -7,7 +7,7 @@ set -euo pipefail
 log() { echo "[home-bootstrap] $*"; }
 
 log_manual_secret_setup() {
-  if [ -r /run/voom/metadata.json ]; then
+  if [ -r /run/voom/metadata.json ] || [ -e /etc/mjr-vm-guest ]; then
     cat <<'EOF'
 [home-bootstrap] Guest credential setup:
 [home-bootstrap]

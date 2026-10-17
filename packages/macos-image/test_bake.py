@@ -5,12 +5,13 @@ import hashlib
 import io
 import itertools
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import bake
 
@@ -27,6 +28,27 @@ RECIPE = {
 
 
 class BakeTests(unittest.TestCase):
+    def test_bootstrap_records_git_revisions_from_guest(self):
+        guest = Mock()
+        guest.ssh.side_effect = [
+            None,
+            subprocess.CompletedProcess([], 0, stdout="a" * 40 + "\n"),
+            subprocess.CompletedProcess([], 0, stdout="b" * 64 + "\n"),
+        ]
+        result = bake.bootstrap_home(guest, 7200, io.StringIO())
+        self.assertEqual(result, {
+            "repositories": {
+                "emacs": {"directory": ".emacs.d", "revision": "a" * 40},
+                "wingman": {"directory": "git/github.com/mjrusso/wingman", "revision": "b" * 64},
+            }
+        })
+
+    def test_bootstrap_rejects_missing_git_revision(self):
+        guest = Mock()
+        guest.ssh.side_effect = [None, subprocess.CompletedProcess([], 0, stdout="")]
+        with self.assertRaisesRegex(ValueError, "bootstrap Git revision"):
+            bake.bootstrap_home(guest, 7200, io.StringIO())
+
     def bundle(self, path, contents):
         path.mkdir()
         for name in ("disk.raw", "AuxiliaryStorage", "HardwareModel", "MachineIdentifier", "restore.json", "toolchain.json"):

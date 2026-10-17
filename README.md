@@ -1314,16 +1314,33 @@ flake, and timeout options. Configuration checking and the unit tests can
 run on Linux, but installation and boot validation require macOS hardware.
 
 The Darwin VM configuration sets Fish as the login shell and installs Ghostty's
-terminal definitions without installing the Ghostty GUI app. As with Linux VMs,
-`home-bootstrap` remains a manual step after creating a VM; the bake does not
-clone `.emacs.d` or run its other bootstrap tasks.
+terminal definitions without installing the Ghostty GUI app. During the
+standalone vfkit boot, the macOS bake runs `home-bootstrap` as the guest user
+before final validation and shutdown. This clones `.emacs.d` and Wingman and
+warms Emacs when available. Its output is saved as `bootstrap.log`; a bootstrap
+failure fails the bake and leaves the previous golden bundle intact. The
+bootstrap uses the provision timeout (`--provision-timeout`). It does not log
+into GitHub or install credentials.
+
+The bootstrap clones current repository HEADs, independently of the Nix flake
+lock. Their Git commit IDs and guest-relative directories are recorded under
+`bootstrap.repositories` in the bundle's `image.json`. Voom preserves that
+manifest as `bundle.json` when importing the image. These IDs identify what was
+baked; they do not pin subsequent bakes to those commits.
+
+Linux baking still builds and copies an image without booting it, so Linux VMs
+require a manual `home-bootstrap` after their first start. Automating Linux
+bootstrap requires a separate boot, bootstrap, and shutdown stage outside the
+sandboxed Nix image build. It is not implemented yet. macOS VMs created from a
+newly bootstrapped image already contain the bootstrap results; rerunning
+`home-bootstrap` is optional and skips existing clones.
 
 The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
 `AuxiliaryStorage`, `image.json`, `restore.json`, toolchain metadata, and boot
-logs. Keep the disk and platform files together. This is the proposed macOS
-image format for Voom; Voom does not yet import or run it. The boot check uses
-vfkit's native NAT, so Voom's gvproxy networking still needs separate
-validation. Shares and automatic port reporting are not enabled.
+logs. Keep the disk and platform files together. The `macos-guests` branch of
+Voom supports these bundles; the pinned Voom dependency has not yet been updated.
+The bake's boot check uses vfkit's native NAT. Voom's gvproxy networking is
+validated separately. Shares and automatic port reporting are not enabled.
 
 #### Running VM Images
 
@@ -1356,16 +1373,19 @@ voom image import golden ~/vms/golden-x86_64-linux.qcow2 --meta ~/vms/golden-x86
 voom create my-vm --image golden
 ```
 
-If the host uses Agent Vault, complete [Attach a New VM](#attach-a-new-vm)
-before you start the VM. A first attachment requires a stopped VM. Otherwise,
-start the VM immediately. After the first start, run the
-[`home-bootstrap`](./scripts/home-bootstrap) script:
+For a Linux guest on a host using Agent Vault, complete
+[Attach a New VM](#attach-a-new-vm) before starting the VM. A first attachment
+requires a stopped VM. Otherwise, start the VM immediately. Linux guests need
+the [`home-bootstrap`](./scripts/home-bootstrap) script after their first start:
 
 ``` bash
 voom start my-vm
 
 voom ssh my-vm -- home-bootstrap
 ```
+
+macOS images baked with `bake-macos` already include the bootstrap results;
+start the VM without the additional `home-bootstrap` command.
 
 _(In this example, the image is named `golden`, and the VM is named `my-vm`;
 both names are arbitrary)._
@@ -2480,7 +2500,8 @@ home-bootstrap
 
 The [`home-bootstrap`](./scripts/home-bootstrap) script performs a limited
 number of imperative steps, mostly for operations that are awkward to implement
-with _home-manager_.
+with _home-manager_. `bake-macos` runs it inside the guest before publishing the
+image; Linux baking leaves it as a manual step after the VM's first start.
 
 #### SSH Key Passphrase
 
