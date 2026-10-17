@@ -1264,6 +1264,7 @@ macosImage = {
   cpuCount = 4;
   memoryMiB = 8192;
   diskGiB = 100;
+  fontFamilies = [ ];
 };
 ```
 
@@ -1319,6 +1320,46 @@ passwordless sudo, Fish, and Ghostty terminal support.
 Linux image baking does not boot the image. Run `home-bootstrap` manually
 after a Linux VM's first start. macOS VMs created from a bootstrapped image
 already contain the clones; rerunning `home-bootstrap` skips existing clones.
+
+##### Copy host fonts
+
+Font copying is disabled by default. To copy installed fonts into the guest,
+select their family names in the flake:
+
+``` nix
+fontFamilies = [ "Berkeley Mono" ];
+```
+
+Or select them on the command line:
+
+``` bash
+nix run .#bake-macos -- --font-family "Berkeley Mono" --font-family "Another Family"
+nix run .#bake-macos -- --no-host-fonts
+```
+
+Repeated `--font-family` flags replace the flake's list. `--no-host-fonts`
+disables copying. The builder searches `~/Library/Fonts` and `/Library/Fonts`,
+matches embedded family names case-insensitively, and copies all matching
+styles. Missing families are reported without failing the bake.
+
+To list installed fonts and available license metadata without starting a
+VM or evaluating a configuration flake:
+
+``` bash
+nix run .#bake-macos -- --list-host-fonts \
+  | jq '.[] | {families, path, licenseUrls}'
+```
+
+Selection uses family names, not license metadata. Supported files are
+`.otf`, `.ttf`, `.otc`, and `.ttc`; a selected collection is copied whole,
+including its other faces. `/System/Library/Fonts` and app-private directories
+are not searched.
+
+Fonts are staged outside the Nix store and copied to the guest user's
+`~/Library/Fonts` before Emacs warm-up. Each transfer is checked against its
+SHA-256. Filenames, families, hashes, and available license metadata are
+recorded under `hostFonts` in `image.json`. Fonts are transferred separately
+from the configuration snapshot; the builder does not add them to Git.
 
 ##### Output and replacement
 
@@ -2551,7 +2592,9 @@ logins share the same agent. (To instead cache it until reboot, set
 #### Fonts
 
 I use [Berkeley Mono](https://berkeleygraphics.com/typefaces/berkeley-mono/),
-which must be manually installed.
+which must be manually installed on normal hosts and Linux guests. `bake-macos`
+can copy it and other installed host fonts when selected through
+`macosImage.fontFamilies` or `--font-family`.
 
 #### Emacs
 
