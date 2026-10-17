@@ -90,9 +90,11 @@ final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
             try disk.close()
             let version = restore.operatingSystemVersion
             let versionString = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
-            let metadata: [String: String] = [
+            let metadata: [String: Any] = [
                 "version": versionString,
                 "build": restore.buildVersion,
+                "minimumCPUCount": requirements.minimumSupportedCPUCount,
+                "minimumMemorySize": requirements.minimumSupportedMemorySize,
             ]
             try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys])
                 .write(to: bundle.appendingPathComponent("restore.json"))
