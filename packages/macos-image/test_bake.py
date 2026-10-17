@@ -1,8 +1,11 @@
+import ctypes
+import errno
 import fcntl
 import hashlib
 import io
 import itertools
 import json
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -24,6 +27,79 @@ RECIPE = {
 
 
 class BakeTests(unittest.TestCase):
+    def bundle(self, path, contents):
+        path.mkdir()
+        for name in ("disk.raw", "AuxiliaryStorage", "HardwareModel", "MachineIdentifier", "restore.json", "toolchain.json"):
+            (path / name).write_text(contents)
+        (path / "image.json").write_text(json.dumps({"system": "aarch64-darwin", "format": "macos-bundle"}))
+        return path
+
+    def test_publish_new_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = self.bundle(root / "staged", "new")
+            destination = root / "golden"
+            bake.publish_bundle(staged, destination)
+            self.assertFalse(staged.exists())
+            self.assertEqual((destination / "disk.raw").read_text(), "new")
+
+    def test_publish_refuses_unrelated_outputs_and_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = self.bundle(root / "staged", "new")
+            unrelated = root / "unrelated"
+            unrelated.mkdir()
+            (unrelated / "keep").write_text("keep")
+            alias = root / "alias"
+            alias.symlink_to(unrelated)
+            file = root / "file"
+            file.write_text("keep")
+            for destination in (unrelated, alias, file):
+                with self.subTest(destination=destination), self.assertRaises((ValueError, OSError)):
+                    bake.publish_bundle(staged, destination)
+                self.assertEqual((staged / "disk.raw").read_text(), "new")
+            self.assertEqual((unrelated / "keep").read_text(), "keep")
+            self.assertEqual(file.read_text(), "keep")
+
+    def test_publish_preserves_existing_bundle_when_storage_is_busy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = self.bundle(root / "staged", "new")
+            destination = self.bundle(root / "golden", "old")
+            for name in ("disk.raw", "AuxiliaryStorage"):
+                with self.subTest(name=name), (destination / name).open("r+b") as holder:
+                    fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    with self.assertRaises(BlockingIOError):
+                        bake.publish_bundle(staged, destination)
+                    self.assertEqual((destination / "disk.raw").read_text(), "old")
+                    self.assertEqual((staged / "disk.raw").read_text(), "new")
+
+    def test_failed_native_swap_preserves_both_bundles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = self.bundle(root / "staged", "new")
+            destination = self.bundle(root / "golden", "old")
+            with patch("bake.ctypes.CDLL") as library:
+                library.return_value.renamex_np.return_value = -1
+                ctypes.set_errno(errno.ENOTSUP)
+                with self.assertRaises(OSError):
+                    bake.publish_bundle(staged, destination)
+            self.assertEqual((destination / "disk.raw").read_text(), "old")
+            self.assertEqual((staged / "disk.raw").read_text(), "new")
+            with bake.locked_storage(destination):
+                pass
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS renamex_np")
+    def test_native_swap_publishes_complete_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = self.bundle(root / "staged", "new")
+            destination = self.bundle(root / "golden", "old")
+            bake.publish_bundle(staged, destination)
+            for name in ("disk.raw", "AuxiliaryStorage", "MachineIdentifier", "HardwareModel"):
+                self.assertEqual((destination / name).read_text(), "new")
+                self.assertEqual((staged / name).read_text(), "old")
+
     def test_storage_handoff_waits_for_each_file_and_releases_its_own_locks(self):
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory)

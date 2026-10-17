@@ -1304,8 +1304,12 @@ starting the next VM process. It checks SSH key access, macOS version,
 Nix, the activated system, passwordless sudo, Fish as the login shell, and
 Ghostty terminal support before shutting it down and
 saving `~/vms/golden-aarch64-darwin` (or `$VMS_DIR/golden-aarch64-darwin`).
-Use `--output` to choose another directory; existing outputs are never
-overwritten. Failed builds leave no final bundle. `--help` lists the cache,
+Use `--output` to choose another directory. A successful re-bake atomically
+replaces an existing bundle after validation, while holding storage locks on the
+old bundle. Keep the old bundle shut down during replacement. Failed builds
+leave the existing bundle intact. Replacement requires a filesystem supporting
+macOS directory swaps, such as APFS; if the swap fails, the old bundle remains.
+Unrelated directories and symlink outputs are rejected. `--help` lists the cache,
 flake, and timeout options. Configuration checking and the unit tests can
 run on Linux, but installation and boot validation require macOS hardware.
 

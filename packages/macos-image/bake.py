@@ -1,4 +1,5 @@
 import argparse
+import ctypes
 import fcntl
 import hashlib
 import ipaddress
@@ -16,7 +17,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 RESOURCES = Path(__file__).resolve().parent
@@ -254,18 +255,64 @@ def stop_process(process):
             process.wait()
 
 
+@contextmanager
+def locked_storage(bundle):
+    with ExitStack() as locks:
+        for name in ("AuxiliaryStorage", "disk.raw"):
+            path = bundle / name
+            if path.is_symlink() or not path.is_file():
+                raise ValueError(f"Expected a regular storage file: {path}")
+            stream = locks.enter_context(path.open("r+b"))
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise BlockingIOError(error.errno, "VM storage is in use", str(path)) from error
+        yield
+
+
+def check_output(destination):
+    if destination.is_symlink():
+        raise ValueError(f"Output must not be a symlink: {destination}")
+    if not destination.exists():
+        return
+    if not destination.is_dir():
+        raise ValueError(f"Output must be a bundle directory: {destination}")
+    manifest = destination / "image.json"
+    image = json.loads(manifest.read_text())
+    if not isinstance(image, dict) or image.get("system") != "aarch64-darwin" or image.get("format") != "macos-bundle":
+        raise ValueError(f"Refusing to replace a directory without a macOS bundle manifest: {destination}")
+    for name in ("disk.raw", "AuxiliaryStorage", "MachineIdentifier", "HardwareModel", "restore.json", "toolchain.json", "image.json"):
+        path = destination / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"Expected a regular bundle file: {path}")
+
+
+def publish_bundle(bundle, destination):
+    check_output(destination)
+    if not destination.exists():
+        bundle.rename(destination)
+        return
+    with locked_storage(destination):
+        rename_swap = 0x00000002  # Darwin RENAME_SWAP exchanges complete directories atomically.
+        rename = ctypes.CDLL(None, use_errno=True).renamex_np
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        rename.restype = ctypes.c_int
+        if rename(os.fsencode(bundle), os.fsencode(destination), rename_swap) != 0:
+            code = ctypes.get_errno()
+            raise OSError(code, os.strerror(code), str(destination))
+    # The old bundle now occupies the staging path and is removed with the build directory.
+
+
 def wait_for_storage(bundle, timeout=120):
     next_report = time.monotonic()
     deadline = next_report + timeout
     while True:
         try:
-            with ExitStack() as locks:
-                for name in ("AuxiliaryStorage", "disk.raw"):
-                    path = bundle / name
-                    stream = locks.enter_context(path.open("r+b"))
-                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with locked_storage(bundle):
+                pass
             return
-        except BlockingIOError:
+        except BlockingIOError as error:
+            path = Path(error.filename)
             now = time.monotonic()
             if now >= deadline:
                 raise TimeoutError(f"Timed out waiting for VM storage lock: {path.name}") from None
@@ -344,9 +391,11 @@ def bake(args, metadata, recipe):
     )
     if not isinstance(user, str) or not re.fullmatch(r"[a-z_][a-z0-9_-]*", user):
         raise ValueError("The target must set system.primaryUser to a macOS account name")
-    destination = args.output.expanduser().resolve()
-    if destination.exists():
-        raise ValueError(f"Output already exists: {destination}; choose a new --output")
+    output = args.output.expanduser()
+    if output.is_symlink():
+        raise ValueError(f"Output must not be a symlink: {output}")
+    destination = output.resolve()
+    check_output(destination)
     if "," in str(destination):
         raise ValueError("The output path cannot contain a comma (vfkit option delimiter)")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -520,7 +569,7 @@ rm -rf ~/macos-image-build
                 guest.shutdown(process)
             for name in ("provision.log", "vfkit.log"):
                 shutil.copyfile(temporary / name, bundle / name)
-            bundle.rename(destination)
+            publish_bundle(bundle, destination)
         except BaseException:
             for name in ("provision.log", "vfkit.log"):
                 path = temporary / name

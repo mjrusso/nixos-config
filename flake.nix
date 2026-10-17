@@ -110,6 +110,23 @@
           '')
         }/bin/${scriptName}";
       };
+      mkMacosImageCheck =
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        pkgs.runCommand "check-macos-image"
+          {
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.shellcheck
+            ];
+          }
+          ''
+            python3 -m unittest discover -s ${./packages/macos-image} -p 'test_*.py'
+            shellcheck ${./packages/macos-image/provision.sh} ${./scripts/bake-macos}
+            touch $out
+          '';
       mkLinuxApps = system: {
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
@@ -159,22 +176,7 @@
       );
 
       checks.x86_64-linux = {
-        macos-image =
-          let
-            pkgs = nixpkgs.legacyPackages.x86_64-linux;
-          in
-          pkgs.runCommand "check-macos-image"
-            {
-              nativeBuildInputs = [
-                pkgs.python3
-                pkgs.shellcheck
-              ];
-            }
-            ''
-              python3 -m unittest discover -s ${./packages/macos-image} -p 'test_*.py'
-              shellcheck ${./packages/macos-image/provision.sh} ${./scripts/bake-macos}
-              touch $out
-            '';
+        macos-image = mkMacosImageCheck "x86_64-linux";
         voom-agent-vault = import ./tests/voom-agent-vault.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
           voomPackage = inputs.voom.packages.x86_64-linux.default;
@@ -184,6 +186,8 @@
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
         };
       };
+
+      checks.aarch64-darwin.macos-image = mkMacosImageCheck "aarch64-darwin";
 
       # Starting points for new projects.
 
