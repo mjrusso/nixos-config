@@ -465,7 +465,7 @@ def bake(args, metadata, recipe):
                 setup = (
                     "mkdir -p /etc/sudoers.d; printf %s "
                     + shlex.quote(sudoers)
-                    + " > /etc/sudoers.d/voom-image-bootstrap; chmod 440 /etc/sudoers.d/voom-image-bootstrap"
+                    + " > /etc/sudoers.d/macos-image-bootstrap; chmod 440 /etc/sudoers.d/macos-image-bootstrap"
                 )
                 guest.ssh(
                     "sudo -S -p '' /bin/sh -c " + shlex.quote(setup),
@@ -476,18 +476,18 @@ def bake(args, metadata, recipe):
                     "Installing Nix and applying the locked guest configuration...",
                     flush=True,
                 )
-                guest.ssh("umask 077; mkdir -p ~/voom-image-build")
+                guest.ssh("umask 077; mkdir -p ~/macos-image-build")
                 source_tar = temporary / "source.tar"
                 with tarfile.open(source_tar, "w") as archive:
                     archive.add(snapshot, arcname="source")
-                guest.copy(source_tar, "voom-image-build/source.tar")
-                guest.copy(nix_archive, "voom-image-build/nix.tar.xz")
-                guest.copy(RESOURCES / "provision.sh", "voom-image-build/provision.sh")
+                guest.copy(source_tar, "macos-image-build/source.tar")
+                guest.copy(nix_archive, "macos-image-build/nix.tar.xz")
+                guest.copy(RESOURCES / "provision.sh", "macos-image-build/provision.sh")
                 guest.ssh(
                     shlex.join(
                         [
                             "/bin/sh",
-                            "voom-image-build/provision.sh",
+                            "macos-image-build/provision.sh",
                             "./source#" + recipe["target"],
                             "./source#darwinConfigurations."
                             + json.dumps(recipe["target"])
@@ -508,7 +508,8 @@ test -e /etc/mjr-vm-guest
 test -L /run/current-system
 /nix/var/nix/profiles/default/bin/nix --version
 sudo -n true
-rm -rf ~/voom-image-build
+chmod -R u+w ~/macos-image-build/source
+rm -rf ~/macos-image-build
 """)
                 guest.shutdown(process)
             for name in ("provision.log", "vfkit.log"):
