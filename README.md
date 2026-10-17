@@ -1384,6 +1384,9 @@ Voom uses these values to permit smaller supported VMs, rounding the memory
 minimum up to MiB. Older bundles retain their baked allocation as the minimum.
 Keep the disk and platform files together. The `macos-guests` branch of
 Voom supports these bundles; the pinned Voom dependency has not yet been updated.
+Voom packages its own patched vfkit, gvproxy, and Apple identity helper.
+The baker uses its separate vfkit dependency for standalone validation; changing
+that dependency does not change the vfkit bundled with Voom.
 The bake's boot check uses vfkit's native NAT. Voom's gvproxy networking is
 validated separately.
 
@@ -1439,7 +1442,8 @@ Use `--work-dir /tmp/voom-check-01` to select a new evidence directory and
 `--timeout SECONDS` to change the per-stage timeout (default 600). This command
 is separate from `bake-macos`, so a Voom acceptance failure does not replace or
 discard an already baked image. Interactive GUI and wider network acceptance
-remain separate checks.
+remain separate checks. Run Voom acceptance against a fresh bake before updating
+Voom pins in this repository and the consuming configuration repository.
 
 #### Running VM Images
 
@@ -1555,6 +1559,12 @@ macOS updates require a Voom version that understands macOS image and VM
 records. The Voom dependency pin has not yet been updated for this support.
 When testing before updating that pin, override the `nixos-config/voom` input
 in the consuming flake with `github:mjrusso/voom/macos-guests`.
+
+Native acceptance of update automation against mixed Linux/macOS guest lists
+remains pending. The separate `voom-shutdown` package is currently exported only
+for Linux hosts. Its macOS guest path still needs validation with the guest's
+Nix-provided Bash (for `mapfile`), `jq`, and Herdr when installed; `voom stop`
+remains the direct Voom shutdown command on either host platform.
 
 Phases are independent: a failure in one doesn't stop the others, and the
 summary names both the VM and the phases that failed (`failed: my-vm(emacs)`).
