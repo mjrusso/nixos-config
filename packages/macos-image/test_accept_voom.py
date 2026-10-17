@@ -31,7 +31,7 @@ if args == ['debug', 'helpers']:
 elif args == ['debug', 'paths']:
     print(json.dumps({name: os.environ['VOOM_' + name.upper() + '_DIR'] for name in ('config','state','cache','runtime')}))
 elif args[0] == 'doctor': print('[]')
-elif args[:2] == ['guest', 'verify-macos']:
+elif args[:2] == ['guest', 'verify']:
     ready = (state / 'checked').exists()
     (state / 'checked').touch()
     print(json.dumps({'checks':[{'name':'ssh-and-architecture','ok':ready}]}))

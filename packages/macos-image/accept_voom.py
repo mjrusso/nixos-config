@@ -139,7 +139,7 @@ class Acceptance:
     def verify_guest(self, phase):
         def probe():
             limit = min(30, self.timeout)
-            result = self.command("guest", "verify-macos", VM, "--timeout", f"{limit}s", "--output", "json", check=False, timeout=limit + 5)
+            result = self.command("guest", "verify", VM, "--timeout", f"{limit}s", "--output", "json", check=False, timeout=limit + 5)
             report = json.loads(result.stdout)
             for check in report.get("checks", []):
                 if check["name"] in ("platform-storage", "driver-running") and not check["ok"]:
