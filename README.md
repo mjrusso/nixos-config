@@ -1301,12 +1301,18 @@ The builder shuts down the configured guest and boots it again with
 standalone vfkit using NAT networking. After installation and shutdown, it
 waits up to two minutes for Apple's VM helper to release storage locks before
 starting the next VM process. It checks SSH key access, macOS version,
-Nix, the activated system, and passwordless sudo before shutting it down and
+Nix, the activated system, passwordless sudo, Fish as the login shell, and
+Ghostty terminal support before shutting it down and
 saving `~/vms/golden-aarch64-darwin` (or `$VMS_DIR/golden-aarch64-darwin`).
 Use `--output` to choose another directory; existing outputs are never
 overwritten. Failed builds leave no final bundle. `--help` lists the cache,
 flake, and timeout options. Configuration checking and the unit tests can
 run on Linux, but installation and boot validation require macOS hardware.
+
+The Darwin VM configuration sets Fish as the login shell and installs Ghostty's
+terminal definitions without installing the Ghostty GUI app. As with Linux VMs,
+`home-bootstrap` remains a manual step after creating a VM; the bake does not
+clone `.emacs.d` or run its other bootstrap tasks.
 
 The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
 `AuxiliaryStorage`, `image.json`, `restore.json`, toolchain metadata, and boot

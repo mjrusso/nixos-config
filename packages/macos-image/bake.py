@@ -506,6 +506,12 @@ def bake(args, metadata, recipe):
 test "$(sw_vers -productVersion | cut -d. -f1)" -ge 27
 test -e /etc/mjr-vm-guest
 test -L /run/current-system
+test "$(/usr/bin/dscl . -read "/Users/$(id -un)" UserShell)" = 'UserShell: /run/current-system/sw/bin/fish'
+env TERM=xterm-ghostty /run/current-system/sw/bin/fish --login --interactive --command '
+    /usr/bin/infocmp -x xterm-ghostty >/dev/null
+    and test "$TERM" = xterm-ghostty
+    and test (/usr/bin/tput colors) -ge 256
+'
 /nix/var/nix/profiles/default/bin/nix --version
 sudo -n true
 chmod -R u+w ~/macos-image-build/source
