@@ -127,12 +127,33 @@
             shellcheck ${./packages/macos-image/provision.sh} ${./scripts/bake-macos}
             touch $out
           '';
+      mkVoomUpdateCheck =
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        pkgs.runCommand "check-voom-update"
+          {
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.bash
+              pkgs.jq
+              pkgs.shellcheck
+            ];
+          }
+          ''
+            cd ${self}
+            PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_voom_update.py'
+            shellcheck scripts/voom-update
+            touch $out
+          '';
       mkLinuxApps = system: {
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
         "bake-golden" = mkRepoScriptApp "bake-golden" system [ ];
         "voom-update" = mkRepoScriptApp "voom-update" system [
           inputs.voom.packages.${system}.default
+          nixpkgs.legacyPackages.${system}.openssh
         ];
       };
       mkDarwinApps = system: {
@@ -149,6 +170,7 @@
         );
         "voom-update" = mkRepoScriptApp "voom-update" system [
           inputs.voom.packages.${system}.default
+          nixpkgs.legacyPackages.${system}.openssh
         ];
       };
     in
@@ -177,6 +199,7 @@
 
       checks.x86_64-linux = {
         macos-image = mkMacosImageCheck "x86_64-linux";
+        voom-update = mkVoomUpdateCheck "x86_64-linux";
         voom-agent-vault = import ./tests/voom-agent-vault.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
           voomPackage = inputs.voom.packages.x86_64-linux.default;
@@ -187,7 +210,10 @@
         };
       };
 
-      checks.aarch64-darwin.macos-image = mkMacosImageCheck "aarch64-darwin";
+      checks.aarch64-darwin = {
+        macos-image = mkMacosImageCheck "aarch64-darwin";
+        voom-update = mkVoomUpdateCheck "aarch64-darwin";
+      };
 
       # Starting points for new projects.
 

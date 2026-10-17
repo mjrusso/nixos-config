@@ -1365,8 +1365,8 @@ Additional tooling is provided that makes it easy to build and run VM images:
 - [`voom`](https://github.com/mjrusso/voom) orchestrates the VM lifecycle
   (start, stop, SSH, deletion, etc.).
 
-- [`voom-update`](./scripts/voom-update) brings every running NixOS guest up to
-  date with this host: the system configuration and `~/.emacs.d`.
+- [`voom-update`](./scripts/voom-update) brings running NixOS and macOS guests
+  up to date with this host: the system configuration and `~/.emacs.d`.
 
 To create a Linux VM, bake a golden image from the system configuration
 repository:
@@ -1384,10 +1384,10 @@ voom image import golden ~/vms/golden-x86_64-linux.qcow2 --meta ~/vms/golden-x86
 voom create my-vm --image golden
 ```
 
-If the host uses Agent Vault, complete [Attach a New VM](#attach-a-new-vm)
-before you start the VM. A first attachment requires a stopped VM. Otherwise,
-start the VM immediately. After the first start, run the
-[`home-bootstrap`](./scripts/home-bootstrap) script:
+For a Linux guest on a host using Agent Vault, complete
+[Attach a New VM](#attach-a-new-vm) before starting the VM. A first attachment
+requires a stopped VM. Otherwise, start the VM immediately. Guests need
+the [`home-bootstrap`](./scripts/home-bootstrap) script after their first start:
 
 ``` bash
 voom start my-vm
@@ -1413,7 +1413,7 @@ normal use the guest architecture matches the host architecture: use
 or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
 `raw` image.
 
-To update every NixOS VM at once, run the exported `voom-update` app:
+To update running NixOS and macOS VMs, run the exported `voom-update` app:
 
 ``` bash
 nix run .#voom-update                            # all guests
@@ -1421,33 +1421,49 @@ nix run .#voom-update -- --dry-run               # preview
 nix run .#voom-update -- my-vm                   # specific VMs
 ```
 
-The NixOS phase uses the system configuration flake in the current directory.
-To run it from another directory, pass the configuration path to both commands:
+System updates use the configuration flake in the current directory.
+To run it from another directory, use the configuration path as both the app
+source and the `--flake` argument:
 
 ``` bash
 nix run /path/to/system-config#voom-update -- --flake /path/to/system-config
 ```
 
-The script runs two phases:
+The script supports three phases:
 
-| Phase     | What it does                                                            |
-|-----------|-------------------------------------------------------------------------|
-| `--nixos` | Rebuilds and switches the guest onto the system configuration checkout. |
-| `--emacs` | Pulls the guest's `~/.emacs.d` clone (cloning it first if missing).     |
+| Phase | What it does |
+|-------|--------------|
+| `--nixos` | Rebuilds and switches NixOS guests onto the host checkout's configuration. |
+| `--darwin` | Builds macOS configurations on the host, copies closures over SSH, and activates them in the guest. |
+| `--emacs` | Pulls the guest's `~/.emacs.d` clone, cloning it first if missing. |
 
-With no phase flag, both phases run. Name one or more to run only the specified
-phase(s):
+With no phase flag, each guest runs its matching system phase, followed by
+Emacs. Pass phase flags to run only those phases:
 
 ``` bash
 nix run .#voom-update -- --nixos
+nix run .#voom-update -- --darwin macos-test
 nix run .#voom-update -- --emacs my-vm
 ```
 
-Every phase selects VMs the same way: the script ignores guests whose image
-doesn't support `nixos switch`, and skips guests that aren't running (with a
-warning). The `nixos` phase picks the flake target per VM. It reuses whatever
-the guest was last switched to, and otherwise derives the target from the VM's
-architecture and image format.
+Stopped guests and guests without a matching selected phase are skipped,
+including explicitly named guests. The NixOS phase requires `nixosSwitch`,
+reuses the last switched flake target, and otherwise derives the target from
+the architecture and image format. macOS guests use the Darwin target
+recorded in the imported image's `bundle.json`.
+
+Darwin updates build on the host, honor `--public-flake`, and copy the built
+closure using Voom's SSH identity and connection settings. The guest updates
+its system profile and runs the built `darwin-rebuild activate` as root using
+passwordless sudo. No source checkout or GitHub credentials are needed in the
+guest. These updates apply nix-darwin and Home Manager configuration; they do
+not install a new macOS release or change the VM's Apple identity. A local
+GC root retains the built closure until transfer and activation finish.
+
+To test macOS updates before the Voom pin is updated, override the
+`nixos-config/voom` input in the consuming flake with
+`github:mjrusso/voom/macos-guests`. Updates across mixed Linux/macOS guest
+lists still need testing on a Mac. Use `voom stop NAME` to stop a VM.
 
 Phases are independent: a failure in one doesn't stop the others, and the
 summary names both the VM and the phases that failed (`failed: my-vm(emacs)`).
@@ -1461,7 +1477,7 @@ summary names both the VM and the phases that failed (`failed: my-vm(emacs)`).
 
 > [!NOTE]
 >
-> vfkit on Darwin requires a `raw` image; baking one directly on Darwin
+> For Linux guests, vfkit on Darwin requires a `raw` image; baking one on Darwin
 > requires a Linux builder. The `aarch64-darwin@desktop` host enables
 > `nix.linux-builder` (see
 > [`hosts/darwin/default.nix`](./hosts/darwin/default.nix)), which spins up a

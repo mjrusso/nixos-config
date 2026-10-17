@@ -1,29 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Bring VM guests up to date with this host, in two phases:
-#
-#   nixos    `voom nixos switch` against this checkout
-#   emacs    pull the guest's `~/.emacs.d` clone
-
 usage() {
   cat <<'USAGE'
-Usage: voom-update [--flake PATH] [--public-flake PATH] [--dry-run] [--nixos] [--emacs] [VM...]
+Usage: voom-update [--flake PATH] [--public-flake PATH] [--dry-run] [--nixos] [--darwin] [--emacs] [VM...]
 
 Updates VM guests from this host.
 
 With no VM names, updates every VM whose image runs this configuration. Stopped
 VMs are skipped.
 
-Phases (with no phase flag, both run, in this order):
-  --nixos             Rebuild and switch onto this checkout's configuration.
+Phases (with no phase flag, run the matching system phase, then Emacs):
+  --nixos             Rebuild and switch NixOS guests.
+  --darwin            Build, copy, and activate nix-darwin configurations.
   --emacs             Update the guest's ~/.emacs.d clone.
 
 Options:
-  --flake PATH        Flake to use for NixOS switches. Defaults to the current
+  --flake PATH        System configuration flake. Defaults to the current
                       directory.
-  --public-flake PATH Override the flake's nixos-config input during NixOS
-                      switches.
+  --public-flake PATH Override the flake's nixos-config input during system
+                      updates.
   --dry-run           List what would be done, without doing it.
   -h, --help          Show this help.
 
@@ -47,6 +43,7 @@ EMACS_REPO_URL="${EMACS_REPO_URL:-https://github.com/mjrusso/.emacs.d}"
 DRY_RUN=0
 NAMES=()
 DO_NIXOS=0
+DO_DARWIN=0
 DO_EMACS=0
 
 while [ $# -gt 0 ]; do
@@ -63,6 +60,7 @@ while [ $# -gt 0 ]; do
       ;;
     --dry-run) DRY_RUN=1 ;;
     --nixos) DO_NIXOS=1 ;;
+    --darwin) DO_DARWIN=1 ;;
     --emacs) DO_EMACS=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) usage >&2; exit 1 ;;
@@ -71,15 +69,16 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-if [ "$DO_NIXOS" -eq 0 ] && [ "$DO_EMACS" -eq 0 ]; then
+if [ "$DO_NIXOS" -eq 0 ] && [ "$DO_DARWIN" -eq 0 ] && [ "$DO_EMACS" -eq 0 ]; then
   DO_NIXOS=1
+  DO_DARWIN=1
   DO_EMACS=1
 fi
 
 require_cmd voom
 require_cmd jq
 
-if [ "$DO_NIXOS" -eq 1 ] && [ ! -f "$FLAKE_ROOT/flake.nix" ]; then
+if { [ "$DO_NIXOS" -eq 1 ] || [ "$DO_DARWIN" -eq 1 ]; } && [ ! -f "$FLAKE_ROOT/flake.nix" ]; then
   echo "No flake.nix in $FLAKE_ROOT" >&2
   exit 1
 fi
@@ -88,11 +87,8 @@ phase_nixos() {
   local name="$1" info="$2" attr arch image format field
   local -a rebuild_args=(--sudo)
 
-  # A phase runs as the left side of `||`, which disables errexit for the whole
-  # function body. Every step that feeds the flake target is therefore checked
-  # by hand: an unchecked failure here builds a truncated attribute (say
-  # `vm-x86_64-linux-`) and hands it to `voom nixos switch`, or reports it as a
-  # successful dry run.
+  # Callers use || to collect failures, disabling errexit inside this function.
+  # Check target discovery explicitly so failures cannot produce a partial flake reference.
   attr="$(jq -r '.vm.nixos.flakeRef // empty' <<<"$info" | sed 's/^.*#//')" || return 1
   if [ -z "$attr" ]; then
     arch="$(jq -r '.vm.arch' <<<"$info")" || return 1
@@ -101,8 +97,6 @@ phase_nixos() {
     # `vm-<system>-qcow` / `vm-<system>-raw`.
     format="$(voom image inspect "$image" --output json | jq -r '.image.format')" || return 1
 
-    # jq prints a literal `null` for a missing key, which would otherwise reach
-    # the flake reference as text.
     for field in "$arch" "$image" "$format"; do
       if [ -z "$field" ] || [ "$field" = null ]; then
         echo "cannot derive a flake target for $name" \
@@ -122,6 +116,40 @@ phase_nixos() {
   fi
   voom nixos switch "$name" --flake "$FLAKE_ROOT#$attr" -- "${rebuild_args[@]}"
 }
+
+phase_darwin() (
+  local name="$1" image_info="$2" platform attr target work system
+  local -a build_args=(--no-update-lock-file)
+
+  platform="$(jq -er '.platformStateDir | select(type == "string" and length > 0)' <<<"$image_info")" || return 1
+  attr="$(jq -er '.target | select(type == "string" and length > 0)' "$platform/bundle.json")" || return 1
+  target="$(jq -rn --arg attr "$attr" '"darwinConfigurations." + ($attr | tojson) + ".system"')" || return 1
+  echo "    darwin: $FLAKE_ROOT#$attr"
+  if [ "$DRY_RUN" -eq 1 ]; then return 0; fi
+
+  require_cmd nix || return 1
+  voom ssh "$name" -- sudo -n true || return 1
+  if [ -n "$PUBLIC_FLAKE" ]; then
+    build_args=(--no-write-lock-file --override-input nixos-config "$PUBLIC_FLAKE")
+  fi
+  umask 077
+  work="$(mktemp -d /tmp/voom-update.XXXXXX)" || return 1
+  trap 'rm -rf "$work"' EXIT
+  system="$(nix build "$FLAKE_ROOT#$target" "${build_args[@]}" --out-link "$work/system" --print-out-paths)" || return 1
+  if [[ ! "$system" =~ ^/nix/store/[a-z0-9]{32}-[a-zA-Z0-9+._?=-]+$ ]]; then
+    echo "Unexpected Darwin system output: $system" >&2
+    return 1
+  fi
+  voom ssh-config "$name" > "$work/ssh-config" || return 1
+  NIX_SSHOPTS="-F $work/ssh-config" nix copy --to "ssh-ng://voom-$name?remote-program=/nix/var/nix/profiles/default/bin/nix-daemon&remote-store=daemon" "$system" || return 1
+  voom ssh "$name" -- sudo -n /bin/sh -s -- "$system" <<'REMOTE'
+set -eu
+system=$1
+export HOME=/var/root NIX_REMOTE=daemon
+/nix/var/nix/profiles/default/bin/nix-env --profile /nix/var/nix/profiles/system --set "$system"
+"$system/sw/bin/darwin-rebuild" activate
+REMOTE
+)
 
 phase_emacs() {
   local name="$1"
@@ -154,19 +182,11 @@ git -C "$repo" pull --ff-only
 REMOTE
 }
 
-# Ignore non-NixOS guests. `nixosSwitch` is the proxy for "runs this
-# configuration", and so for guests that have `git`.
 if [ ${#NAMES[@]} -eq 0 ]; then
-  while read -r name; do
-    [ -n "$name" ] || continue
-    image="$(voom info "$name" --output json | jq -r '.vm.image.name')"
-    capable="$(voom image inspect "$image" --output json | jq -r '.image.capabilities.nixosSwitch')"
-    if [ "$capable" = true ]; then
-      NAMES+=("$name")
-    else
-      echo "skipping $name: image '$image' does not run this configuration"
-    fi
-  done < <(voom list --output json | jq -r '.[].name')
+  names="$(voom list --output json | jq -r '.[].name')"
+  while IFS= read -r name; do
+    if [ -n "$name" ]; then NAMES+=("$name"); fi
+  done <<<"$names"
 fi
 
 if [ ${#NAMES[@]} -eq 0 ]; then
@@ -179,8 +199,6 @@ SKIPPED=()
 FAILED=()
 
 for name in "${NAMES[@]}"; do
-  # An unknown VM name (typo) fails here rather than being reported as a
-  # stopped VM and silently passing.
   if ! info="$(voom info "$name" --output json)"; then
     echo "Cannot inspect $name" >&2
     FAILED+=("$name")
@@ -193,11 +211,44 @@ for name in "${NAMES[@]}"; do
     continue
   fi
 
+  if ! image="$(jq -er '.vm.image.name' <<<"$info")" ||
+     ! image_info="$(voom image inspect "$image" --output json)"; then
+    echo "Cannot inspect image for $name" >&2
+    FAILED+=("$name")
+    continue
+  fi
+  if ! jq -e --arg id "$(jq -r '.vm.image.id' <<<"$info")" '.image.id == $id' >/dev/null <<<"$image_info"; then
+    echo "Image reference changed for $name" >&2
+    FAILED+=("$name")
+    continue
+  fi
+  kind=""
+  if jq -e '.vm.arch == "aarch64-darwin" and .vm.macos != null' >/dev/null <<<"$info" &&
+     jq -e '.image.macos != null' >/dev/null <<<"$image_info"; then
+    kind=darwin
+  elif jq -e '.image.capabilities.nixosSwitch == true' >/dev/null <<<"$image_info" &&
+       jq -e '.vm.arch | endswith("-linux")' >/dev/null <<<"$info"; then
+    kind=nixos
+  fi
+
+  do_system=0
+  case "$kind" in
+    nixos) do_system=$DO_NIXOS ;;
+    darwin) do_system=$DO_DARWIN ;;
+  esac
+  if [ -z "$kind" ] || { [ "$do_system" -eq 0 ] && [ "$DO_EMACS" -eq 0 ]; }; then
+    echo "skipping $name: no applicable update phases"
+    SKIPPED+=("$name")
+    continue
+  fi
   echo "==> $name"
 
   failed_phases=()
-  if [ "$DO_NIXOS" -eq 1 ]; then
+  if [ "$DO_NIXOS" -eq 1 ] && [ "$kind" = nixos ]; then
     phase_nixos "$name" "$info" || failed_phases+=("nixos")
+  fi
+  if [ "$DO_DARWIN" -eq 1 ] && [ "$kind" = darwin ]; then
+    phase_darwin "$name" "$image_info" || failed_phases+=("darwin")
   fi
   if [ "$DO_EMACS" -eq 1 ]; then
     phase_emacs "$name" || failed_phases+=("emacs")
@@ -214,7 +265,7 @@ if [ ${#UPDATED[@]} -gt 0 ]; then
   echo "updated: ${UPDATED[*]}"
 fi
 if [ ${#SKIPPED[@]} -gt 0 ]; then
-  echo "skipped (not running): ${SKIPPED[*]}" >&2
+  echo "skipped: ${SKIPPED[*]}" >&2
 fi
 if [ ${#FAILED[@]} -gt 0 ]; then
   echo "failed: ${FAILED[*]}" >&2
