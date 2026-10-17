@@ -118,7 +118,7 @@
         pkgs.runCommand "check-macos-image"
           {
             nativeBuildInputs = [
-              pkgs.python3
+              (pkgs.python3.withPackages (python: [ python.fonttools ]))
               pkgs.shellcheck
             ];
           }
@@ -163,7 +163,7 @@
         "bake-macos" = mkRepoScriptApp "bake-macos" system (
           with nixpkgs.legacyPackages.${system};
           [
-            python3
+            (python3.withPackages (python: [ python.fonttools ]))
             openssh
             vfkit
           ]

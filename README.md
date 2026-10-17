@@ -1258,6 +1258,7 @@ macosImage = {
   cpuCount = 4;
   memoryMiB = 8192;
   diskGiB = 100;
+  fontFamilies = [ ];
 };
 ```
 
@@ -1334,6 +1335,46 @@ bootstrap requires a separate boot, bootstrap, and shutdown stage outside the
 sandboxed Nix image build. It is not implemented yet. macOS VMs created from a
 newly bootstrapped image already contain the bootstrap results; rerunning
 `home-bootstrap` is optional and skips existing clones.
+
+Host fonts are copied before `home-bootstrap`, so Emacs warm-up can use them.
+Font copying defaults to an empty list. Set `macosImage.fontFamilies` in your
+system configuration flake to select families, for example:
+
+``` nix
+fontFamilies = [ "Berkeley Mono" ];
+```
+
+The bake looks in `~/Library/Fonts` and `/Library/Fonts`, matches embedded family
+names case-insensitively, copies all matching styles, and reports absent families
+without failing the bake. You can also select families on the command line:
+
+``` bash
+nix run .#bake-macos -- --font-family "Berkeley Mono" --font-family "Your Other Family"
+nix run .#bake-macos -- --no-host-fonts
+```
+
+Repeated `--font-family` flags replace the recipe's family list; `--no-host-fonts`
+disables copying even when the recipe selects families. The inventory command reads
+available family, manufacturer, license-description, and license-URL metadata
+without starting a VM or requiring a system configuration flake:
+
+``` bash
+nix run .#bake-macos -- --list-host-fonts \
+  | jq '.[] | {families, path, licenseUrls}'
+```
+
+Font metadata does not reliably identify paid versus free fonts. Review the
+inventory and explicitly select other families; the bake does not automatically
+copy fonts based on license text. OpenType/TrueType files (`.otf`, `.ttf`, `.otc`,
+`.ttc`) are supported. A selected collection is copied whole, including its
+other faces. `/System/Library/Fonts` and app-private font directories are not scanned.
+
+Selected font bytes are staged directly on the host outside the Nix store and
+copied into the guest user's `~/Library/Fonts` before bootstrap. Hash-based
+filenames prevent collisions. Each transfer is checked against its SHA-256;
+file names, families, hashes, and available license metadata are recorded under
+`hostFonts` in `image.json`. Font files are not added to Git or the configuration
+snapshot. Guest rendering and font discovery still need validation on the Mac.
 
 The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
 `AuxiliaryStorage`, `image.json`, `restore.json`, toolchain metadata, and boot
@@ -2530,7 +2571,9 @@ logins share the same agent. (To instead cache it until reboot, set
 #### Fonts
 
 I use [Berkeley Mono](https://berkeleygraphics.com/typefaces/berkeley-mono/),
-which must be manually installed.
+which must be manually installed on normal hosts and Linux guests. `bake-macos`
+can copy it and other installed host fonts when selected through
+`macosImage.fontFamilies` or `--font-family`.
 
 #### Emacs
 

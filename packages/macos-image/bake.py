@@ -20,6 +20,8 @@ import urllib.request
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
+from host_fonts import discover_fonts, host_font_directories, install_fonts, stage_fonts
+
 RESOURCES = Path(__file__).resolve().parent
 
 
@@ -37,7 +39,10 @@ def parse_recipe(recipe):
         raise ValueError("target must name a darwinConfigurations output")
     if not re.fullmatch(r"27\.\d+(?:\.\d+)?", recipe["sdkVersion"]):
         raise ValueError("sdkVersion must select an exact macOS 27 SDK version")
-    return recipe
+    families = recipe.get("fontFamilies", [])
+    if not isinstance(families, list) or any(not isinstance(family, str) or not family.strip() for family in families):
+        raise ValueError("fontFamilies must be a list of nonempty font family names")
+    return {**recipe, "fontFamilies": [family.strip() for family in families]}
 
 
 def load_configuration(flake):
@@ -429,6 +434,11 @@ def bake(args, metadata, recipe):
         temporary = Path(work)
         bundle = temporary / "image"
         bundle.mkdir()
+        families = args.font_family if args.font_family is not None else recipe["fontFamilies"]
+        if args.no_host_fonts:
+            families = []
+        font_staging = temporary / "fonts"
+        fonts = stage_fonts(host_font_directories(), families, font_staging)
         image = {key: recipe[key] for key in ("cpuCount", "memoryMiB", "diskGiB")}
         image.update(
             {
@@ -440,6 +450,7 @@ def bake(args, metadata, recipe):
                 "macAddress": "02:" + ":".join(f"{byte:02x}" for byte in secrets.token_bytes(5)),
                 "source": metadata.get("locked", {}),
                 "recipe": recipe,
+                "hostFonts": {"requestedFamilies": families, "files": fonts},
                 "capabilities": {
                     "controlShare": False,
                     "guestPortReport": False,
@@ -574,6 +585,7 @@ def bake(args, metadata, recipe):
             with (temporary / "vfkit.log").open("w") as log:
                 process = subprocess.Popen(vfkit_arguments(bundle, image), stdout=log, stderr=log)
                 guest.wait(process, image["macAddress"])
+                install_fonts(guest, fonts, font_staging)
                 print("Running home-bootstrap in the configured guest...", flush=True)
                 with (temporary / "bootstrap.log").open("w") as bootstrap_log:
                     image["bootstrap"] = bootstrap_home(guest, args.provision_timeout, bootstrap_log)
@@ -629,6 +641,16 @@ def main():
         default=Path(os.environ.get("VMS_DIR", "~/vms")) / "golden-aarch64-darwin",
     )
     parser.add_argument("--cache", type=Path, default=Path("~/Library/Caches/bake-macos"))
+    parser.add_argument(
+        "--list-host-fonts", action="store_true",
+        help="list installed user/system font families and available license metadata as JSON, without baking",
+    )
+    font_options = parser.add_mutually_exclusive_group()
+    font_options.add_argument(
+        "--font-family", action="append",
+        help="font family to copy if installed; repeat to select multiple families; overrides macosImage.fontFamilies (default: no fonts)",
+    )
+    font_options.add_argument("--no-host-fonts", action="store_true", help="disable copying host fonts")
     parser.add_argument("--install-timeout", type=int, default=3600)
     parser.add_argument("--provision-timeout", type=int, default=7200)
     parser.add_argument(
@@ -638,6 +660,11 @@ def main():
     )
     args = parser.parse_args()
     try:
+        if args.list_host_fonts:
+            print(json.dumps(discover_fonts(host_font_directories()), indent=2))
+            return
+        if args.font_family is not None and any(not family.strip() for family in args.font_family):
+            raise ValueError("--font-family must not be empty")
         metadata, recipe = load_configuration(args.flake.expanduser().resolve())
         if args.check:
             print("Recipe is valid")

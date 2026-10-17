@@ -230,7 +230,7 @@ class BakeTests(unittest.TestCase):
                     side_effect=[json.dumps(metadata), json.dumps(RECIPE)],
                 ):
                     if accepted:
-                        self.assertEqual(bake.load_configuration(flake), (metadata, RECIPE))
+                        self.assertEqual(bake.load_configuration(flake), (metadata, {**RECIPE, "fontFamilies": []}))
                     else:
                         with self.assertRaisesRegex(ValueError, "agent-skills"):
                             bake.load_configuration(flake)
@@ -269,6 +269,9 @@ class BakeTests(unittest.TestCase):
             {"diskGiB": -1},
             {"cpuCount": True},
             {"sdkVersion": "latest"},
+            {"fontFamilies": "Berkeley Mono"},
+            {"fontFamilies": [""]},
+            {"fontFamilies": [42]},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 bake.parse_recipe({**recipe, **changes})
