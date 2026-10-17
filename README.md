@@ -1397,10 +1397,9 @@ expected to be bit-for-bit reproducible. See `--help` for other options.
 
 ##### Test the image with Voom
 
-macOS bundles require Voom's `macos-guests` branch; this repository's Voom pin
-has not been updated yet. Bake and import a new image to use its guest
-services. Updating Voom alone does not add those services to an existing image.
-To import a bundle and create a VM with that Voom version:
+The pinned Voom package must include macOS support. Bake and import a new
+image to use its guest services. Updating Voom alone does not add those
+services to an existing image. To import a bundle and create a VM:
 
 ``` bash
 voom image import macos "$HOME/vms/golden-aarch64-darwin" \
@@ -1415,9 +1414,44 @@ directories. Enable automatic forwarding with `voom forward auto enable NAME`.
 It forwards wildcard TCP listeners and excludes SSH and guest-loopback-only
 listeners.
 
-The bake uses vfkit's native NAT. Voom's gvproxy networking requires
-separate validation. Configuration checks and unit tests can run on Linux;
-installation and boot validation require a Mac.
+The baker checks guest mounts over vfkit's native NAT. Voom packages its own
+patched vfkit, gvproxy, and Apple identity helper; its networking and host-side
+read-only exports need a separate check. From this checkout, build the pinned
+Voom package and run the acceptance command:
+
+``` bash
+nix build --inputs-from path:. voom#voom --out-link /tmp/voom-under-test
+nix run path:.#verify-macos-voom -- \
+  --voom /tmp/voom-under-test/bin/voom \
+  --bundle "$HOME/vms/golden-aarch64-darwin" \
+  --identity "$HOME/.ssh/id_ed25519"
+```
+
+`--inputs-from path:.` resolves `voom` from this checkout's flake inputs.
+`--voom` selects the resulting package, with vfkit, gvproxy, and the identity
+helper beside its executable. The command clears inherited `VOOM_*` settings,
+uses private state/config/cache/runtime directories, and checks helper paths and
+capabilities through `voom debug helpers`. It records versions, helper hashes,
+command output, and guest results.
+
+Acceptance imports a disposable image, creates a VM, checks SSH and Nix,
+tests writable and read-only shares, and checks automatic TCP forwarding and
+its removal. It then restarts the VM, checks persistence, and repeats the share
+and forwarding checks. Allow disk space for the imported image and VM copy.
+Keep the source bundle stopped and run from a graphical login session with
+an SSH identity that works without prompting.
+
+The command removes its VM and imported image after success or failure. Logs
+and `evidence/result.json` remain in the printed `/tmp/voom-accept-*` directory.
+If cleanup fails, it retains state for recovery and exits nonzero.
+Use `--work-dir /tmp/voom-check-01` to choose a new evidence directory and
+`--timeout SECONDS` to change the per-stage timeout (default 600).
+
+Configuration checks and unit tests can run on Linux. Installation, boot
+validation, and Voom acceptance require a Mac. Guest font discovery and
+rendering, interactive GUI use, and broader networking still need manual
+validation. After changing the Voom pin, run acceptance against a fresh bake
+before updating the consuming configuration repository.
 
 #### Running VM Images
 
