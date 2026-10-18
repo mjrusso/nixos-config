@@ -1195,7 +1195,7 @@ journalctl --user -u headless-display -b
 
 ### Container and VM Images
 
-Container and VM images can be built using
+Linux container and VM images can be built using
 [nixos-generators](https://github.com/nix-community/nixos-generators). The
 following formats are supported:
 
@@ -1231,32 +1231,29 @@ are [voom](https://github.com/mjrusso/voom)-compatible (`cloud-init` with a
 
 #### Running VM Images
 
-Additional tooling is provided that makes it easy to build and run VM images:
+[Voom](https://github.com/mjrusso/voom) manages VM creation, startup, SSH,
+shutdown, and deletion. The system configuration installs it automatically.
 
-- [`bake-golden`](./scripts/bake-golden) builds an `.#images.<system>.<format>`
-  virtual machine output and copies it to `$VMS_DIR` (default `~/vms`) as
-  `golden-<system>.<ext>`, with a per-image `.meta.json` sidecar that records
-  relevant image metadata, including guest capabilities for runtime
-  coordination over the `voom-control` share.
+Follow the Linux workflow below, or see [MacOS VM Images](#macos-vm-images)
+for MacOS setup. The [update commands](#update-running-vms) apply to both.
+MacOS images include the [bootstrap results](#bootstrap-and-validation);
+Linux VMs need `home-bootstrap` after their first start.
 
-- [`voom`](https://github.com/mjrusso/voom) orchestrates the VM lifecycle
-  (start, stop, SSH, deletion, etc.).
+##### Create a Linux VM
 
-- [`voom-update`](./scripts/voom-update) brings running NixOS and MacOS guests
-  up to date with this host: the system configuration and `~/.emacs.d`.
-
-For MacOS, see [MacOS VM Images](#macos-vm-images) below for building,
-importing, and validating a bundle.
-
-To create a Linux VM, bake a golden image from the system configuration
-repository:
+Run these commands from your system configuration repository.
+[`bake-golden`](./scripts/bake-golden) builds the VM image and copies it to
+`$VMS_DIR` (default `~/vms`) with a `.meta.json` metadata file. The commands
+below assume `~/vms`; adjust the paths if you set `VMS_DIR` or `--output-dir`.
+This example uses an x86_64 Linux host and a qcow2 image. For a MacOS host,
+follow [Build Linux images on a Mac](#build-linux-images-on-a-mac) and use
+the resulting `.raw` image and metadata paths in the import command.
 
 ``` bash
-nix run .#bake-golden
-# Optional flags: --system x86_64-linux|aarch64-linux, --format qcow|raw
+nix run .#bake-golden -- --system x86_64-linux --format qcow
 ```
 
-Then import the image and create the VM:
+Import the image and create the VM:
 
 ``` bash
 voom image import golden ~/vms/golden-x86_64-linux.qcow2 --meta ~/vms/golden-x86_64-linux.qcow2.meta.json
@@ -1264,10 +1261,9 @@ voom image import golden ~/vms/golden-x86_64-linux.qcow2 --meta ~/vms/golden-x86
 voom create my-vm --image golden
 ```
 
-For a Linux guest on a host using Agent Vault, complete
-[Attach a New VM](#attach-a-new-vm) before starting the VM. A first attachment
-requires a stopped VM. Otherwise, start the VM immediately. Linux guests need
-the [`home-bootstrap`](./scripts/home-bootstrap) script after their first start:
+If the host uses Agent Vault, complete [Attach a New VM](#attach-a-new-vm)
+while the VM is stopped. Then start the VM and run
+[`home-bootstrap`](./scripts/home-bootstrap) inside it:
 
 ``` bash
 voom start my-vm
@@ -1275,27 +1271,36 @@ voom start my-vm
 voom ssh my-vm -- home-bootstrap
 ```
 
-MacOS images baked with `bake-macos` already include the
-[bootstrap results](#bootstrap-and-validation); start the VM without the
-additional `home-bootstrap` command.
+##### Build Linux images on a Mac
 
-_(In this example, the image is named `golden`, and the VM is named `my-vm`;
-both names are arbitrary)._
-
-To rebuild and switch an existing NixOS VM after changing the system
-configuration flake, run:
+Linux VMs on MacOS use vfkit and require a `raw` image. Building that image
+requires a Linux builder. The `aarch64-darwin@desktop` host enables
+`nix.linux-builder` (see
+[`hosts/darwin/default.nix`](./hosts/darwin/default.nix)), which spins up a
+small aarch64-linux NixOS VM under vfkit and registers it as a remote
+builder. If the builder is not available on a given host, bake on a host that
+does have an available Linux builder, and rsync the result over:
 
 ``` bash
-voom nixos switch my-vm \
-  --flake .#vm-x86_64-linux-qcow \
-  -- --sudo
+# On the host with Linux builder:
+nix run .#bake-golden -- --format raw --system aarch64-linux
+
+# From the other host:
+rsync -aS --info=progress2 \
+  <host-with-linux-builder>:~/vms/golden-aarch64-linux.raw{,.meta.json} \
+  ~/vms/
 ```
 
-The flake target must match the VM guest's architecture and image format. In
-normal use the guest architecture matches the host architecture: use
-`vm-x86_64-linux-qcow` for an `x86_64` Linux host running a QEMU `qcow` image,
-or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
-`raw` image.
+`rsync -S` preserves sparseness so the copy doesn't allocate the full
+virtual size on the destination.
+
+`--system aarch64-linux` is redundant on aarch64 Linux hosts (bake-golden
+defaults to the host arch). On x86_64 Linux hosts it triggers a cross-arch
+build, which works because
+[`hosts/nixos/default.nix`](./hosts/nixos/default.nix) sets
+`boot.binfmt.emulatedSystems = [ "aarch64-linux" ]`.
+
+##### Update running VMs
 
 To update running NixOS and MacOS VMs, run the exported `voom-update` app:
 
@@ -1354,38 +1359,19 @@ summary names both the VM and the phases that failed (`failed: my-vm(emacs)`).
 > [the repository](https://github.com/mjrusso/.emacs.d), so unpushed work on
 > this host is not pushed to the guests.
 
-> [!NOTE]
->
-> For Linux guests, vfkit on Darwin requires a `raw` image; baking one on Darwin
-> requires a Linux builder. The `aarch64-darwin@desktop` host enables
-> `nix.linux-builder` (see
-> [`hosts/darwin/default.nix`](./hosts/darwin/default.nix)), which spins up a
-> small aarch64-linux NixOS VM under vfkit and registers it as a remote
-> builder. If the builder is not available on a given host, bake on a host that
-> does have an available Linux builder, and rsync the result over:
->
-> ``` bash
-> # On the host with Linux builder:
-> nix run .#bake-golden -- --format raw --system aarch64-linux
->
-> # From the other host:
-> rsync -aS --info=progress2 \
->   <host-with-linux-builder>:~/vms/golden-aarch64-linux.raw{,.meta.json} \
->   ~/vms/
-> ```
->
-> `rsync -S` preserves sparseness so the copy doesn't allocate the full
-> virtual size on the destination.
->
-> `--system aarch64-linux` is redundant on aarch64 Linux hosts (bake-golden
-> defaults to the host arch). On x86_64 Linux hosts it triggers a cross-arch
-> build, which works because
-> [`hosts/nixos/default.nix`](./hosts/nixos/default.nix) sets
-> `boot.binfmt.emulatedSystems = [ "aarch64-linux" ]`.
+To update a single NixOS VM directly with Voom, use:
 
-Then, to run and manage virtual machines that use this base image, use the
-[Voom](https://github.com/mjrusso/voom) CLI. The system configuration installs
-it automatically.
+``` bash
+voom nixos switch my-vm \
+  --flake .#vm-x86_64-linux-qcow \
+  -- --sudo
+```
+
+The flake target must match the VM guest's architecture and image format. In
+normal use the guest architecture matches the host architecture: use
+`vm-x86_64-linux-qcow` for an `x86_64` Linux host running a QEMU `qcow` image,
+or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
+`raw` image.
 
 ##### NVIDIA GPU in a VM
 
@@ -1445,7 +1431,7 @@ The builder requires:
 - An Xcode toolchain with a MacOS 27 SDK.
 - An SSH identity that works without prompting, directly or through ssh-agent.
 
-##### Configure and build
+##### Configure the image
 
 Define `macosImage` next to `darwinConfigurations` in your system configuration
 flake. The included template provides this output with placeholder URLs and
@@ -1475,7 +1461,55 @@ set their URLs and SHA-256 checksums. Nix 2.26 or later is required on both
 host and guest when using relative path inputs. Both downloads also accept
 absolute `file://` URLs. Set `sdkVersion` to the exact version reported by
 `xcrun --sdk macosx --show-sdk-version`; use `DEVELOPER_DIR` to select Xcode.
-Commit the configuration and `flake.lock`.
+Commit the configuration and `flake.lock`. Add new files to Git before
+building: Git flakes include only tracked files. Inputs must be locked remote
+sources or relative paths within their containing source tree; host-local
+absolute paths are rejected.
+
+The template selects `darwinConfigurations."aarch64-darwin@vm"`. That
+configuration grants the user passwordless sudo, disables computer sleep,
+sets Fish as the login shell, and installs Ghostty terminal definitions.
+The builder authorizes the public key in the `.pub` file beside `--identity`.
+It creates a random account password and deletes the host's temporary password
+file once SSH key access is established. The guest account retains that
+password; the exported bundle contains no plaintext password file.
+Set a known password [after creating the VM](#set-a-login-password).
+
+##### Select host fonts (optional)
+
+Font copying is disabled by default. To copy installed fonts into the guest,
+select their family names in the flake:
+
+``` nix
+fontFamilies = [ "Berkeley Mono" ];
+```
+
+To override the list when building, pass `--font-family "Berkeley Mono"`.
+Repeat `--font-family` to select several families, or pass `--no-host-fonts`
+to disable copying. The builder searches `~/Library/Fonts` and `/Library/Fonts`,
+matches embedded family names case-insensitively, and copies all matching
+styles. Missing families are reported without failing the bake.
+
+To list installed fonts and available license metadata without starting a
+VM or evaluating a configuration flake:
+
+``` bash
+nix run .#bake-macos -- --list-host-fonts \
+  | jq '.[] | {families, path, licenseUrls}'
+```
+
+Selection uses family names, not license metadata. Supported files are
+`.otf`, `.ttf`, `.otc`, and `.ttc`; a selected collection is copied whole,
+including its other faces. `/System/Library/Fonts` and app-private directories
+are not searched.
+
+Fonts are staged outside the Nix store and copied to the guest user's
+`~/Library/Fonts` before Emacs warm-up. Each transfer is checked against its
+SHA-256. Filenames, families, hashes, and available license metadata are
+recorded under `hostFonts` in `image.json`. Fonts are transferred separately
+from the configuration snapshot; the builder does not add them to Git.
+
+##### Build the image
 
 Run from the system configuration directory, or pass `--flake PATH`:
 
@@ -1487,22 +1521,123 @@ nix run .#bake-macos -- --identity ~/.ssh/id_ed25519
 `--check` evaluates and validates `macosImage`. It may fetch flake inputs,
 but does not download the IPSW or Nix archive or start a VM.
 
-The template selects `darwinConfigurations."aarch64-darwin@vm"`. That
-configuration grants the user passwordless sudo, disables computer sleep,
-sets Fish as the login shell, and installs Ghostty terminal definitions.
-The builder authorizes the public key in the `.pub` file beside `--identity`.
-It creates a random account password and deletes the host's temporary password
-file once SSH key access is established. The guest account retains that
-password; the exported bundle contains no plaintext password file.
+The default output is `$VMS_DIR/golden-aarch64-darwin`, with `VMS_DIR`
+defaulting to `~/vms`. Use `--output` to choose another directory. The import
+and validation examples below assume `~/vms/golden-aarch64-darwin`; adjust
+their paths if you change the output location.
 
-The builder transfers a Nix snapshot of the source to the guest and builds
-with lock updates disabled. Inputs must be locked remote sources or relative
-paths within their containing source tree; host-local absolute paths are
-rejected. Git flakes include tracked files, so add new files to Git before
-baking. Downloads are cached under `~/Library/Caches/bake-macos` and checked
-against their hashes on every use.
+A successful bake atomically replaces an existing bundle after validation.
+Before replacement, shut down any VM running directly from the existing
+bundle. The builder locks its storage files and swaps the directories.
+This requires filesystem support for MacOS directory swaps, such as APFS.
+Failed builds and failed swaps leave the existing bundle intact. Unrelated
+directories and symlink outputs are rejected.
 
-##### Bootstrap and validation
+##### Create and start a MacOS VM
+
+Run these commands on the host to import the bundle and create a VM:
+
+``` bash
+voom image import macos "$HOME/vms/golden-aarch64-darwin" \
+  --ssh-identity "$HOME/.ssh/id_ed25519"
+voom create macos-dev --image macos
+```
+
+If you want to share a host directory, add it while the VM is stopped.
+Replace `/path/to/project` with an existing directory on the host:
+
+``` bash
+voom share add macos-dev project /path/to/project /Volumes/project
+```
+
+Add `--readonly` to make the share read-only. Use a writable guest mount path
+such as `/Volumes/project`; MacOS's sealed root prevents creating arbitrary
+`/mnt` directories.
+
+To enable automatic TCP forwarding, run `voom forward auto enable macos-dev`
+on the host. It forwards wildcard listeners and excludes SSH and
+guest-loopback-only listeners.
+
+Start the VM and connect over SSH:
+
+``` bash
+voom start macos-dev
+voom ssh macos-dev
+```
+
+The image already includes the results of `home-bootstrap`. Continue with
+[password setup](#set-a-login-password) in the guest session. To update its
+configuration later, use [voom-update](#update-running-vms).
+
+##### Set a login password
+
+In the guest's SSH session, set a known password for graphical or console
+login:
+
+``` bash
+sudo -n /usr/bin/passwd "$USER"
+```
+
+Enter the new password twice when prompted. Passwordless sudo allows this
+reset without the random password created during baking. Set the password
+separately in each VM after creating it.
+
+If the login keychain cannot unlock afterward, follow
+[Apple's keychain reset instructions](https://support.apple.com/guide/keychain-access/if-you-need-to-update-your-keychain-password-kyca2429/mac).
+Resetting the keychain deletes the passwords stored in it.
+
+Run `exit` to return to the host shell. To open the VM's graphical display,
+run this command on the host:
+
+``` bash
+voom gui macos-dev
+```
+
+Log in with the username from `user-info.nix` and the password you just set.
+
+##### Validate the image with Voom (optional)
+
+This optional check tests the baked bundle through Voom, including its
+networking and host-side read-only exports. It creates a disposable VM;
+it does not test or modify `macos-dev`.
+
+Run from a checkout of the shared `nixos-config` repository on the host.
+Build the pinned Voom package, then pass it to the acceptance command:
+
+``` bash
+nix build --inputs-from path:. voom#voom --out-link /tmp/voom-under-test
+nix run path:.#verify-macos-voom -- \
+  --voom /tmp/voom-under-test/bin/voom \
+  --bundle "$HOME/vms/golden-aarch64-darwin" \
+  --identity "$HOME/.ssh/id_ed25519"
+```
+
+`--inputs-from path:.` resolves `voom` from this checkout's flake inputs.
+`--voom` selects the resulting package, with vfkit, gvproxy, and the identity
+helper beside its executable. The command clears inherited `VOOM_*` settings,
+uses private state/config/cache/runtime directories, and checks helper paths and
+capabilities through `voom debug helpers`. It records versions, helper hashes,
+command output, and guest results.
+
+Acceptance imports a disposable image, creates a VM, checks SSH and Nix,
+tests writable and read-only shares, and checks automatic TCP forwarding and
+its removal. It then restarts the VM, checks persistence, and repeats the share
+and forwarding checks. Allow disk space for the imported image and VM copy.
+Do not run a VM directly from the source bundle during the check. Run from
+a graphical login session with an SSH identity that works without prompting.
+
+The command removes its VM and imported image after success or failure. Logs
+and `evidence/result.json` remain in the printed `/tmp/voom-accept-*` directory.
+If cleanup fails, it retains state for recovery and exits nonzero.
+Use `--work-dir /tmp/voom-check-01` to choose a new evidence directory and
+`--timeout SECONDS` to change the per-stage timeout (default 600).
+
+Configuration checks and unit tests can run on Linux. Installation, boot
+validation, and Voom acceptance require a Mac.
+
+##### Build details
+
+###### Bootstrap and validation
 
 After applying the configuration, the builder shuts down the guest and boots it
 with standalone vfkit using NAT networking. It runs `home-bootstrap` as the
@@ -1527,50 +1662,21 @@ The guest service runs as root under launchd with the label
 user shares, and reports TCP listeners every two seconds. Its guest log is
 `/var/log/voom-guest-services.log`.
 
-##### Copy host fonts
+Between VM processes, the builder waits up to two minutes for Apple's VM
+helper to release storage locks.
 
-Font copying is disabled by default. To copy installed fonts into the guest,
-select their family names in the flake:
+###### Source and toolchain
 
-``` nix
-fontFamilies = [ "Berkeley Mono" ];
-```
+The builder transfers a Nix snapshot of the source to the guest and builds
+with lock updates disabled. Downloads are cached under
+`~/Library/Caches/bake-macos` and checked against their hashes on every use.
 
-Or select them on the command line:
+The native installer is compiled outside the Nix build sandbox with the
+selected Apple SDK. The SDK version, Swift compiler, and vfkit version are
+recorded in the bundle. The installed disk is not expected to be bit-for-bit
+reproducible. See `--help` for other options.
 
-``` bash
-nix run .#bake-macos -- --font-family "Berkeley Mono" --font-family "Another Family"
-nix run .#bake-macos -- --no-host-fonts
-```
-
-Repeated `--font-family` flags replace the flake's list. `--no-host-fonts`
-disables copying. The builder searches `~/Library/Fonts` and `/Library/Fonts`,
-matches embedded family names case-insensitively, and copies all matching
-styles. Missing families are reported without failing the bake.
-
-To list installed fonts and available license metadata without starting a
-VM or evaluating a configuration flake:
-
-``` bash
-nix run .#bake-macos -- --list-host-fonts \
-  | jq '.[] | {families, path, licenseUrls}'
-```
-
-Selection uses family names, not license metadata. Supported files are
-`.otf`, `.ttf`, `.otc`, and `.ttc`; a selected collection is copied whole,
-including its other faces. `/System/Library/Fonts` and app-private directories
-are not searched.
-
-Fonts are staged outside the Nix store and copied to the guest user's
-`~/Library/Fonts` before Emacs warm-up. Each transfer is checked against its
-SHA-256. Filenames, families, hashes, and available license metadata are
-recorded under `hostFonts` in `image.json`. Fonts are transferred separately
-from the configuration snapshot; the builder does not add them to Git.
-
-##### Output and replacement
-
-The default output is `$VMS_DIR/golden-aarch64-darwin`, with `VMS_DIR`
-defaulting to `~/vms`. Use `--output` to choose another directory.
+###### Bundle contents
 
 The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
 `AuxiliaryStorage`, `image.json`, `restore.json`, `toolchain.json`, and boot
@@ -1578,72 +1684,6 @@ and bootstrap logs. Keep the disk and platform files together.
 `restore.json` records Apple's minimum CPU count and minimum memory size
 (in bytes). Voom requires both values and uses them as the minimum resource
 allocations when creating VMs.
-
-A successful bake atomically replaces an existing bundle after validation.
-Keep the old bundle shut down during replacement. The builder locks its
-storage files and swaps the directories; this requires filesystem support
-for MacOS directory swaps, such as APFS. Failed builds and failed swaps leave
-the existing bundle intact. Unrelated directories and symlink outputs are
-rejected.
-
-Between VM processes, the builder waits up to two minutes for Apple's VM
-helper to release storage locks. The native installer is compiled outside the
-Nix build sandbox with the selected Apple SDK. The SDK version, Swift compiler,
-and vfkit version are recorded in the bundle. The installed disk is not
-expected to be bit-for-bit reproducible. See `--help` for other options.
-
-##### Test the image with Voom
-
-Import the baked bundle and create a VM:
-
-``` bash
-voom image import macos "$HOME/vms/golden-aarch64-darwin" \
-  --ssh-identity "$HOME/.ssh/id_ed25519"
-voom create macos-dev --image macos
-voom start macos-dev
-```
-
-Configure shares while the VM is stopped, using a writable guest path such as
-`/Volumes/project`. MacOS's sealed root prevents creating arbitrary `/mnt`
-directories. Enable automatic forwarding with `voom forward auto enable NAME`.
-It forwards wildcard TCP listeners and excludes SSH and guest-loopback-only
-listeners.
-
-The baker checks guest mounts over vfkit's native NAT. Voom packages its own
-patched vfkit, gvproxy, and Apple identity helper; its networking and host-side
-read-only exports need a separate check. From this checkout, build the pinned
-Voom package and run the acceptance command:
-
-``` bash
-nix build --inputs-from path:. voom#voom --out-link /tmp/voom-under-test
-nix run path:.#verify-macos-voom -- \
-  --voom /tmp/voom-under-test/bin/voom \
-  --bundle "$HOME/vms/golden-aarch64-darwin" \
-  --identity "$HOME/.ssh/id_ed25519"
-```
-
-`--inputs-from path:.` resolves `voom` from this checkout's flake inputs.
-`--voom` selects the resulting package, with vfkit, gvproxy, and the identity
-helper beside its executable. The command clears inherited `VOOM_*` settings,
-uses private state/config/cache/runtime directories, and checks helper paths and
-capabilities through `voom debug helpers`. It records versions, helper hashes,
-command output, and guest results.
-
-Acceptance imports a disposable image, creates a VM, checks SSH and Nix,
-tests writable and read-only shares, and checks automatic TCP forwarding and
-its removal. It then restarts the VM, checks persistence, and repeats the share
-and forwarding checks. Allow disk space for the imported image and VM copy.
-Keep the source bundle stopped and run from a graphical login session with
-an SSH identity that works without prompting.
-
-The command removes its VM and imported image after success or failure. Logs
-and `evidence/result.json` remain in the printed `/tmp/voom-accept-*` directory.
-If cleanup fails, it retains state for recovery and exits nonzero.
-Use `--work-dir /tmp/voom-check-01` to choose a new evidence directory and
-`--timeout SECONDS` to change the per-stage timeout (default 600).
-
-Configuration checks and unit tests can run on Linux. Installation, boot
-validation, and Voom acceptance require a Mac.
 
 #### Voom Agent Vault
 
