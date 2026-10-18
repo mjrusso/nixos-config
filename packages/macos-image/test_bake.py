@@ -28,6 +28,32 @@ RECIPE = {
 
 
 class BakeTests(unittest.TestCase):
+    def test_shutdown_accepts_ssh_disconnect_when_vm_exits_successfully(self):
+        guest = bake.Guest("user", Path("key"), Path("/tmp"))
+        guest.address = "192.0.2.1"
+        process = Mock(returncode=0)
+        with patch("bake.subprocess.run", side_effect=subprocess.CalledProcessError(255, "ssh")):
+            guest.shutdown(process)
+        process.wait.assert_called_once_with(timeout=180)
+
+    def test_shutdown_rejects_command_errors_and_failed_or_stalled_vms(self):
+        for ssh_status, vm_status, wait_error, expected in (
+            (1, 0, None, subprocess.CalledProcessError),
+            (255, 1, None, RuntimeError),
+            (0, 1, None, RuntimeError),
+            (255, None, subprocess.TimeoutExpired("vm", 180), subprocess.TimeoutExpired),
+        ):
+            with self.subTest(ssh_status=ssh_status, vm_status=vm_status, wait_error=wait_error):
+                guest = bake.Guest("user", Path("key"), Path("/tmp"))
+                guest.address = "192.0.2.1"
+                process = Mock(returncode=vm_status)
+                process.wait.side_effect = wait_error
+                ssh_result = subprocess.CompletedProcess([], 0)
+                ssh_error = subprocess.CalledProcessError(ssh_status, "ssh") if ssh_status else None
+                with patch("bake.subprocess.run", return_value=ssh_result, side_effect=ssh_error):
+                    with self.assertRaises(expected):
+                        guest.shutdown(process)
+
     def test_guest_service_probe_checks_roundtrip_and_removes_its_mounts(self):
         from datetime import datetime, timezone
         with tempfile.TemporaryDirectory() as directory:

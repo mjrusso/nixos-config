@@ -245,7 +245,11 @@ class Guest:
         )
 
     def shutdown(self, process):
-        self.ssh("sudo -n /sbin/shutdown -h now")
+        try:
+            self.ssh("sudo -n /sbin/shutdown -h now")
+        except subprocess.CalledProcessError as error:
+            if error.returncode != 255:
+                raise
         process.wait(timeout=180)
         if process.returncode:
             raise RuntimeError(f"VM shutdown failed (status {process.returncode})")
