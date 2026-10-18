@@ -19,7 +19,7 @@ in
   '';
   environment.systemPackages = [ pkgs.ghostty-bin.terminfo ];
 
-  # macOS creates the first-boot account outside nix-darwin's managed users.
+  # MacOS creates the first-boot account outside nix-darwin's managed users.
   system.activationScripts.postActivation.text = ''
     /usr/bin/dscl . -create ${lib.escapeShellArg "/Users/${userInfo.user}"} UserShell /run/current-system/sw/bin/fish
   '';

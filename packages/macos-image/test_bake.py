@@ -145,7 +145,7 @@ class BakeTests(unittest.TestCase):
             with bake.locked_storage(destination):
                 pass
 
-    @unittest.skipUnless(sys.platform == "darwin", "requires macOS renamex_np")
+    @unittest.skipUnless(sys.platform == "darwin", "requires MacOS renamex_np")
     def test_native_swap_publishes_complete_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

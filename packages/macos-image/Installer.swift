@@ -27,7 +27,7 @@ final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
               hardware.isSupported,
               let identifier = VZMacMachineIdentifier(dataRepresentation: try Data(contentsOf: bundle.appendingPathComponent("MachineIdentifier"))),
               let mac = VZMACAddress(string: image.macAddress) else {
-            throw BuildError("Invalid or unsupported macOS platform files")
+            throw BuildError("Invalid or unsupported MacOS platform files")
         }
         let platform = VZMacPlatformConfiguration()
         platform.hardwareModel = hardware
@@ -69,7 +69,7 @@ final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
             let ipsw = URL(fileURLWithPath: args[3])
             let restore = try await VZMacOSRestoreImage.image(from: ipsw)
             guard restore.operatingSystemVersion.majorVersion >= 27 else {
-                throw BuildError("The IPSW must contain macOS 27 or later")
+                throw BuildError("The IPSW must contain MacOS 27 or later")
             }
             guard let requirements = restore.mostFeaturefulSupportedConfiguration else {
                 throw BuildError("This host does not support the selected restore image")
@@ -100,7 +100,7 @@ final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
                 .write(to: bundle.appendingPathComponent("restore.json"))
             let vm = VZVirtualMachine(configuration: try Self.configuration(bundle: bundle, image: image))
             let installer = VZMacOSInstaller(virtualMachine: vm, restoringFromImageAt: ipsw)
-            print("Installing macOS \(versionString) (\(restore.buildVersion))...")
+            print("Installing MacOS \(versionString) (\(restore.buildVersion))...")
             fflush(stdout)
             let progress = installer.progress
             let started = ProcessInfo.processInfo.systemUptime
@@ -108,14 +108,14 @@ final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
                 while !Task.isCancelled {
                     let percent = String(format: "%.1f", progress.fractionCompleted * 100)
                     let elapsed = Int(ProcessInfo.processInfo.systemUptime - started)
-                    print("macOS installation: \(percent)% (\(elapsed / 60)m \(elapsed % 60)s elapsed)")
+                    print("MacOS installation: \(percent)% (\(elapsed / 60)m \(elapsed % 60)s elapsed)")
                     fflush(stdout)
                     try await Task.sleep(for: .seconds(5))
                 }
             }
             defer { progressTask.cancel() }
             try await installer.install()
-            print("macOS installation completed")
+            print("MacOS installation completed")
             fflush(stdout)
             exit(EXIT_SUCCESS)
         }
@@ -128,7 +128,7 @@ final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
         view.capturesSystemKeys = true
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
                               styleMask: [.titled, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "macOS image provisioning"
+        window.title = "MacOS image provisioning"
         window.contentView = view
         window.makeKeyAndOrderFront(nil)
         self.window = window

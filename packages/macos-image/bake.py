@@ -39,7 +39,7 @@ def parse_recipe(recipe):
     if not isinstance(recipe["target"], str) or not recipe["target"]:
         raise ValueError("target must name a darwinConfigurations output")
     if not re.fullmatch(r"27\.\d+(?:\.\d+)?", recipe["sdkVersion"]):
-        raise ValueError("sdkVersion must select an exact macOS 27 SDK version")
+        raise ValueError("sdkVersion must select an exact MacOS 27 SDK version")
     families = recipe.get("fontFamilies", [])
     if not isinstance(families, list) or any(not isinstance(family, str) or not family.strip() for family in families):
         raise ValueError("fontFamilies must be a list of nonempty font family names")
@@ -374,7 +374,7 @@ def check_output(destination):
     manifest = destination / "image.json"
     image = json.loads(manifest.read_text())
     if not isinstance(image, dict) or image.get("system") != "aarch64-darwin" or image.get("format") != "macos-bundle":
-        raise ValueError(f"Refusing to replace a directory without a macOS bundle manifest: {destination}")
+        raise ValueError(f"Refusing to replace a directory without a MacOS bundle manifest: {destination}")
     for name in ("disk.raw", "AuxiliaryStorage", "MachineIdentifier", "HardwareModel", "restore.json", "toolchain.json", "image.json"):
         path = destination / name
         if path.is_symlink() or not path.is_file():
@@ -452,9 +452,9 @@ def vfkit_arguments(bundle, image, shares=()):
 
 def bake(args, metadata, recipe):
     if platform.system() != "Darwin" or platform.machine() != "arm64":
-        raise ValueError("bake-macos requires an Apple Silicon Mac running macOS 27 or later")
+        raise ValueError("bake-macos requires an Apple Silicon Mac running MacOS 27 or later")
     if int(platform.mac_ver()[0].split(".")[0]) < 27:
-        raise ValueError("bake-macos requires macOS 27 or later")
+        raise ValueError("bake-macos requires MacOS 27 or later")
     for command in ("ssh", "scp", "ssh-keygen", "vfkit"):
         if not shutil.which(command):
             raise ValueError(f"Missing required command: {command}")
@@ -488,7 +488,7 @@ def bake(args, metadata, recipe):
         )
     )
     if not isinstance(user, str) or not re.fullmatch(r"[a-z_][a-z0-9_-]*", user):
-        raise ValueError("The target must set system.primaryUser to a macOS account name")
+        raise ValueError("The target must set system.primaryUser to a MacOS account name")
     output = args.output.expanduser()
     if output.is_symlink():
         raise ValueError(f"Output must not be a symlink: {output}")
@@ -695,13 +695,13 @@ rm -rf ~/macos-image-build
             raise
         finally:
             stop_process(process)
-    print(f"Validated macOS bundle: {destination}")
+    print(f"Validated MacOS bundle: {destination}")
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="bake-macos",
-        description="Install and configure a macOS 27 VM, then validate it under vfkit.",
+        description="Install and configure a MacOS 27 VM, then validate it under vfkit.",
     )
     parser.add_argument(
         "--flake",

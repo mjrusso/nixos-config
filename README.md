@@ -1229,18 +1229,18 @@ are [voom](https://github.com/mjrusso/voom)-compatible (`cloud-init` with a
 `NoCloud` datasource for bootstrap metadata; runtime coordination via the
 `voom-control` virtiofs share mounted at `/run/voom`).
 
-#### macOS VM Images
+#### MacOS VM Images
 
-[`bake-macos`](./scripts/bake-macos) installs macOS from an Apple IPSW,
+[`bake-macos`](./scripts/bake-macos) installs MacOS from an Apple IPSW,
 creates a user account, enables SSH, installs Nix, and applies a nix-darwin
 and Home Manager configuration. It then boots the image with vfkit and
 validates the guest before saving the bundle.
 
 The builder requires:
 
-- An Apple Silicon Mac running macOS 27 or later.
+- An Apple Silicon Mac running MacOS 27 or later.
 - A logged-in graphical session.
-- An Xcode toolchain with a macOS 27 SDK.
+- An Xcode toolchain with a MacOS 27 SDK.
 - An SSH identity that works without prompting, directly or through ssh-agent.
 
 ##### Configure and build
@@ -1268,7 +1268,7 @@ macosImage = {
 };
 ```
 
-Choose a macOS 27 or later IPSW and an official Nix binary distribution, and
+Choose a MacOS 27 or later IPSW and an official Nix binary distribution, and
 set their URLs and SHA-256 checksums. Nix 2.26 or later is required on both
 host and guest when using relative path inputs. Both downloads also accept
 absolute `file://` URLs. Set `sdkVersion` to the exact version reported by
@@ -1314,7 +1314,7 @@ within the guest home are recorded in `image.json` under
 `bootstrap.repositories`. These IDs describe the image; later bakes may clone
 different commits. Voom preserves `image.json` as `bundle.json` on import.
 
-The final boot checks SSH key access, macOS version, Nix, system activation,
+The final boot checks SSH key access, MacOS version, Nix, system activation,
 passwordless sudo, Fish, and Ghostty terminal support. Temporary shares check
 host-to-guest reads, guest-to-host writes, and a read-only guest mount. The
 builder also requires a fresh SSH listener report from the guest service
@@ -1327,7 +1327,7 @@ user shares, and reports TCP listeners every two seconds. Its guest log is
 `/var/log/voom-guest-services.log`.
 
 Linux image baking does not boot the image. Run `home-bootstrap` manually
-after a Linux VM's first start. macOS VMs created from a bootstrapped image
+after a Linux VM's first start. MacOS VMs created from a bootstrapped image
 already contain the clones; rerunning `home-bootstrap` skips existing clones.
 
 ##### Copy host fonts
@@ -1385,7 +1385,7 @@ baked allocation as the minimum.
 A successful bake atomically replaces an existing bundle after validation.
 Keep the old bundle shut down during replacement. The builder locks its
 storage files and swaps the directories; this requires filesystem support
-for macOS directory swaps, such as APFS. Failed builds and failed swaps leave
+for MacOS directory swaps, such as APFS. Failed builds and failed swaps leave
 the existing bundle intact. Unrelated directories and symlink outputs are
 rejected.
 
@@ -1397,7 +1397,7 @@ expected to be bit-for-bit reproducible. See `--help` for other options.
 
 ##### Test the image with Voom
 
-The pinned Voom package must include macOS support. Bake and import a new
+The pinned Voom package must include MacOS support. Bake and import a new
 image to use its guest services. Updating Voom alone does not add those
 services to an existing image. To import a bundle and create a VM:
 
@@ -1409,7 +1409,7 @@ voom start macos-dev
 ```
 
 Configure shares while the VM is stopped, using a writable guest path such as
-`/Volumes/project`. macOS's sealed root prevents creating arbitrary `/mnt`
+`/Volumes/project`. MacOS's sealed root prevents creating arbitrary `/mnt`
 directories. Enable automatic forwarding with `voom forward auto enable NAME`.
 It forwards wildcard TCP listeners and excludes SSH and guest-loopback-only
 listeners.
@@ -1466,7 +1466,7 @@ Additional tooling is provided that makes it easy to build and run VM images:
 - [`voom`](https://github.com/mjrusso/voom) orchestrates the VM lifecycle
   (start, stop, SSH, deletion, etc.).
 
-- [`voom-update`](./scripts/voom-update) brings running NixOS and macOS guests
+- [`voom-update`](./scripts/voom-update) brings running NixOS and MacOS guests
   up to date with this host: the system configuration and `~/.emacs.d`.
 
 To create a Linux VM, bake a golden image from the system configuration
@@ -1496,7 +1496,7 @@ voom start my-vm
 voom ssh my-vm -- home-bootstrap
 ```
 
-macOS images baked with `bake-macos` already include the bootstrap results;
+MacOS images baked with `bake-macos` already include the bootstrap results;
 start the VM without the additional `home-bootstrap` command.
 
 _(In this example, the image is named `golden`, and the VM is named `my-vm`;
@@ -1517,7 +1517,7 @@ normal use the guest architecture matches the host architecture: use
 or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
 `raw` image.
 
-To update running NixOS and macOS VMs, run the exported `voom-update` app:
+To update running NixOS and MacOS VMs, run the exported `voom-update` app:
 
 ``` bash
 nix run .#voom-update                            # all guests
@@ -1538,7 +1538,7 @@ The script supports three phases:
 | Phase | What it does |
 |-------|--------------|
 | `--nixos` | Rebuilds and switches NixOS guests onto the host checkout's configuration. |
-| `--darwin` | Builds macOS configurations on the host, copies closures over SSH, and activates them in the guest. |
+| `--darwin` | Builds MacOS configurations on the host, copies closures over SSH, and activates them in the guest. |
 | `--emacs` | Pulls the guest's `~/.emacs.d` clone, cloning it first if missing. |
 
 With no phase flag, each guest runs its matching system phase, followed by
@@ -1553,7 +1553,7 @@ nix run .#voom-update -- --emacs my-vm
 Stopped guests and guests without a matching selected phase are skipped,
 including explicitly named guests. The NixOS phase requires `nixosSwitch`,
 reuses the last switched flake target, and otherwise derives the target from
-the architecture and image format. macOS guests use the Darwin target
+the architecture and image format. MacOS guests use the Darwin target
 recorded in the imported image's `bundle.json`.
 
 Darwin updates build on the host, honor `--public-flake`, and copy the built
@@ -1561,12 +1561,12 @@ closure using Voom's SSH identity and connection settings. The guest updates
 its system profile and runs the built `darwin-rebuild activate` as root using
 passwordless sudo. No source checkout or GitHub credentials are needed in the
 guest. These updates apply nix-darwin and Home Manager configuration; they do
-not install a new macOS release or change the VM's Apple identity. A local
+not install a new MacOS release or change the VM's Apple identity. A local
 GC root retains the built closure until transfer and activation finish.
 
-To test macOS updates before the Voom pin is updated, override the
+To test MacOS updates before the Voom pin is updated, override the
 `nixos-config/voom` input in the consuming flake with
-`github:mjrusso/voom/macos-guests`. Updates across mixed Linux/macOS guest
+`github:mjrusso/voom/macos-guests`. Updates across mixed Linux/MacOS guest
 lists still need testing on a Mac. Use `voom stop NAME` to stop a VM.
 
 Phases are independent: a failure in one doesn't stop the others, and the

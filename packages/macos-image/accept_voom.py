@@ -146,7 +146,7 @@ class Acceptance:
                     raise RuntimeError(f"VM cannot become ready: {check}")
             return report if result.returncode == 0 else None
 
-        report = self.wait_for("SSH and macOS guest verification", probe)
+        report = self.wait_for("SSH and MacOS guest verification", probe)
         self.save(f"{phase}-guest.json", report)
         return self.json("info", VM)
 
@@ -273,7 +273,7 @@ def execute(acceptance):
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="verify-macos-voom", description="Test a baked macOS bundle through a Voom package and its bundled helpers.")
+    parser = argparse.ArgumentParser(prog="verify-macos-voom", description="Test a baked MacOS bundle through a Voom package and its bundled helpers.")
     parser.add_argument("--voom", type=Path, required=True, help="Voom executable from the package to test")
     parser.add_argument("--bundle", type=Path, default=Path("~/vms/golden-aarch64-darwin"))
     parser.add_argument("--identity", type=Path, default=Path("~/.ssh/id_ed25519"))
@@ -293,7 +293,7 @@ def main():
     if root.is_relative_to(bundle):
         parser.error("--work-dir must be outside the source bundle")
     if len(os.fsencode(root / "run" / ("x" * 32) / "vfkit.sock")) >= 104:
-        parser.error("--work-dir is too long for macOS Unix sockets; choose a short path under /tmp")
+        parser.error("--work-dir is too long for MacOS Unix sockets; choose a short path under /tmp")
     if args.work_dir:
         try:
             root.mkdir(mode=0o700)

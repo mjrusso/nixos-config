@@ -17,7 +17,7 @@ log_manual_secret_setup() {
 [home-bootstrap]   Linux guests: use Agent Vault on the host. Stop the VM and follow
 [home-bootstrap]   "Attach a New VM" in the nixos-config README.
 [home-bootstrap]
-[home-bootstrap]   macOS guests: this configuration does not support Agent Vault attachment.
+[home-bootstrap]   MacOS guests: this configuration does not support Agent Vault attachment.
 
 EOF
     return

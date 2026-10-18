@@ -199,7 +199,7 @@ with pkgs; [
     # SIGKILL the Emacs daemon process. For use when the server is wedged
     # and not responding to `ekill`.
     #
-    # On macOS, BSD `killall` matches against the process name (basename of
+    # On MacOS, BSD `killall` matches against the process name (basename of
     # argv[0]), which is just `emacs` — so `killall -9 emacs` targets the
     # daemon without hitting `emacsclient`.
     #
