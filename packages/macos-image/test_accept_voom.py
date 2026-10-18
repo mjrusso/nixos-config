@@ -34,6 +34,9 @@ elif args[0] == 'doctor': print('[]')
 elif args[:2] == ['guest', 'verify']:
     ready = (state / 'checked').exists()
     (state / 'checked').touch()
+    if (package / 'missing-shares').exists():
+        print(json.dumps({'checks':[{'name':'ssh-and-architecture','ok':True}, {'name':'control-share','ok':False}]}))
+        sys.exit(1)
     print(json.dumps({'checks':[{'name':'ssh-and-architecture','ok':ready}]}))
     sys.exit(0 if ready else 1)
 elif args[0] == 'info': print('{"vm":{"id":"ready"}}')
@@ -46,7 +49,11 @@ elif args[0] == 'create':
         os.kill(os.getppid(), signal.SIGTERM)
         time.sleep(60)
     sys.exit(1)
-elif args[0] == 'list': print(json.dumps([{'name':'acceptance-vm'}] if (state / 'vm').exists() else []))
+elif args[0] == 'list': print(json.dumps([{'name':'acceptance-vm', 'status':'running' if (state / 'running').exists() else 'stopped'}] if (state / 'vm').exists() else []))
+elif args[0] == 'ssh':
+    print('guest service failed to mount voom-control', flush=True)
+    if (package / 'refuse-diagnostics').exists(): sys.exit(255)
+    if (package / 'hang-diagnostics').exists(): time.sleep(60)
 elif args[0] == 'stop':
     if (package / 'refuse-stop').exists(): sys.exit(1)
 elif args[0] == 'remove': (state / 'vm').unlink()
@@ -134,6 +141,42 @@ elif args[0] != 'logs': raise RuntimeError(args)
             attempts = list(acceptance.evidence.glob("*-guest.stdout"))
             self.assertEqual(len(attempts), 2)
             self.assertTrue((acceptance.evidence / "boot-guest.json").is_file())
+
+    def test_guest_timeout_names_failed_checks_and_keeps_last_report(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            root = Path(directory)
+            binary = self.package(root)
+            (binary.parent / "missing-shares").touch()
+            acceptance = accept_voom.Acceptance(binary, root, root, root, 10)
+            with patch.object(accept_voom.time, "monotonic", side_effect=[0, 0, 11]), patch.object(accept_voom.time, "sleep"):
+                with self.assertRaisesRegex(TimeoutError, "control-share") as failure:
+                    acceptance.verify_guest("boot")
+            self.assertNotIn("waiting for SSH", str(failure.exception))
+            report = json.loads((acceptance.evidence / "boot-guest.json").read_text())
+            self.assertTrue(report["checks"][0]["ok"])
+            self.assertFalse(report["checks"][1]["ok"])
+
+    def test_guest_diagnostics_precede_stop_and_failure_does_not_prevent_cleanup(self):
+        for mode in ("success", "refuse-diagnostics", "hang-diagnostics"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory(dir="/tmp") as directory:
+                root = Path(directory)
+                binary = self.package(root)
+                if mode != "success":
+                    (binary.parent / mode).touch()
+                acceptance = accept_voom.Acceptance(binary, root, root, root, 1)
+                state = root / "state"
+                state.mkdir()
+                for name in ("vm", "image", "running"):
+                    (state / name).touch()
+                acceptance.cleanup()
+                commands = [json.loads(line) for line in (state / "commands.jsonl").read_text().splitlines()]
+                ssh = next(command for command in commands if command[0] == "ssh")
+                self.assertLess(commands.index(ssh), commands.index(["stop", accept_voom.VM]))
+                for probe in ("launchctl print system/org.voom.guest-services", "/var/log/voom-guest-services.log", "/sbin/mount"):
+                    self.assertIn(probe, ssh[-1])
+                self.assertIn("failed to mount", next(acceptance.evidence.glob("*-ssh.stdout")).read_text())
+                self.assertFalse((state / "vm").exists())
+                self.assertFalse((state / "image").exists())
 
     def test_existing_work_directory_is_rejected_without_running_voom(self):
         with tempfile.TemporaryDirectory(dir="/tmp") as directory:

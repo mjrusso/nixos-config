@@ -137,17 +137,24 @@ class Acceptance:
         raise TimeoutError(f"Timed out waiting for {description}; see {self.evidence}")
 
     def verify_guest(self, phase):
+        report = None
+
         def probe():
+            nonlocal report
             limit = min(30, self.timeout)
             result = self.command("guest", "verify", VM, "--timeout", f"{limit}s", "--output", "json", check=False, timeout=limit + 5)
             report = json.loads(result.stdout)
+            self.save(f"{phase}-guest.json", report)
             for check in report.get("checks", []):
                 if check["name"] in ("platform-storage", "driver-running") and not check["ok"]:
                     raise RuntimeError(f"VM cannot become ready: {check}")
             return report if result.returncode == 0 else None
 
-        report = self.wait_for("SSH and MacOS guest verification", probe)
-        self.save(f"{phase}-guest.json", report)
+        try:
+            self.wait_for("MacOS guest verification", probe)
+        except TimeoutError as error:
+            failures = [check["name"] for check in report.get("checks", []) if not check["ok"]] if report else []
+            raise TimeoutError(f"MacOS guest verification timed out; failing checks: {', '.join(failures) or 'no report'}; see {self.evidence}") from error
         return self.json("info", VM)
 
     def verify_shares(self):
@@ -239,6 +246,21 @@ server.serve_forever()
     def cleanup(self):
         rows = self.json("list")
         if any(row["name"] == VM for row in rows):
+            if any(row["name"] == VM and row.get("status") == "running" for row in rows):
+                script = '''set +e
+printf '\\n--- Guest service ---\\n'
+sudo -n /bin/launchctl print system/org.voom.guest-services
+printf '\\n--- Guest service log ---\\n'
+sudo -n /usr/bin/tail -n 100 /var/log/voom-guest-services.log
+printf '\\n--- Mounted filesystems ---\\n'
+/sbin/mount
+printf '\\n--- Guest service plist ---\\n'
+/bin/cat /Library/LaunchDaemons/org.voom.guest-services.plist
+'''
+                try:
+                    self.command("ssh", VM, "--", "/bin/sh -c " + shlex.quote(script), check=False, timeout=min(30, self.timeout))
+                except Exception as error:
+                    self.save("guest-diagnostics-error.json", {"error": str(error)})
             for kind in ("vfkit", "gvproxy", "auto-forward", "runtime-watch"):
                 self.command("logs", VM, "--kind", kind, check=False)
             self.command("stop", VM)
