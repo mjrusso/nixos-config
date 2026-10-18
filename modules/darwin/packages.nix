@@ -8,6 +8,5 @@ shared-packages ++ lib.optionals (systemType != "vm") [
   docker
   docker-compose
   kitty
-  vfkit
   voom
 ]
