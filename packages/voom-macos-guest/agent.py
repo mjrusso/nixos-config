@@ -42,7 +42,7 @@ def mount_share(tag, target, readonly, mounts):
     target.mkdir(parents=True, exist_ok=True)
     command = ["/sbin/mount_virtiofs"]
     if readonly:
-        command += ["-o", "ro"]
+        command += ["-r"]
     subprocess.run([*command, tag, str(target)], check=True, capture_output=True, text=True, timeout=15)
     mounts[str(resolved)] = (tag, ["virtiofs", "read-only"] if readonly else ["virtiofs"])
 

@@ -41,7 +41,7 @@ class AgentTests(unittest.TestCase):
             mounts = {}
             with patch.object(agent.subprocess, "run") as run:
                 agent.mount_share("src", target, True, mounts)
-                run.assert_called_once_with(["/sbin/mount_virtiofs", "-o", "ro", "src", str(target)], check=True, capture_output=True, text=True, timeout=15)
+                run.assert_called_once_with(["/sbin/mount_virtiofs", "-r", "src", str(target)], check=True, capture_output=True, text=True, timeout=15)
                 agent.mount_share("src", target, True, mounts)
                 self.assertEqual(run.call_count, 1)
                 for current in (("src", ["virtiofs"]), ("other", ["virtiofs", "read-only"]), ("src", ["apfs"])):
