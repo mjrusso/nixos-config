@@ -1618,20 +1618,18 @@ checked separately here. The command creates a disposable VM; it does not test
 or modify `macos-dev`. You can repeat it against the same bundle without baking
 again.
 
-Run from a checkout of the shared `nixos-config` repository on the host.
-Build the pinned Voom package, then pass it to the acceptance command:
+Run from your configuration repository on the host, using the installed Voom:
 
 ``` bash
-nix build --inputs-from path:. voom#voom --out-link /tmp/voom-under-test
-nix run path:.#verify-macos-voom -- \
-  --voom /tmp/voom-under-test/bin/voom \
+nix run .#verify-macos-voom -- \
+  --voom "$(command -v voom)" \
   --bundle "$HOME/vms/golden-aarch64-darwin" \
   --identity "$HOME/.ssh/id_ed25519"
 ```
 
-`--inputs-from path:.` resolves `voom` from this checkout's flake inputs.
-`--voom` selects the resulting package, with vfkit, gvproxy, and the identity
-helper beside its executable. The command clears inherited `VOOM_*` settings,
+`--voom` selects the Voom executable on your `PATH`. The checker resolves any
+symlinks and verifies that vfkit, gvproxy, and the identity helper come from
+that executable's package. The command clears inherited `VOOM_*` settings,
 uses private state/config/cache/runtime directories, and checks helper paths and
 capabilities through `voom debug helpers`. It records versions, helper hashes,
 command output, and guest results.
