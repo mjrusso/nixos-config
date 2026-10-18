@@ -68,7 +68,7 @@ elif args[0] != 'logs': raise RuntimeError(args)
             helper = package / name
             helper.write_text(f"#!{sys.executable}\nimport json\nprint(json.dumps({{'gui-lifecycle-v1': 1, 'virtiofs-readonly-v1': 1, 'guest-isolation-v1': 1}}))\n")
             helper.chmod(0o755)
-        return binary
+        return binary.resolve()
 
     def test_environment_is_isolated_and_clears_all_helper_overrides(self):
         original = {"VOOM_VFKIT": "/bad/vfkit", "VOOM_GVPROXY": "/bad/gvproxy", "VOOM_MACOS_IDENTITY": "/bad/identity", "VOOM_STATE_DIR": "/real/state", "SSH_AUTH_SOCK": "/agent"}

@@ -254,7 +254,9 @@ printf '\\n--- Guest service log ---\\n'
 sudo -n /usr/bin/tail -n 100 /var/log/voom-guest-services.log
 printf '\\n--- Mounted filesystems ---\\n'
 /sbin/mount
+/bin/ls -ld /var/run/voom /Volumes/voom-accept-rw /Volumes/voom-accept-ro
 printf '\\n--- Guest service plist ---\\n'
+/bin/ls -l /Library/LaunchDaemons/*voom*
 /bin/cat /Library/LaunchDaemons/org.voom.guest-services.plist
 '''
                 try:
