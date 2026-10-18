@@ -1229,6 +1229,208 @@ are [voom](https://github.com/mjrusso/voom)-compatible (`cloud-init` with a
 `NoCloud` datasource for bootstrap metadata; runtime coordination via the
 `voom-control` virtiofs share mounted at `/run/voom`).
 
+#### Running VM Images
+
+Additional tooling is provided that makes it easy to build and run VM images:
+
+- [`bake-golden`](./scripts/bake-golden) builds an `.#images.<system>.<format>`
+  virtual machine output and copies it to `$VMS_DIR` (default `~/vms`) as
+  `golden-<system>.<ext>`, with a per-image `.meta.json` sidecar that records
+  relevant image metadata, including guest capabilities for runtime
+  coordination over the `voom-control` share.
+
+- [`voom`](https://github.com/mjrusso/voom) orchestrates the VM lifecycle
+  (start, stop, SSH, deletion, etc.).
+
+- [`voom-update`](./scripts/voom-update) brings running NixOS and MacOS guests
+  up to date with this host: the system configuration and `~/.emacs.d`.
+
+For MacOS, see [MacOS VM Images](#macos-vm-images) below for building,
+importing, and validating a bundle.
+
+To create a Linux VM, bake a golden image from the system configuration
+repository:
+
+``` bash
+nix run .#bake-golden
+# Optional flags: --system x86_64-linux|aarch64-linux, --format qcow|raw
+```
+
+Then import the image and create the VM:
+
+``` bash
+voom image import golden ~/vms/golden-x86_64-linux.qcow2 --meta ~/vms/golden-x86_64-linux.qcow2.meta.json
+
+voom create my-vm --image golden
+```
+
+For a Linux guest on a host using Agent Vault, complete
+[Attach a New VM](#attach-a-new-vm) before starting the VM. A first attachment
+requires a stopped VM. Otherwise, start the VM immediately. Linux guests need
+the [`home-bootstrap`](./scripts/home-bootstrap) script after their first start:
+
+``` bash
+voom start my-vm
+
+voom ssh my-vm -- home-bootstrap
+```
+
+MacOS images baked with `bake-macos` already include the
+[bootstrap results](#bootstrap-and-validation); start the VM without the
+additional `home-bootstrap` command.
+
+_(In this example, the image is named `golden`, and the VM is named `my-vm`;
+both names are arbitrary)._
+
+To rebuild and switch an existing NixOS VM after changing the system
+configuration flake, run:
+
+``` bash
+voom nixos switch my-vm \
+  --flake .#vm-x86_64-linux-qcow \
+  -- --sudo
+```
+
+The flake target must match the VM guest's architecture and image format. In
+normal use the guest architecture matches the host architecture: use
+`vm-x86_64-linux-qcow` for an `x86_64` Linux host running a QEMU `qcow` image,
+or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
+`raw` image.
+
+To update running NixOS and MacOS VMs, run the exported `voom-update` app:
+
+``` bash
+nix run .#voom-update                            # all guests
+nix run .#voom-update -- --dry-run               # preview
+nix run .#voom-update -- my-vm                   # specific VMs
+```
+
+System updates use the configuration flake in the current directory.
+To run it from another directory, use the configuration path as both the app
+source and the `--flake` argument:
+
+``` bash
+nix run /path/to/system-config#voom-update -- --flake /path/to/system-config
+```
+
+The script supports three phases:
+
+| Phase | What it does |
+|-------|--------------|
+| `--nixos` | Rebuilds and switches NixOS guests onto the host checkout's configuration. |
+| `--darwin` | Builds MacOS configurations on the host, copies closures over SSH, and activates them in the guest. |
+| `--emacs` | Pulls the guest's `~/.emacs.d` clone, cloning it first if missing. |
+
+With no phase flag, each guest runs its matching system phase, followed by
+Emacs. Pass phase flags to run only those phases:
+
+``` bash
+nix run .#voom-update -- --nixos
+nix run .#voom-update -- --darwin macos-test
+nix run .#voom-update -- --emacs my-vm
+```
+
+Stopped guests and guests without a matching selected phase are skipped,
+including explicitly named guests. The NixOS phase requires `nixosSwitch`,
+reuses the last switched flake target, and otherwise derives the target from
+the architecture and image format. MacOS guests use the Darwin target
+recorded in the imported image's `bundle.json`.
+
+Darwin updates build on the host, honor `--public-flake`, and copy the built
+closure using Voom's SSH identity and connection settings. The guest updates
+its system profile and runs the built `darwin-rebuild activate` as root using
+passwordless sudo. No source checkout or GitHub credentials are needed in the
+guest. These updates apply nix-darwin and Home Manager configuration; they do
+not install a new MacOS release or change the VM's Apple identity. A local
+GC root retains the built closure until transfer and activation finish.
+
+Phases are independent: a failure in one doesn't stop the others, and the
+summary names both the VM and the phases that failed (`failed: my-vm(emacs)`).
+
+> [!NOTE]
+>
+> The `emacs` phase skips a guest whose `~/.emacs.d` has uncommitted changes,
+> and reports that guest as failed. It pulls from
+> [the repository](https://github.com/mjrusso/.emacs.d), so unpushed work on
+> this host is not pushed to the guests.
+
+> [!NOTE]
+>
+> For Linux guests, vfkit on Darwin requires a `raw` image; baking one on Darwin
+> requires a Linux builder. The `aarch64-darwin@desktop` host enables
+> `nix.linux-builder` (see
+> [`hosts/darwin/default.nix`](./hosts/darwin/default.nix)), which spins up a
+> small aarch64-linux NixOS VM under vfkit and registers it as a remote
+> builder. If the builder is not available on a given host, bake on a host that
+> does have an available Linux builder, and rsync the result over:
+>
+> ``` bash
+> # On the host with Linux builder:
+> nix run .#bake-golden -- --format raw --system aarch64-linux
+>
+> # From the other host:
+> rsync -aS --info=progress2 \
+>   <host-with-linux-builder>:~/vms/golden-aarch64-linux.raw{,.meta.json} \
+>   ~/vms/
+> ```
+>
+> `rsync -S` preserves sparseness so the copy doesn't allocate the full
+> virtual size on the destination.
+>
+> `--system aarch64-linux` is redundant on aarch64 Linux hosts (bake-golden
+> defaults to the host arch). On x86_64 Linux hosts it triggers a cross-arch
+> build, which works because
+> [`hosts/nixos/default.nix`](./hosts/nixos/default.nix) sets
+> `boot.binfmt.emulatedSystems = [ "aarch64-linux" ]`.
+
+Then, to run and manage virtual machines that use this base image, use the
+[Voom](https://github.com/mjrusso/voom) CLI. The system configuration installs
+it automatically.
+
+##### NVIDIA GPU in a VM
+
+A VM can have exclusive use of a host NVIDIA GPU, for example for CUDA
+workloads. While the VM runs, the host and other VMs cannot use the GPU.
+
+1. Set up the host as described in [PCI Passthrough](#pci-passthrough).
+
+2. Install the NVIDIA driver in your VMs. In your system configuration
+   repository's `flake.nix`, add this module to the `extraModules` of the
+   x86_64 VM targets:
+
+   ``` nix
+   { hardware.nvidiaGuest.enable = true; }
+   ```
+
+   Add it to the `extraModules` of the `qcow` and `raw` image outputs too, so
+   that VMs created from a newly baked image include the driver. Then update
+   the running VMs with `voom-update`.
+
+   The driver adds about 1 GB to each VM. Its kernel module stays unloaded in
+   VMs without an NVIDIA GPU. Installing it in every VM means you can move the
+   GPU from one VM to another without changing either VM's configuration.
+
+3. Assign the GPU to the VM while the VM is stopped, then start the VM and
+   check that it sees the GPU:
+
+   ``` bash
+   voom pci discover
+   voom stop my-vm
+   voom pci add my-vm gpu 0000:41:00
+   voom start my-vm
+   voom ssh my-vm -- nvidia-smi
+   ```
+
+   `voom pci discover` lists the host's PCI slots and whether each one can be
+   assigned. A slot address, such as `0000:41:00`, assigns all of the GPU's
+   functions. A function address, such as `0000:41:00.0`, assigns only that
+   function; the GPU function alone is enough for compute workloads.
+
+To move the GPU to another VM, stop the VM that it is assigned to, run `voom
+pci remove my-vm gpu`, and then follow step 3 for the other VM. To return the
+GPU to the host, also remove it from `nixosVfio` in `host-info.nix`, apply the
+configuration, and reboot.
+
 #### MacOS VM Images
 
 [`bake-macos`](./scripts/bake-macos) installs MacOS from an Apple IPSW,
@@ -1442,204 +1644,6 @@ Use `--work-dir /tmp/voom-check-01` to choose a new evidence directory and
 
 Configuration checks and unit tests can run on Linux. Installation, boot
 validation, and Voom acceptance require a Mac.
-
-#### Running VM Images
-
-Additional tooling is provided that makes it easy to build and run VM images:
-
-- [`bake-golden`](./scripts/bake-golden) builds an `.#images.<system>.<format>`
-  virtual machine output and copies it to `$VMS_DIR` (default `~/vms`) as
-  `golden-<system>.<ext>`, with a per-image `.meta.json` sidecar that records
-  relevant image metadata, including guest capabilities for runtime
-  coordination over the `voom-control` share.
-
-- [`voom`](https://github.com/mjrusso/voom) orchestrates the VM lifecycle
-  (start, stop, SSH, deletion, etc.).
-
-- [`voom-update`](./scripts/voom-update) brings running NixOS and MacOS guests
-  up to date with this host: the system configuration and `~/.emacs.d`.
-
-To create a Linux VM, bake a golden image from the system configuration
-repository:
-
-``` bash
-nix run .#bake-golden
-# Optional flags: --system x86_64-linux|aarch64-linux, --format qcow|raw
-```
-
-Then import the image and create the VM:
-
-``` bash
-voom image import golden ~/vms/golden-x86_64-linux.qcow2 --meta ~/vms/golden-x86_64-linux.qcow2.meta.json
-
-voom create my-vm --image golden
-```
-
-For a Linux guest on a host using Agent Vault, complete
-[Attach a New VM](#attach-a-new-vm) before starting the VM. A first attachment
-requires a stopped VM. Otherwise, start the VM immediately. Linux guests need
-the [`home-bootstrap`](./scripts/home-bootstrap) script after their first start:
-
-``` bash
-voom start my-vm
-
-voom ssh my-vm -- home-bootstrap
-```
-
-MacOS images baked with `bake-macos` already include the bootstrap results;
-start the VM without the additional `home-bootstrap` command.
-
-_(In this example, the image is named `golden`, and the VM is named `my-vm`;
-both names are arbitrary)._
-
-To rebuild and switch an existing NixOS VM after changing the system
-configuration flake, run:
-
-``` bash
-voom nixos switch my-vm \
-  --flake .#vm-x86_64-linux-qcow \
-  -- --sudo
-```
-
-The flake target must match the VM guest's architecture and image format. In
-normal use the guest architecture matches the host architecture: use
-`vm-x86_64-linux-qcow` for an `x86_64` Linux host running a QEMU `qcow` image,
-or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
-`raw` image.
-
-To update running NixOS and MacOS VMs, run the exported `voom-update` app:
-
-``` bash
-nix run .#voom-update                            # all guests
-nix run .#voom-update -- --dry-run               # preview
-nix run .#voom-update -- my-vm                   # specific VMs
-```
-
-System updates use the configuration flake in the current directory.
-To run it from another directory, use the configuration path as both the app
-source and the `--flake` argument:
-
-``` bash
-nix run /path/to/system-config#voom-update -- --flake /path/to/system-config
-```
-
-The script supports three phases:
-
-| Phase | What it does |
-|-------|--------------|
-| `--nixos` | Rebuilds and switches NixOS guests onto the host checkout's configuration. |
-| `--darwin` | Builds MacOS configurations on the host, copies closures over SSH, and activates them in the guest. |
-| `--emacs` | Pulls the guest's `~/.emacs.d` clone, cloning it first if missing. |
-
-With no phase flag, each guest runs its matching system phase, followed by
-Emacs. Pass phase flags to run only those phases:
-
-``` bash
-nix run .#voom-update -- --nixos
-nix run .#voom-update -- --darwin macos-test
-nix run .#voom-update -- --emacs my-vm
-```
-
-Stopped guests and guests without a matching selected phase are skipped,
-including explicitly named guests. The NixOS phase requires `nixosSwitch`,
-reuses the last switched flake target, and otherwise derives the target from
-the architecture and image format. MacOS guests use the Darwin target
-recorded in the imported image's `bundle.json`.
-
-Darwin updates build on the host, honor `--public-flake`, and copy the built
-closure using Voom's SSH identity and connection settings. The guest updates
-its system profile and runs the built `darwin-rebuild activate` as root using
-passwordless sudo. No source checkout or GitHub credentials are needed in the
-guest. These updates apply nix-darwin and Home Manager configuration; they do
-not install a new MacOS release or change the VM's Apple identity. A local
-GC root retains the built closure until transfer and activation finish.
-
-Phases are independent: a failure in one doesn't stop the others, and the
-summary names both the VM and the phases that failed (`failed: my-vm(emacs)`).
-
-> [!NOTE]
->
-> The `emacs` phase skips a guest whose `~/.emacs.d` has uncommitted changes,
-> and reports that guest as failed. It pulls from
-> [the repository](https://github.com/mjrusso/.emacs.d), so unpushed work on
-> this host is not pushed to the guests.
-
-> [!NOTE]
->
-> For Linux guests, vfkit on Darwin requires a `raw` image; baking one on Darwin
-> requires a Linux builder. The `aarch64-darwin@desktop` host enables
-> `nix.linux-builder` (see
-> [`hosts/darwin/default.nix`](./hosts/darwin/default.nix)), which spins up a
-> small aarch64-linux NixOS VM under vfkit and registers it as a remote
-> builder. If the builder is not available on a given host, bake on a host that
-> does have an available Linux builder, and rsync the result over:
->
-> ``` bash
-> # On the host with Linux builder:
-> nix run .#bake-golden -- --format raw --system aarch64-linux
->
-> # From the other host:
-> rsync -aS --info=progress2 \
->   <host-with-linux-builder>:~/vms/golden-aarch64-linux.raw{,.meta.json} \
->   ~/vms/
-> ```
->
-> `rsync -S` preserves sparseness so the copy doesn't allocate the full
-> virtual size on the destination.
->
-> `--system aarch64-linux` is redundant on aarch64 Linux hosts (bake-golden
-> defaults to the host arch). On x86_64 Linux hosts it triggers a cross-arch
-> build, which works because
-> [`hosts/nixos/default.nix`](./hosts/nixos/default.nix) sets
-> `boot.binfmt.emulatedSystems = [ "aarch64-linux" ]`.
-
-Then, to run and manage virtual machines that use this base image, use the
-[Voom](https://github.com/mjrusso/voom) CLI. The system configuration installs
-it automatically.
-
-##### NVIDIA GPU in a VM
-
-A VM can have exclusive use of a host NVIDIA GPU, for example for CUDA
-workloads. While the VM runs, the host and other VMs cannot use the GPU.
-
-1. Set up the host as described in [PCI Passthrough](#pci-passthrough).
-
-2. Install the NVIDIA driver in your VMs. In your system configuration
-   repository's `flake.nix`, add this module to the `extraModules` of the
-   x86_64 VM targets:
-
-   ``` nix
-   { hardware.nvidiaGuest.enable = true; }
-   ```
-
-   Add it to the `extraModules` of the `qcow` and `raw` image outputs too, so
-   that VMs created from a newly baked image include the driver. Then update
-   the running VMs with `voom-update`.
-
-   The driver adds about 1 GB to each VM. Its kernel module stays unloaded in
-   VMs without an NVIDIA GPU. Installing it in every VM means you can move the
-   GPU from one VM to another without changing either VM's configuration.
-
-3. Assign the GPU to the VM while the VM is stopped, then start the VM and
-   check that it sees the GPU:
-
-   ``` bash
-   voom pci discover
-   voom stop my-vm
-   voom pci add my-vm gpu 0000:41:00
-   voom start my-vm
-   voom ssh my-vm -- nvidia-smi
-   ```
-
-   `voom pci discover` lists the host's PCI slots and whether each one can be
-   assigned. A slot address, such as `0000:41:00`, assigns all of the GPU's
-   functions. A function address, such as `0000:41:00.0`, assigns only that
-   function; the GPU function alone is enough for compute workloads.
-
-To move the GPU to another VM, stop the VM that it is assigned to, run `voom
-pci remove my-vm gpu`, and then follow step 3 for the other VM. To return the
-GPU to the host, also remove it from `nixosVfio` in `host-info.nix`, apply the
-configuration, and reboot.
 
 #### Voom Agent Vault
 
