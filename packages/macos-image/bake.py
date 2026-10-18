@@ -306,19 +306,31 @@ def prepare_guest_service_check(root):
 
 
 def verify_guest_services(guest, root):
-    guest.ssh("""set -eu
+    script = """set -eu
+fail() {
+    echo "$1" >&2
+    /sbin/mount >&2 || true
+    sudo -n /usr/bin/tail -n 80 /var/log/voom-guest-services.log >&2 || true
+    exit 1
+}
 for attempt in $(seq 1 60); do
     if test -f /Volumes/voom-check-rw/from-host && test -f /Volumes/voom-check-ro/from-host; then break; fi
     sleep 1
 done
-test "$(cat /Volumes/voom-check-rw/from-host)" = voom-share-check
-test "$(cat /Volumes/voom-check-ro/from-host)" = voom-share-check
-printf 'guest-write\\n' > /Volumes/voom-check-rw/from-guest
+test -f /Volumes/voom-check-rw/from-host || fail 'Writable share did not mount within 60 seconds'
+test -f /Volumes/voom-check-ro/from-host || fail 'Read-only share did not mount within 60 seconds'
+test "$(cat /Volumes/voom-check-rw/from-host)" = voom-share-check || fail 'Writable share returned unexpected contents'
+test "$(cat /Volumes/voom-check-ro/from-host)" = voom-share-check || fail 'Read-only share returned unexpected contents'
+printf 'guest-write\\n' > /Volumes/voom-check-rw/from-guest || fail 'Writable share rejected a write'
 if sudo -n /usr/bin/touch /Volumes/voom-check-ro/forbidden-write; then
-    echo 'Read-only share accepted a write' >&2
-    exit 1
+    fail 'Read-only share accepted a write'
 fi
-""", timeout=90)
+"""
+    try:
+        guest.ssh(script, timeout=90, capture_output=True)
+    except subprocess.CalledProcessError as error:
+        output = "\n".join(part for part in (error.stdout, error.stderr) if part)
+        raise RuntimeError("Voom guest share validation failed:\n" + (output or str(error))) from error
     source = root / "voom-share-check"
     if (source / "from-guest").read_text() != "guest-write\n" or (source / "forbidden-write").exists():
         raise ValueError("Voom share validation failed")

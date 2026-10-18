@@ -78,6 +78,15 @@ class BakeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "share validation"):
                 bake.verify_guest_services(Mock(), root)
 
+    def test_guest_service_probe_reports_guest_failure_output(self):
+        guest = Mock()
+        guest.ssh.side_effect = subprocess.CalledProcessError(
+            1, "ssh", output="Read-only share did not mount\nmount_virtiofs: illegal option -- o\n"
+        )
+        with self.assertRaisesRegex(RuntimeError, "Read-only share did not mount") as caught:
+            bake.verify_guest_services(guest, Path("/unused"))
+        self.assertIn("mount_virtiofs: illegal option -- o", str(caught.exception))
+
     def test_guest_capabilities_require_the_installed_service_contract(self):
         guest = Mock()
         capabilities = {"controlShare": True, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
