@@ -1302,12 +1302,11 @@ against their hashes on every use.
 
 ##### Bootstrap and validation
 
-After applying the configuration, the builder shuts down the guest and boots
-it with standalone vfkit using NAT networking. It runs `home-bootstrap` as
-the guest user to clone `.emacs.d` and Wingman and warm Emacs when available.
-The output is saved as `bootstrap.log`. A bootstrap failure fails the bake;
-`--provision-timeout` controls its timeout. Bootstrap does not sign in to
-GitHub or install credentials.
+After applying the configuration, the builder shuts down the guest and boots it
+with standalone vfkit using NAT networking. It runs `home-bootstrap` as the
+guest user; the output is saved as `bootstrap.log`. A bootstrap failure fails
+the bake; `--provision-timeout` controls its timeout. Bootstrap does not sign
+in to GitHub or install credentials.
 
 Bootstrap clones the repositories' current HEADs. Their commit IDs and paths
 within the guest home are recorded in `image.json` under
@@ -1325,10 +1324,6 @@ The guest service runs as root under launchd with the label
 `org.voom.guest-services`. It mounts `voom-control` at `/var/run/voom`, mounts
 user shares, and reports TCP listeners every two seconds. Its guest log is
 `/var/log/voom-guest-services.log`.
-
-Linux image baking does not boot the image. Run `home-bootstrap` manually
-after a Linux VM's first start. MacOS VMs created from a bootstrapped image
-already contain the clones; rerunning `home-bootstrap` skips existing clones.
 
 ##### Copy host fonts
 
@@ -1379,8 +1374,8 @@ The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
 `AuxiliaryStorage`, `image.json`, `restore.json`, `toolchain.json`, and boot
 and bootstrap logs. Keep the disk and platform files together.
 `restore.json` records Apple's minimum CPU count and minimum memory size
-(in bytes). Voom uses these limits when creating VMs; older bundles use their
-baked allocation as the minimum.
+(in bytes). Voom uses these limits when creating VMs. If the metadata omits
+them, Voom uses the bundle's configured CPU and memory as the minimum.
 
 A successful bake atomically replaces an existing bundle after validation.
 Keep the old bundle shut down during replacement. The builder locks its
@@ -1397,9 +1392,7 @@ expected to be bit-for-bit reproducible. See `--help` for other options.
 
 ##### Test the image with Voom
 
-The pinned Voom package must include MacOS support. Bake and import a new
-image to use its guest services. Updating Voom alone does not add those
-services to an existing image. To import a bundle and create a VM:
+Import the baked bundle and create a VM:
 
 ``` bash
 voom image import macos "$HOME/vms/golden-aarch64-darwin" \
@@ -1448,10 +1441,7 @@ Use `--work-dir /tmp/voom-check-01` to choose a new evidence directory and
 `--timeout SECONDS` to change the per-stage timeout (default 600).
 
 Configuration checks and unit tests can run on Linux. Installation, boot
-validation, and Voom acceptance require a Mac. Guest font discovery and
-rendering, interactive GUI use, and broader networking still need manual
-validation. After changing the Voom pin, run acceptance against a fresh bake
-before updating the consuming configuration repository.
+validation, and Voom acceptance require a Mac.
 
 #### Running VM Images
 
@@ -1563,11 +1553,6 @@ passwordless sudo. No source checkout or GitHub credentials are needed in the
 guest. These updates apply nix-darwin and Home Manager configuration; they do
 not install a new MacOS release or change the VM's Apple identity. A local
 GC root retains the built closure until transfer and activation finish.
-
-To test MacOS updates before the Voom pin is updated, override the
-`nixos-config/voom` input in the consuming flake with
-`github:mjrusso/voom/macos-guests`. Updates across mixed Linux/MacOS guest
-lists still need testing on a Mac. Use `voom stop NAME` to stop a VM.
 
 Phases are independent: a failure in one doesn't stop the others, and the
 summary names both the VM and the phases that failed (`failed: my-vm(emacs)`).
@@ -2051,10 +2036,10 @@ Voom replaces the CA while the guest remains running, refresh the database with
 the service also regenerates the session CA bundle and removes the old NSS
 entry when `/run/voom/egress-ca.pem` is absent.
 
-Git and GitHub CLI use their normal packages. The Codex and Claude launchers
-still add `--yolo` and `--dangerously-skip-permissions`, respectively, but do
-not add an egress wrapper. The VM is the isolation boundary for these agents.
-Host installations keep their normal permission controls.
+Git and GitHub CLI use their normal packages. In guests, the Codex and Claude
+launchers add `--yolo` and `--dangerously-skip-permissions`, respectively.
+The VM is the isolation boundary for these agents. Host installations keep
+their normal permission controls.
 
 Run these commands normally:
 
@@ -2750,11 +2735,9 @@ configuration from `system_profiler`, builds
 
 > [!NOTE]
 >
-> Only files in the working tree will be copied to the [Nix
-> Store](https://zero-to-nix.com/concepts/nix-store). Ensure that any new files
-> have been added to the working tree (use `git add`) before running
-> `nix run .#build` or `nix run .#build-switch`, or they will be ignored. (The
-> files do not need to be committed to the system configuration repository.)
+> Git flakes copy tracked files to the Nix store. Run `git add` for new files
+> before `nix run .#build` or `nix run .#build-switch`; untracked files are
+> ignored. The files do not need to be committed.
 
 ### Updating dependencies
 
@@ -2808,9 +2791,7 @@ To preview what would be removed before committing to it:
 nh clean all --dry
 ```
 
-By default `nh clean all` keeps the 1 most recent generation and anything from
-the last 0 days; loosen that to avoid throwing away generations you might want
-to roll back to:
+Set an explicit retention policy to keep generations available for rollback:
 
 ``` bash
 nh clean all --keep 5 --keep-since 7d

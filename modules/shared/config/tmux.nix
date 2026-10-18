@@ -42,13 +42,6 @@
 
   extraConfig = ''
 
-  # M-[ and M-] disable/enable the prefix, to allow for tmux inception.
-  #
-  # Currently commented out to free M-[ and M-] for emacs.
-  #
-  # bind -n M-[ set -g prefix None \; set -g status-bg color22 \;
-  # bind -n M-] set -g prefix C-, \; set -g status-bg default \;
-
   # Session creation.
   bind C command-prompt  -p "session name" 'new-session -s "%%" -c "#{pane_current_path}"'
 
