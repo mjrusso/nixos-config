@@ -387,6 +387,7 @@ def check_output(destination):
 
 def publish_bundle(bundle, destination):
     check_output(destination)
+    wait_for_storage(bundle)
     if not destination.exists():
         bundle.rename(destination)
         return

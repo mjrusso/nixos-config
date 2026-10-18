@@ -156,6 +156,24 @@ class BakeTests(unittest.TestCase):
                     self.assertEqual((destination / "disk.raw").read_text(), "old")
                     self.assertEqual((staged / "disk.raw").read_text(), "new")
 
+    def test_publish_waits_for_staged_storage_before_exposing_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("disk.raw", "AuxiliaryStorage"):
+                staged = self.bundle(root / ("staged-" + name), "new")
+                destination = root / ("golden-" + name)
+                with self.subTest(name=name), (staged / name).open("r+b") as holder:
+                    fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                    def release_storage(_):
+                        self.assertFalse(destination.exists())
+                        fcntl.flock(holder, fcntl.LOCK_UN)
+
+                    with patch("bake.time.sleep", side_effect=release_storage) as sleep:
+                        bake.publish_bundle(staged, destination)
+                    sleep.assert_called_once()
+                    self.assertEqual((destination / "disk.raw").read_text(), "new")
+
     def test_failed_native_swap_preserves_both_bundles(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
