@@ -1533,6 +1533,20 @@ This requires filesystem support for MacOS directory swaps, such as APFS.
 Failed builds and failed swaps leave the existing bundle intact. Unrelated
 directories and symlink outputs are rejected.
 
+The builder prints its workspace path when it starts. On failure, it retains
+that directory, including the staged `image/` and any `provision.log`,
+`vfkit.log`, and `bootstrap.log` files. The staged image may be incomplete;
+retention does not mark it as validated. The temporary account-password file
+is removed during cleanup. After diagnosing the failure, remove the retained
+workspace manually to reclaim its disk space. Successful builds remove their
+workspace after publication.
+
+While bootstrap runs, follow its output from another terminal:
+
+``` bash
+tail -f /path/to/printed/workspace/bootstrap.log
+```
+
 ##### Create and start a MacOS VM
 
 Run these commands on the host to import the bundle and create a VM:
@@ -1598,8 +1612,11 @@ Log in with the username from `user-info.nix` and the password you just set.
 ##### Validate the image with Voom (optional)
 
 This optional check tests the baked bundle through Voom, including its
-networking and host-side read-only exports. It creates a disposable VM;
-it does not test or modify `macos-dev`.
+networking and host-side read-only exports. Baking checks boot and configuration;
+shares, read-only enforcement, listener reports, and automatic forwarding are
+checked separately here. The command creates a disposable VM; it does not test
+or modify `macos-dev`. You can repeat it against the same bundle without baking
+again.
 
 Run from a checkout of the shared `nixos-config` repository on the host.
 Build the pinned Voom package, then pass it to the acceptance command:
@@ -1640,8 +1657,9 @@ validation, and Voom acceptance require a Mac.
 ###### Bootstrap and validation
 
 After applying the configuration, the builder shuts down the guest and boots it
-with standalone vfkit using NAT networking. It runs `home-bootstrap` as the
-guest user; the output is saved as `bootstrap.log`. A bootstrap failure fails
+with standalone vfkit using NAT networking. It checks boot and configuration
+before copying fonts and running `home-bootstrap` as the guest user. Bootstrap
+output is saved as `bootstrap.log`. A bootstrap failure fails
 the bake; `--provision-timeout` controls its timeout. Bootstrap does not sign
 in to GitHub or install credentials.
 
@@ -1650,12 +1668,12 @@ within the guest home are recorded in `image.json` under
 `bootstrap.repositories`. These IDs describe the image; later bakes may clone
 different commits. Voom preserves `image.json` as `bundle.json` on import.
 
-The final boot checks SSH key access, MacOS version, Nix, system activation,
-passwordless sudo, Fish, and Ghostty terminal support. Temporary shares check
-host-to-guest reads, guest-to-host writes, and a read-only guest mount. The
-builder also requires a fresh SSH listener report from the guest service
-before advertising `controlShare`, `guestShareMount`, and `guestPortReport`
-in `image.json`.
+The standalone boot checks SSH key access, MacOS version, Nix, system activation,
+passwordless sudo, Fish, and Ghostty terminal support. It also checks the installed
+guest-service declaration and launchd job, then records their capabilities in
+`image.json`. These capabilities describe installed services; they do not mean
+Voom integration tests have passed. Test shares, listener reporting, and
+forwarding afterward with [Voom acceptance](#validate-the-image-with-voom-optional).
 
 The guest service runs as root under launchd with the label
 `org.voom.guest-services`. It mounts `voom-control` at `/var/run/voom`, mounts

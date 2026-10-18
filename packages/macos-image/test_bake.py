@@ -9,8 +9,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import bake
@@ -28,6 +29,138 @@ RECIPE = {
 
 
 class BakeTests(unittest.TestCase):
+    def test_bake_publication_and_failure_recovery_without_integration_tests(self):
+        recipe = bake.parse_recipe(RECIPE)
+        for failure in (None, "boot checks", "bootstrap", "first SSH"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                snapshot = root / "source"
+                snapshot.mkdir()
+                (snapshot / "flake.nix").write_text("locked source")
+                key = root / "key"
+                key.write_text("private test key")
+                Path(str(key) + ".pub").write_text("public test key")
+                archive = root / "archive"
+                archive.touch()
+                args = SimpleNamespace(identity=key, output=root / "golden", cache=root / "cache",
+                                       font_family=None, no_host_fonts=True, install_timeout=10, provision_timeout=10)
+                if failure:
+                    self.bundle(args.output, "existing image")
+                capabilities = {"controlShare": True, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
+                stages, processes = [], []
+                guest = Mock(spec=bake.Guest)
+
+                def check_output(command, **kwargs):
+                    if command[0] == "nix":
+                        return json.dumps("user")
+                    if "--show-sdk-version" in command:
+                        return RECIPE["sdkVersion"]
+                    return "tool version"
+
+                def check_call(command, **kwargs):
+                    if command[1] == "install":
+                        for name in ("disk.raw", "AuxiliaryStorage", "HardwareModel", "MachineIdentifier", "restore.json"):
+                            (command[2] / name).write_text("installed guest")
+
+                def start_process(command, **kwargs):
+                    self.assertFalse(any("virtio-fs" in str(argument) for argument in command))
+                    kwargs["stdout"].write("VM log\n")
+                    process = Mock(returncode=None)
+                    process.poll.side_effect = lambda: process.returncode
+
+                    def wait(**kwargs):
+                        process.returncode = 0
+                        return 0
+
+                    process.wait.side_effect = wait
+                    processes.append(process)
+                    return process
+
+                def ssh(command, *positional, **kwargs):
+                    self.assertNotIn("/Volumes/voom-check", command)
+                    if "UserShell" in command:
+                        stages.append("boot checks")
+                    elif "--command home-bootstrap" in command:
+                        self.assertIn("boot checks", stages)
+                        stages.append("bootstrap")
+                        kwargs["stdout"].write("bootstrap output\n")
+                    else:
+                        if "guest-services.json" in command:
+                            return subprocess.CompletedProcess([], 0, json.dumps({"schemaVersion": 1, "capabilities": capabilities}))
+                        return subprocess.CompletedProcess([], 0, "a" * 40)
+                    if stages[-1] == failure:
+                        raise RuntimeError(failure)
+                    return subprocess.CompletedProcess([], 0)
+
+                guest.ssh.side_effect = ssh
+                guest.shutdown.side_effect = lambda process: process.wait()
+                if failure == "first SSH":
+                    guest.wait.side_effect = RuntimeError(failure)
+                output = io.StringIO()
+                with ExitStack() as stack:
+                    for target, replacement in (
+                        ("platform.system", lambda: "Darwin"),
+                        ("platform.machine", lambda: "arm64"),
+                        ("platform.mac_ver", lambda: ("27.0", "", "")),
+                        ("shutil.which", lambda command: "/bin/" + command),
+                        ("subprocess.check_output", check_output),
+                        ("subprocess.check_call", check_call),
+                        ("subprocess.Popen", start_process),
+                        ("fetch", lambda *args, **kwargs: archive),
+                        ("Guest", lambda *args: guest),
+                    ):
+                        stack.enter_context(patch("bake." + target, replacement))
+                    stack.enter_context(redirect_stdout(output))
+                    stack.enter_context(redirect_stderr(output))
+                    if failure:
+                        with self.assertRaisesRegex(RuntimeError, failure):
+                            bake.bake(args, {"path": str(snapshot)}, recipe)
+                    else:
+                        bake.bake(args, {"path": str(snapshot)}, recipe)
+                self.assertTrue(all(process.returncode == 0 for process in processes))
+                workspaces = list(root.glob(".bake-macos-*"))
+                if failure:
+                    self.assertEqual((args.output / "disk.raw").read_text(), "existing image")
+                    self.assertEqual(len(workspaces), 1)
+                    work = workspaces[0]
+                    self.assertEqual((work / "image/disk.raw").read_text(), "installed guest")
+                    self.assertEqual((work / "provision.log").read_text(), "VM log\n")
+                    self.assertFalse((work / "password").exists())
+                    self.assertIn(str(work), output.getvalue())
+                    if failure == "boot checks":
+                        self.assertNotIn("bootstrap", stages)
+                    elif failure == "bootstrap":
+                        self.assertEqual((work / "bootstrap.log").read_text(), "bootstrap output\n")
+                else:
+                    self.assertEqual(workspaces, [])
+                    image = json.loads((args.output / "image.json").read_text())
+                    self.assertEqual(image["capabilities"], capabilities)
+                    self.assertEqual(image["bootstrap"]["repositories"]["emacs"]["revision"], "a" * 40)
+                    for name in ("provision.log", "vfkit.log", "bootstrap.log"):
+                        self.assertTrue((args.output / name).read_text())
+
+    def test_failed_bake_keeps_workspace_and_reports_its_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(output):
+                with self.assertRaisesRegex(RuntimeError, "validation failed"):
+                    with bake.build_workspace(Path(directory)) as work:
+                        (work / "image").mkdir()
+                        (work / "image/disk.raw").write_text("installed guest")
+                        (work / "bootstrap.log").write_text("bootstrap completed")
+                        (work / "password").write_text("temporary account password")
+                        raise RuntimeError("validation failed")
+            self.assertEqual((work / "image/disk.raw").read_text(), "installed guest")
+            self.assertEqual((work / "bootstrap.log").read_text(), "bootstrap completed")
+            self.assertFalse((work / "password").exists())
+            self.assertIn(f"Bake failed; workspace retained at: {work}", output.getvalue())
+
+    def test_successful_bake_removes_workspace(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            with bake.build_workspace(Path(directory)) as work:
+                (work / "bootstrap.log").write_text("bootstrap completed")
+            self.assertFalse(work.exists())
+
     def test_shutdown_accepts_ssh_disconnect_when_vm_exits_successfully(self):
         guest = bake.Guest("user", Path("key"), Path("/tmp"))
         guest.address = "192.0.2.1"
@@ -53,39 +186,6 @@ class BakeTests(unittest.TestCase):
                 with patch("bake.subprocess.run", return_value=ssh_result, side_effect=ssh_error):
                     with self.assertRaises(expected):
                         guest.shutdown(process)
-
-    def test_guest_service_probe_checks_roundtrip_and_removes_its_mounts(self):
-        from datetime import datetime, timezone
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            shares = bake.prepare_guest_service_check(root)
-            args = bake.vfkit_arguments(root, {"cpuCount": 4, "memoryMiB": 8192, "macAddress": "02:00:00:00:00:01"}, shares)
-            self.assertTrue(any("mountTag=voom-control" in argument for argument in args))
-            (root / "voom-share-check" / "from-guest").write_text("guest-write\n")
-            report = {"schemaVersion": 1, "generatedAt": datetime.now(timezone.utc).isoformat(), "listeners": [{"proto": "tcp", "port": 22}]}
-            (root / "voom-control" / "ports.json").write_text(json.dumps(report))
-            guest = Mock()
-            bake.verify_guest_services(guest, root)
-            self.assertEqual(json.loads((root / "voom-control" / "mounts.json").read_text()), [])
-            self.assertIn("umount", guest.ssh.call_args.args[0])
-
-    def test_guest_service_probe_rejects_failed_readonly_enforcement(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            bake.prepare_guest_service_check(root)
-            (root / "voom-share-check" / "from-guest").write_text("guest-write\n")
-            (root / "voom-share-check" / "forbidden-write").touch()
-            with self.assertRaisesRegex(ValueError, "share validation"):
-                bake.verify_guest_services(Mock(), root)
-
-    def test_guest_service_probe_reports_guest_failure_output(self):
-        guest = Mock()
-        guest.ssh.side_effect = subprocess.CalledProcessError(
-            1, "ssh", output="Read-only share did not mount\nmount_virtiofs: illegal option -- o\n"
-        )
-        with self.assertRaisesRegex(RuntimeError, "Read-only share did not mount") as caught:
-            bake.verify_guest_services(guest, Path("/unused"))
-        self.assertIn("mount_virtiofs: illegal option -- o", str(caught.exception))
 
     def test_guest_capabilities_require_the_installed_service_contract(self):
         guest = Mock()

@@ -19,7 +19,6 @@ import urllib.parse
 import urllib.request
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from datetime import datetime, timezone
 
 from host_fonts import discover_fonts, host_font_directories, install_fonts, stage_fonts
 
@@ -291,70 +290,6 @@ def guest_capabilities(guest):
     return expected
 
 
-def prepare_guest_service_check(root):
-    control = root / "voom-control"
-    source = root / "voom-share-check"
-    control.mkdir()
-    source.mkdir()
-    (source / "from-host").write_text("voom-share-check\n")
-    mounts = [
-        {"tag": "voom-check-rw", "guestPath": "/Volumes/voom-check-rw", "readonly": False},
-        {"tag": "voom-check-ro", "guestPath": "/Volumes/voom-check-ro", "readonly": True},
-    ]
-    (control / "mounts.json").write_text(json.dumps(mounts) + "\n")
-    return [("voom-control", control), ("voom-check-rw", source), ("voom-check-ro", source)]
-
-
-def verify_guest_services(guest, root):
-    script = """set -eu
-fail() {
-    echo "$1" >&2
-    /sbin/mount >&2 || true
-    sudo -n /usr/bin/tail -n 80 /var/log/voom-guest-services.log >&2 || true
-    exit 1
-}
-for attempt in $(seq 1 60); do
-    if test -f /Volumes/voom-check-rw/from-host && test -f /Volumes/voom-check-ro/from-host; then break; fi
-    sleep 1
-done
-test -f /Volumes/voom-check-rw/from-host || fail 'Writable share did not mount within 60 seconds'
-test -f /Volumes/voom-check-ro/from-host || fail 'Read-only share did not mount within 60 seconds'
-test "$(cat /Volumes/voom-check-rw/from-host)" = voom-share-check || fail 'Writable share returned unexpected contents'
-test "$(cat /Volumes/voom-check-ro/from-host)" = voom-share-check || fail 'Read-only share returned unexpected contents'
-printf 'guest-write\\n' > /Volumes/voom-check-rw/from-guest || fail 'Writable share rejected a write'
-if sudo -n /usr/bin/touch /Volumes/voom-check-ro/forbidden-write; then
-    fail 'Read-only share accepted a write'
-fi
-"""
-    try:
-        guest.ssh(script, timeout=90, capture_output=True)
-    except subprocess.CalledProcessError as error:
-        output = "\n".join(part for part in (error.stdout, error.stderr) if part)
-        raise RuntimeError("Voom guest share validation failed:\n" + (output or str(error))) from error
-    source = root / "voom-share-check"
-    if (source / "from-guest").read_text() != "guest-write\n" or (source / "forbidden-write").exists():
-        raise ValueError("Voom share validation failed")
-    control = root / "voom-control"
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        try:
-            report = json.loads((control / "ports.json").read_text())
-            generated = datetime.fromisoformat(report["generatedAt"].replace("Z", "+00:00"))
-            age = (datetime.now(timezone.utc) - generated).total_seconds()
-            if report["schemaVersion"] == 1 and abs(age) < 30 and any(
-                row["proto"] == "tcp" and row["port"] == 22 for row in report["listeners"]
-            ):
-                break
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-        time.sleep(1)
-    else:
-        raise TimeoutError("Voom guest service did not publish a fresh SSH listener report")
-    (control / "mounts.next").write_text("[]\n")
-    (control / "mounts.next").replace(control / "mounts.json")
-    guest.ssh("sudo -n /sbin/umount /Volumes/voom-check-rw && sudo -n /sbin/umount /Volumes/voom-check-ro && sudo -n /bin/rmdir /Volumes/voom-check-rw /Volumes/voom-check-ro", timeout=30)
-
-
 def stop_process(process):
     if process is not None and process.poll() is None:
         process.terminate()
@@ -433,7 +368,7 @@ def wait_for_storage(bundle, timeout=120):
             time.sleep(1)
 
 
-def vfkit_arguments(bundle, image, shares=()):
+def vfkit_arguments(bundle, image):
     arguments = [
         "vfkit",
         "--cpus",
@@ -461,10 +396,23 @@ def vfkit_arguments(bundle, image, shares=()):
         "virtio-input,pointing",
         "--gui",
     ]
-
-    for tag, host_path in shares:
-        arguments += ["--device", f"virtio-fs,sharedDir={host_path},mountTag={tag}"]
     return arguments
+
+
+@contextmanager
+def build_workspace(parent):
+    directory = Path(tempfile.mkdtemp(prefix=".bake-macos-", dir=parent))
+    print(f"Build workspace: {directory}", flush=True)
+    try:
+        try:
+            yield directory
+        finally:
+            (directory / "password").unlink(missing_ok=True)
+    except BaseException:
+        print(f"Bake failed; workspace retained at: {directory}", file=sys.stderr, flush=True)
+        raise
+    else:
+        shutil.rmtree(directory)
 
 
 def bake(args, metadata, recipe):
@@ -517,8 +465,7 @@ def bake(args, metadata, recipe):
     cache = args.cache.expanduser().resolve()
     cache.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix=".bake-macos-", dir=destination.parent) as work:
-        temporary = Path(work)
+    with build_workspace(destination.parent) as temporary:
         bundle = temporary / "image"
         bundle.mkdir()
         families = args.font_family if args.font_family is not None else recipe["fontFamilies"]
@@ -670,18 +617,10 @@ def bake(args, metadata, recipe):
             wait_for_storage(bundle)
             print("Booting the installed bundle under standalone vfkit...", flush=True)
             with (temporary / "vfkit.log").open("w") as log:
-                shares = prepare_guest_service_check(temporary)
-                process = subprocess.Popen(vfkit_arguments(bundle, image, shares), stdout=log, stderr=log)
+                process = subprocess.Popen(vfkit_arguments(bundle, image), stdout=log, stderr=log)
                 guest.wait(process, image["macAddress"])
-                install_fonts(guest, fonts, font_staging)
-                print("Running home-bootstrap in the configured guest...", flush=True)
-                with (temporary / "bootstrap.log").open("w") as bootstrap_log:
-                    image["bootstrap"] = bootstrap_home(guest, args.provision_timeout, bootstrap_log)
-                capabilities = guest_capabilities(guest)
-                print("Checking Voom guest shares and port reporting...", flush=True)
-                verify_guest_services(guest, temporary)
-                image["capabilities"] = capabilities
-                (bundle / "image.json").write_text(json.dumps(image, indent=2) + "\n")
+                print("Checking guest boot and configuration...", flush=True)
+                image["capabilities"] = guest_capabilities(guest)
                 guest.ssh("""set -eu
 test "$(sw_vers -productVersion | cut -d. -f1)" -ge 27
 test -e /etc/mjr-vm-guest
@@ -694,9 +633,13 @@ env TERM=xterm-ghostty /run/current-system/sw/bin/fish --login --interactive --c
 '
 /nix/var/nix/profiles/default/bin/nix --version
 sudo -n true
-chmod -R u+w ~/macos-image-build/source
-rm -rf ~/macos-image-build
-""")
+""", timeout=60)
+                install_fonts(guest, fonts, font_staging)
+                print("Running home-bootstrap in the configured guest...", flush=True)
+                with (temporary / "bootstrap.log").open("w") as bootstrap_log:
+                    image["bootstrap"] = bootstrap_home(guest, args.provision_timeout, bootstrap_log)
+                (bundle / "image.json").write_text(json.dumps(image, indent=2) + "\n")
+                guest.ssh("chmod -R u+w ~/macos-image-build/source && rm -rf ~/macos-image-build", timeout=args.provision_timeout)
                 guest.shutdown(process)
             for name in ("provision.log", "vfkit.log", "bootstrap.log"):
                 shutil.copyfile(temporary / name, bundle / name)
