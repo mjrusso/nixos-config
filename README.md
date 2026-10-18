@@ -1576,8 +1576,8 @@ The bundle contains `disk.raw`, `HardwareModel`, `MachineIdentifier`,
 `AuxiliaryStorage`, `image.json`, `restore.json`, `toolchain.json`, and boot
 and bootstrap logs. Keep the disk and platform files together.
 `restore.json` records Apple's minimum CPU count and minimum memory size
-(in bytes). Voom uses these limits when creating VMs. If the metadata omits
-them, Voom uses the bundle's configured CPU and memory as the minimum.
+(in bytes). Voom requires both values and uses them as the minimum resource
+allocations when creating VMs.
 
 A successful bake atomically replaces an existing bundle after validation.
 Keep the old bundle shut down during replacement. The builder locks its
