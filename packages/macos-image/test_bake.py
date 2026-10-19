@@ -12,7 +12,7 @@ import unittest
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import bake
 
@@ -31,7 +31,7 @@ RECIPE = {
 class BakeTests(unittest.TestCase):
     def test_bake_publication_and_failure_recovery_without_integration_tests(self):
         recipe = bake.parse_recipe(RECIPE)
-        for failure in (None, "boot checks", "bootstrap", "first SSH"):
+        for failure in (None, "boot checks", "bootstrap", "first SSH", "authentication", "installation", "provisioning options"):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 snapshot = root / "source"
@@ -49,6 +49,8 @@ class BakeTests(unittest.TestCase):
                 capabilities = {"metadataDisk": False, "controlShare": False, "guestPortReport": False, "guestShareMount": False, "nixosSwitch": False}
                 stages, processes = [], []
                 guest = Mock(spec=bake.Guest)
+                guest.user = "user"
+                password = "  chosen test pässword $`\"  "
 
                 def check_output(command, **kwargs):
                     if command[0] == "nix":
@@ -58,12 +60,27 @@ class BakeTests(unittest.TestCase):
                     return "tool version"
 
                 def check_call(command, **kwargs):
+                    self.assertNotIn(password, str(command))
+                    if command[1] == "validate-provisioning":
+                        if failure == "provisioning options":
+                            raise RuntimeError(failure)
+                        stages.append("provisioning options")
                     if command[1] == "install":
+                        if failure == "installation":
+                            raise RuntimeError(failure)
                         for name in ("disk.raw", "AuxiliaryStorage", "HardwareModel", "MachineIdentifier", "restore.json"):
                             (command[2] / name).write_text("installed guest")
 
+                def fetch(*args, **kwargs):
+                    self.assertIn("provisioning options", stages)
+                    return archive
+
                 def start_process(command, **kwargs):
                     self.assertFalse(any("virtio-fs" in str(argument) for argument in command))
+                    self.assertNotIn(password, str(command))
+                    if command[1] == "provision":
+                        self.assertEqual(command[3].read_text(), password)
+                        self.assertEqual(command[3].stat().st_mode & 0o777, 0o600)
                     kwargs["stdout"].write("VM log\n")
                     process = Mock(returncode=None)
                     process.poll.side_effect = lambda: process.returncode
@@ -77,6 +94,7 @@ class BakeTests(unittest.TestCase):
                     return process
 
                 def ssh(command, *positional, **kwargs):
+                    self.assertNotIn(password, command)
                     if "UserShell" in command:
                         stages.append("boot checks")
                     elif "--command home-bootstrap" in command:
@@ -93,6 +111,7 @@ class BakeTests(unittest.TestCase):
                 guest.shutdown.side_effect = lambda process: process.wait()
                 if failure == "first SSH":
                     guest.wait.side_effect = RuntimeError(failure)
+                validation = Mock(side_effect=RuntimeError(failure) if failure == "authentication" else None)
                 output = io.StringIO()
                 with ExitStack() as stack:
                     for target, replacement in (
@@ -103,38 +122,149 @@ class BakeTests(unittest.TestCase):
                         ("subprocess.check_output", check_output),
                         ("subprocess.check_call", check_call),
                         ("subprocess.Popen", start_process),
-                        ("fetch", lambda *args, **kwargs: archive),
+                        ("fetch", fetch),
                         ("Guest", lambda *args: guest),
+                        ("validate_authentication", validation),
                     ):
                         stack.enter_context(patch("bake." + target, replacement))
                     stack.enter_context(redirect_stdout(output))
                     stack.enter_context(redirect_stderr(output))
                     if failure:
                         with self.assertRaisesRegex(RuntimeError, failure):
-                            bake.bake(args, {"path": str(snapshot)}, recipe)
+                            bake.bake(args, {"path": str(snapshot)}, recipe, password)
                     else:
-                        bake.bake(args, {"path": str(snapshot)}, recipe)
+                        bake.bake(args, {"path": str(snapshot)}, recipe, password)
+                if failure in (None, "authentication", "bootstrap"):
+                    validation.assert_called_once_with(guest, password, ANY)
+                    self.assertEqual(len(processes), 2)
+                else:
+                    validation.assert_not_called()
+                self.assertNotIn(password, output.getvalue())
                 self.assertTrue(all(process.returncode == 0 for process in processes))
                 workspaces = list(root.glob(".bake-macos-*"))
                 if failure:
                     self.assertEqual((args.output / "disk.raw").read_text(), "existing image")
                     self.assertEqual(len(workspaces), 1)
                     work = workspaces[0]
-                    self.assertEqual((work / "image/disk.raw").read_text(), "installed guest")
-                    self.assertEqual((work / "provision.log").read_text(), "VM log\n")
+                    if failure not in ("installation", "provisioning options"):
+                        self.assertEqual((work / "image/disk.raw").read_text(), "installed guest")
+                        self.assertEqual((work / "provision.log").read_text(), "VM log\n")
                     self.assertFalse((work / "password").exists())
                     self.assertIn(str(work), output.getvalue())
-                    if failure == "boot checks":
+                    if failure in ("boot checks", "authentication"):
                         self.assertNotIn("bootstrap", stages)
                     elif failure == "bootstrap":
                         self.assertEqual((work / "bootstrap.log").read_text(), "bootstrap output\n")
                 else:
                     self.assertEqual(workspaces, [])
+                    for path in args.output.iterdir():
+                        if path.is_file():
+                            self.assertNotIn(password.encode(), path.read_bytes())
                     image = json.loads((args.output / "image.json").read_text())
                     self.assertEqual(image["capabilities"], capabilities)
                     self.assertEqual(image["bootstrap"]["repositories"]["emacs"]["revision"], "a" * 40)
                     for name in ("provision.log", "vfkit.log", "bootstrap.log"):
                         self.assertTrue((args.output / name).read_text())
+
+    def test_password_file_preserves_whitespace_and_removes_one_line_ending(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "input-password"
+            for ending in (b"", b"\n", b"\r\n"):
+                contents = "  pässword $`'  ".encode() + ending
+                path.write_bytes(contents)
+                path.chmod(0o640)
+                self.assertEqual(bake.read_password(path), "  pässword $`'  ")
+                self.assertEqual(path.read_bytes(), contents)
+                self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+
+    def test_invalid_password_files_fail_without_disclosing_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "input-password"
+            for contents in (b"", b"\n", b"secret\n\n", b"secret\nother", b"secret\r",
+                             b"secret\x00", b"secret\x1b", b"secret\xff", "secret\u0085".encode()):
+                with self.subTest(contents=contents):
+                    path.write_bytes(contents)
+                    with self.assertRaises(ValueError) as raised:
+                        bake.read_password(path)
+                    self.assertNotIn("secret", str(raised.exception))
+                    self.assertEqual(path.read_bytes(), contents)
+
+    def test_interactive_password_is_confirmed_and_echo_fallback_is_rejected(self):
+        for answers, expected in (([" chosen ", " chosen "], " chosen "),
+                                  (["secret", "other"], None)):
+            with patch("builtins.open"), patch("bake.getpass.getpass", side_effect=answers) as prompt:
+                if expected is None:
+                    with self.assertRaisesRegex(ValueError, "do not match"):
+                        bake.read_password(None)
+                else:
+                    self.assertEqual(bake.read_password(None), expected)
+                self.assertEqual(prompt.call_count, 2)
+        with patch("builtins.open", side_effect=OSError):
+            with self.assertRaisesRegex(ValueError, "--password-file"):
+                bake.read_password(None)
+        with patch("builtins.open"), patch("bake.getpass.getpass", side_effect=bake.getpass.GetPassWarning):
+            with self.assertRaisesRegex(ValueError, "--password-file"):
+                bake.read_password(None)
+
+    def test_main_acquires_password_before_configuration_and_skips_it_for_inspection(self):
+        with patch("sys.argv", ["bake-macos"]), patch("builtins.open", side_effect=OSError), patch("bake.load_configuration") as load:
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                bake.main()
+            load.assert_not_called()
+        for option in ("--check", "--list-host-fonts"):
+            with patch("sys.argv", ["bake-macos", option]), patch("bake.read_password") as read, patch("bake.load_configuration", return_value=({}, RECIPE)), patch("bake.discover_fonts", return_value=[]), redirect_stdout(io.StringIO()):
+                bake.main()
+                read.assert_not_called()
+
+    def test_main_passes_password_file_contents_to_bake(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "password"
+            path.write_bytes(b" chosen password \r\n")
+            with patch("sys.argv", ["bake-macos", "--password-file", str(path)]), patch("bake.load_configuration", return_value=({}, RECIPE)), patch("bake.bake") as build:
+                bake.main()
+                self.assertEqual(build.call_args.args[3], " chosen password ")
+            self.assertEqual(path.read_bytes(), b" chosen password \r\n")
+
+    def test_validate_authentication_transports_password_privately(self):
+        guest = Mock(spec=bake.Guest)
+        guest.user = "user"
+        guest.ssh.side_effect = [
+            None,
+            subprocess.CompletedProcess([], 0, "sysadminctl: Secure token is ENABLED for user user\n"),
+        ]
+        password = "  chosen pässword $`'  "
+        authenticator = Path("authenticate")
+        output = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(output):
+            bake.validate_authentication(guest, password, authenticator)
+        guest.copy.assert_called_once_with(authenticator, "macos-image-build/authenticate")
+        authentication, token_status = guest.ssh.call_args_list
+        self.assertEqual(authentication.args, ("macos-image-build/authenticate user",))
+        self.assertEqual(authentication.kwargs["input"], password)
+        self.assertEqual(authentication.kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(authentication.kwargs["stderr"], subprocess.DEVNULL)
+        self.assertEqual(token_status.args, ("LC_ALL=C /usr/sbin/sysadminctl -secureTokenStatus user",))
+        self.assertNotIn(password, output.getvalue())
+
+    def test_validate_authentication_rejects_password_failure(self):
+        guest = Mock(spec=bake.Guest)
+        guest.user = "user"
+        password = "secret password"
+        guest.ssh.side_effect = subprocess.CalledProcessError(1, "authenticate", stderr=password)
+        output = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(output):
+            with self.assertRaisesRegex(RuntimeError, "Initial login password authentication failed") as raised:
+                bake.validate_authentication(guest, password, Path("authenticate"))
+        self.assertEqual(guest.ssh.call_count, 1)
+        self.assertNotIn(password, str(raised.exception))
+        self.assertNotIn(password, output.getvalue())
+
+    def test_validate_authentication_requires_secure_token_for_the_account(self):
+        for status in ("", "Secure token is DISABLED for user user", "Secure token is ENABLED for user user2"):
+            guest = Mock(user="user")
+            guest.ssh.side_effect = [None, subprocess.CompletedProcess([], 0, status)]
+            with self.subTest(status=status), self.assertRaisesRegex(RuntimeError, "Secure Token"):
+                bake.validate_authentication(guest, "secret", Path("authenticate"))
 
     def test_failed_bake_keeps_workspace_and_reports_its_path(self):
         with tempfile.TemporaryDirectory() as directory:

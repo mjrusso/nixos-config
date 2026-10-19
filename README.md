@@ -1470,10 +1470,9 @@ The template selects `darwinConfigurations."aarch64-darwin@vm"`. That
 configuration grants the user passwordless sudo, disables computer sleep,
 sets Fish as the login shell, and installs Ghostty terminal definitions.
 The builder authorizes the public key in the `.pub` file beside `--identity`.
-It creates a random account password and deletes the host's temporary password
-file once SSH key access is established. The guest account retains that
-password; the exported bundle contains no plaintext password file.
-Set a known password [after creating the VM](#set-a-login-password).
+The builder creates the account with the password you supply. Every VM created
+from the image starts with that password. Keep it in a password manager; you
+will need it to log in through the graphical console or change the password.
 
 ##### Select host fonts (optional)
 
@@ -1517,6 +1516,26 @@ Run from the system configuration directory, or pass `--flake PATH`:
 nix run .#bake-macos -- --check
 nix run .#bake-macos -- --identity ~/.ssh/id_ed25519
 ```
+
+The builder asks you to enter and confirm the initial login password before
+downloading VM artifacts or installing MacOS. Password input is hidden. For
+unattended builds, keep a password file outside the configuration repository
+and pass its path:
+
+``` bash
+nix run .#bake-macos -- --identity ~/.ssh/id_ed25519 \
+  --password-file "$HOME/.config/voom/initial-password"
+```
+
+The file must contain a nonempty UTF-8 password, optionally followed by one
+LF or CRLF line ending. Spaces are preserved; control characters and extra
+lines are rejected. The builder leaves your file unchanged. It uses a
+temporary copy with mode `0600` and removes that copy on success or failure.
+The password is not written to manifests or logs, and the exported bundle
+contains no plaintext password file.
+
+Without an interactive terminal, `--password-file` is required. `--check` and
+`--list-host-fonts` do not read or prompt for a password.
 
 `--check` evaluates and validates `macosImage`. It may fetch flake inputs,
 but does not download the IPSW or Nix archive or start a VM.
@@ -1568,26 +1587,21 @@ voom start macos-dev
 voom ssh macos-dev
 ```
 
-The image already includes the results of `home-bootstrap`. Continue with
-[password setup](#set-a-login-password) in the guest session. To update its
-configuration later, use [voom-update](#update-running-vms).
+The image already includes the results of `home-bootstrap`. You can
+[change the login password](#change-the-login-password) in the guest session. To
+update its configuration later, use [voom-update](#update-running-vms).
 
-##### Set a login password
+##### Change the login password
 
-In the guest's SSH session, set a known password for graphical or console
-login:
+To change a VM's login password, run this command in its SSH session:
 
 ``` bash
-sudo -n /usr/bin/passwd "$USER"
+/usr/bin/passwd
 ```
 
-Enter the new password twice when prompted. Passwordless sudo allows this
-reset without the random password created during baking. Set the password
-separately in each VM after creating it.
-
-If the login keychain cannot unlock afterward, follow
-[Apple's keychain reset instructions](https://support.apple.com/guide/keychain-access/if-you-need-to-update-your-keychain-password-kyca2429/mac).
-Resetting the keychain deletes the passwords stored in it.
+Enter the current password, then the new password twice. Passwordless sudo
+cannot reset this account without its current password. If an older image
+has an unknown password, rebuild it and create a new VM.
 
 Run `exit` to return to the host shell. To open the VM's graphical display,
 run this command on the host:
@@ -1596,7 +1610,8 @@ run this command on the host:
 voom gui macos-dev
 ```
 
-Log in with the username from `user-info.nix` and the password you just set.
+Log in with the username from `user-info.nix` and the chosen initial password,
+or your new password if you changed it.
 
 ##### Validate the image with Voom (optional)
 
@@ -1631,8 +1646,13 @@ within the guest home are recorded in `image.json` under
 `bootstrap.repositories`. These IDs describe the image; later bakes may clone
 different commits. Voom preserves `image.json` as `bundle.json` on import.
 
-The standalone boot checks SSH key access, MacOS version, Nix, system activation,
-passwordless sudo, Fish, and Ghostty terminal support.
+The standalone boot checks SSH key access, MacOS version, Nix, system
+activation, passwordless sudo, Fish, and Ghostty terminal support. It also
+verifies the chosen password through Open Directory's `ODRecord.verifyPassword`
+API and checks that Secure Token is enabled. The check uses SSH key
+authentication and sends the password through stdin. SSH password
+authentication remains disabled. Failed password authentication or a missing
+Secure Token fails the bake.
 
 Between VM processes, the builder waits up to two minutes for Apple's VM
 helper to release storage locks.

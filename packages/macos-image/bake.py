@@ -1,6 +1,7 @@
 import argparse
 import ctypes
 import fcntl
+import getpass
 import hashlib
 import ipaddress
 import json
@@ -17,12 +18,64 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+import warnings
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from host_fonts import discover_fonts, host_font_directories, install_fonts, stage_fonts
 
 RESOURCES = Path(__file__).resolve().parent
+
+
+def read_password(password_file):
+    if password_file is not None:
+        try:
+            password = password_file.expanduser().read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            raise ValueError("Password file must contain UTF-8 text") from None
+        if password.endswith("\r\n"):
+            password = password[:-2]
+        elif password.endswith("\n"):
+            password = password[:-1]
+    else:
+        try:
+            with open("/dev/tty", "w") as terminal, warnings.catch_warnings():
+                warnings.simplefilter("error", getpass.GetPassWarning)
+                password = getpass.getpass("Initial VM login password: ", stream=terminal)
+                confirmation = getpass.getpass("Confirm initial VM login password: ", stream=terminal)
+        except (OSError, EOFError, getpass.GetPassWarning):
+            raise ValueError("An interactive terminal or --password-file PATH is required") from None
+        if password != confirmation:
+            raise ValueError("Passwords do not match")
+    if not password or any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in password):
+        raise ValueError("Password must be nonempty and contain no control characters or extra lines")
+    try:
+        password.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("Password must contain valid UTF-8 text") from None
+    return password
+
+
+def validate_authentication(guest, password, authenticator):
+    guest.copy(authenticator, "macos-image-build/authenticate")
+    try:
+        guest.ssh(
+            shlex.join(["macos-image-build/authenticate", guest.user]),
+            input=password,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+        )
+    except subprocess.CalledProcessError:
+        raise RuntimeError("Initial login password authentication failed") from None
+    result = guest.ssh(
+        "LC_ALL=C /usr/sbin/sysadminctl -secureTokenStatus " + shlex.quote(guest.user),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=60,
+    )
+    if not re.search(r"\bSecure token is ENABLED for user " + re.escape(guest.user) + r"(?:\s|$)", result.stdout):
+        raise RuntimeError("Secure Token is not enabled for the initial account")
 
 
 def parse_recipe(recipe):
@@ -402,7 +455,7 @@ def build_workspace(parent):
         shutil.rmtree(directory)
 
 
-def bake(args, metadata, recipe):
+def bake(args, metadata, recipe, password):
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise ValueError("bake-macos requires an Apple Silicon Mac running MacOS 27 or later")
     if int(platform.mac_ver()[0].split(".")[0]) < 27:
@@ -453,6 +506,11 @@ def bake(args, metadata, recipe):
     cache.mkdir(parents=True, exist_ok=True)
 
     with build_workspace(destination.parent) as temporary:
+        password_file = temporary / "password"
+        descriptor = os.open(password_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(password)
         bundle = temporary / "image"
         bundle.mkdir()
         families = args.font_family if args.font_family is not None else recipe["fontFamilies"]
@@ -524,6 +582,7 @@ def bake(args, metadata, recipe):
                     ).strip(),
                     "vfkit": subprocess.check_output(["vfkit", "--version"], text=True).strip(),
                     "installerSha256": checksum(RESOURCES / "Installer.swift"),
+                    "authenticatorSha256": checksum(RESOURCES / "Authenticate.swift"),
                     "orchestratorSha256": checksum(Path(__file__)),
                     "provisionerSha256": checksum(RESOURCES / "provision.sh"),
                 },
@@ -531,13 +590,17 @@ def bake(args, metadata, recipe):
             )
             + "\n"
         )
+        authenticator = temporary / "authenticate"
+        subprocess.check_call([
+            "/usr/bin/xcrun", "--sdk", "macosx", "swiftc", "-swift-version", "6",
+            "-target", "arm64-apple-macos27.0", "-framework", "OpenDirectory",
+            RESOURCES / "Authenticate.swift", "-o", authenticator,
+        ])
+        subprocess.check_call([native, "validate-provisioning", bundle, password_file])
         ipsw = fetch(recipe["ipsw"], cache, suffix=".ipsw")
         nix_archive = fetch(recipe["nix"], cache)
         subprocess.check_call([native, "install", bundle, ipsw], timeout=args.install_timeout)
         wait_for_storage(bundle)
-        password_file = temporary / "password"
-        password_file.write_text(secrets.token_urlsafe(32))
-        password_file.chmod(0o600)
         askpass = temporary / "askpass"
         askpass.write_text("#!/bin/sh\nexec /bin/cat " + shlex.quote(str(password_file)) + "\n")
         askpass.chmod(0o700)
@@ -574,9 +637,10 @@ def bake(args, metadata, recipe):
                 )
                 guest.ssh(
                     "sudo -S -p '' /bin/sh -c " + shlex.quote(setup),
-                    input=password_file.read_text() + "\n",
+                    input=password + "\n",
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
-                password_file.unlink()
                 print(
                     "Installing Nix and applying the locked guest configuration...",
                     flush=True,
@@ -627,6 +691,9 @@ if sudo -n /bin/launchctl print system/org.voom.guest-services >/dev/null 2>&1; 
     exit 1
 fi
 """, timeout=60)
+                print("Checking initial password authentication and Secure Token...", flush=True)
+                validate_authentication(guest, password, authenticator)
+                password_file.unlink()
                 install_fonts(guest, fonts, font_staging)
                 print("Running home-bootstrap in the configured guest...", flush=True)
                 with (temporary / "bootstrap.log").open("w") as bootstrap_log:
@@ -662,6 +729,10 @@ def main():
         default=Path.cwd(),
         help="system configuration flake containing macosImage (default: current directory)",
     )
+    parser.add_argument(
+        "--password-file", type=Path,
+        help="read the initial login password from a UTF-8 file instead of prompting",
+    )
     parser.add_argument("--identity", type=Path, default=Path("~/.ssh/id_ed25519"))
     parser.add_argument(
         "--output",
@@ -693,11 +764,12 @@ def main():
             return
         if args.font_family is not None and any(not family.strip() for family in args.font_family):
             raise ValueError("--font-family must not be empty")
+        password = None if args.check else read_password(args.password_file)
         metadata, recipe = load_configuration(args.flake.expanduser().resolve())
         if args.check:
             print("Recipe is valid")
         else:
-            bake(args, metadata, recipe)
+            bake(args, metadata, recipe, password)
     except (
         OSError,
         ValueError,

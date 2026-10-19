@@ -58,8 +58,8 @@ final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
 
     func execute() async throws {
         let args = CommandLine.arguments
-        guard args.count == 4, ["install", "provision"].contains(args[1]) else {
-            throw BuildError("Usage: macos-image-native install BUNDLE IPSW | provision BUNDLE PASSWORD_FILE")
+        guard args.count == 4, ["install", "provision", "validate-provisioning"].contains(args[1]) else {
+            throw BuildError("Usage: macos-image-native install BUNDLE IPSW | provision BUNDLE PASSWORD_FILE | validate-provisioning BUNDLE PASSWORD_FILE")
         }
         guard VZVirtualMachine.isSupported else { throw BuildError("Virtualization is unavailable on this host") }
         let bundle = URL(fileURLWithPath: args[2], isDirectory: true)
@@ -120,6 +120,19 @@ final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
             exit(EXIT_SUCCESS)
         }
 
+        let provisioning = VZMacGuestProvisioningOptions()
+        provisioning.fullName = image.user
+        provisioning.username = image.user
+        provisioning.password = try String(contentsOfFile: args[3], encoding: .utf8)
+        provisioning.enablesRemoteLogin = true
+        provisioning.logsInAutomatically = false
+        do {
+            try provisioning.validate()
+        } catch {
+            throw BuildError("Invalid initial account provisioning options")
+        }
+        if args[1] == "validate-provisioning" { exit(EXIT_SUCCESS) }
+
         let vm = VZVirtualMachine(configuration: try Self.configuration(bundle: bundle, image: image))
         virtualMachine = vm
         vm.delegate = self
@@ -132,12 +145,6 @@ final class Installer: NSObject, @MainActor VZVirtualMachineDelegate {
         window.contentView = view
         window.makeKeyAndOrderFront(nil)
         self.window = window
-        let provisioning = VZMacGuestProvisioningOptions()
-        provisioning.fullName = image.user
-        provisioning.username = image.user
-        provisioning.password = try String(contentsOfFile: args[3], encoding: .utf8)
-        provisioning.enablesRemoteLogin = true
-        provisioning.logsInAutomatically = false
         let options = VZMacOSVirtualMachineStartOptions()
         try options.setGuestProvisioning(provisioning)
         try await vm.start(options: options)
