@@ -124,7 +124,6 @@
           }
           ''
             python3 -m unittest discover -s ${./packages/macos-image} -p 'test_*.py'
-            python3 -m unittest discover -s ${./packages/voom-macos-guest} -p 'test_*.py'
             shellcheck ${./scripts/verify-macos-voom} ${./packages/macos-image/provision.sh} ${./scripts/bake-macos} ${./scripts/home-bootstrap}
             touch $out
           '';

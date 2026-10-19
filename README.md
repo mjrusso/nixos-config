@@ -1557,20 +1557,9 @@ voom image import macos "$HOME/vms/golden-aarch64-darwin" \
 voom create macos-dev --image macos
 ```
 
-If you want to share a host directory, add it while the VM is stopped.
-Replace `/path/to/project` with an existing directory on the host:
-
-``` bash
-voom share add macos-dev project /path/to/project /Volumes/project
-```
-
-Add `--readonly` to make the share read-only. Use a writable guest mount path
-such as `/Volumes/project`; MacOS's sealed root prevents creating arbitrary
-`/mnt` directories.
-
-To enable automatic TCP forwarding, run `voom forward auto enable macos-dev`
-on the host. It forwards wildcard listeners and excludes SSH and
-guest-loopback-only listeners.
+MacOS guests support VM lifecycle operations, the graphical console, and SSH.
+Voom-managed file sharing, application port forwarding, and egress/proxy
+attachment are unsupported.
 
 Start the VM and connect over SSH:
 
@@ -1611,14 +1600,10 @@ Log in with the username from `user-info.nix` and the password you just set.
 
 ##### Validate the image with Voom (optional)
 
-This optional check tests the baked bundle through Voom, including its
-networking and host-side read-only exports. Baking checks boot and configuration;
-shares, read-only enforcement, listener reports, and automatic forwarding are
-checked separately here. The command creates a disposable VM; it does not test
-or modify `macos-dev`. You can repeat it against the same bundle without baking
-again.
+This check creates a disposable VM and verifies SSH, Nix, data persistence,
+and Apple identity across a restart.
 
-Run from your configuration repository on the host, using the installed Voom:
+Run from your configuration repository on the Mac host:
 
 ``` bash
 nix run .#verify-macos-voom -- \
@@ -1627,28 +1612,8 @@ nix run .#verify-macos-voom -- \
   --identity "$HOME/.ssh/id_ed25519"
 ```
 
-`--voom` selects the Voom executable on your `PATH`. The checker resolves any
-symlinks and verifies that vfkit, gvproxy, and the identity helper come from
-that executable's package. The command clears inherited `VOOM_*` settings,
-uses private state/config/cache/runtime directories, and checks helper paths and
-capabilities through `voom debug helpers`. It records versions, helper hashes,
-command output, and guest results.
-
-Acceptance imports a disposable image, creates a VM, checks SSH and Nix,
-tests writable and read-only shares, and checks automatic TCP forwarding and
-its removal. It then restarts the VM, checks persistence, and repeats the share
-and forwarding checks. Allow disk space for the imported image and VM copy.
-Do not run a VM directly from the source bundle during the check. Run from
-a graphical login session with an SSH identity that works without prompting.
-
-The command removes its VM and imported image after success or failure. Logs
-and `evidence/result.json` remain in the printed `/tmp/voom-accept-*` directory.
-If cleanup fails, it retains state for recovery and exits nonzero.
-Use `--work-dir /tmp/voom-check-01` to choose a new evidence directory and
-`--timeout SECONDS` to change the per-stage timeout (default 600).
-
-Configuration checks and unit tests can run on Linux. Installation, boot
-validation, and Voom acceptance require a Mac.
+Logs and `evidence/result.json` are saved in the printed
+`/tmp/voom-accept-*` directory.
 
 ##### Build details
 
@@ -1667,16 +1632,7 @@ within the guest home are recorded in `image.json` under
 different commits. Voom preserves `image.json` as `bundle.json` on import.
 
 The standalone boot checks SSH key access, MacOS version, Nix, system activation,
-passwordless sudo, Fish, and Ghostty terminal support. It also checks the installed
-guest-service declaration and launchd job, then records their capabilities in
-`image.json`. These capabilities describe installed services; they do not mean
-Voom integration tests have passed. Test shares, listener reporting, and
-forwarding afterward with [Voom acceptance](#validate-the-image-with-voom-optional).
-
-The guest service runs as root under launchd with the label
-`org.voom.guest-services`. It mounts `voom-control` at `/var/run/voom`, mounts
-user shares, and reports TCP listeners every two seconds. Its guest log is
-`/var/log/voom-guest-services.log`.
+passwordless sudo, Fish, and Ghostty terminal support.
 
 Between VM processes, the builder waits up to two minutes for Apple's VM
 helper to release storage locks.

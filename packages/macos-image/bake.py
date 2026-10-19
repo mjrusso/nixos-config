@@ -277,19 +277,6 @@ def bootstrap_home(guest, timeout, log):
     return {"repositories": repositories}
 
 
-def guest_capabilities(guest):
-    result = guest.ssh(
-        "cat /etc/voom/guest-services.json && sudo -n /bin/launchctl print system/org.voom.guest-services >/dev/null",
-        stdout=subprocess.PIPE,
-        timeout=30,
-    )
-    services = json.loads(result.stdout)
-    expected = {"controlShare": True, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
-    if services.get("schemaVersion") != 1 or services.get("capabilities") != expected:
-        raise ValueError("The Darwin VM configuration must install Voom guest services")
-    return expected
-
-
 def stop_process(process):
     if process is not None and process.poll() is None:
         process.terminate()
@@ -486,6 +473,7 @@ def bake(args, metadata, recipe):
                 "recipe": recipe,
                 "hostFonts": {"requestedFamilies": families, "files": fonts},
                 "capabilities": {
+                    "metadataDisk": False,
                     "controlShare": False,
                     "guestPortReport": False,
                     "guestShareMount": False,
@@ -620,7 +608,6 @@ def bake(args, metadata, recipe):
                 process = subprocess.Popen(vfkit_arguments(bundle, image), stdout=log, stderr=log)
                 guest.wait(process, image["macAddress"])
                 print("Checking guest boot and configuration...", flush=True)
-                image["capabilities"] = guest_capabilities(guest)
                 guest.ssh("""set -eu
 test "$(sw_vers -productVersion | cut -d. -f1)" -ge 27
 test -e /etc/mjr-vm-guest
@@ -633,6 +620,12 @@ env TERM=xterm-ghostty /run/current-system/sw/bin/fish --login --interactive --c
 '
 /nix/var/nix/profiles/default/bin/nix --version
 sudo -n true
+test ! -e /Library/LaunchDaemons/org.voom.guest-services.plist
+test ! -L /Library/LaunchDaemons/org.voom.guest-services.plist
+if sudo -n /bin/launchctl print system/org.voom.guest-services >/dev/null 2>&1; then
+    echo 'Obsolete Voom guest service is still loaded' >&2
+    exit 1
+fi
 """, timeout=60)
                 install_fonts(guest, fonts, font_staging)
                 print("Running home-bootstrap in the configured guest...", flush=True)

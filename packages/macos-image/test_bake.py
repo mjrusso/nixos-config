@@ -46,7 +46,7 @@ class BakeTests(unittest.TestCase):
                                        font_family=None, no_host_fonts=True, install_timeout=10, provision_timeout=10)
                 if failure:
                     self.bundle(args.output, "existing image")
-                capabilities = {"controlShare": True, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
+                capabilities = {"metadataDisk": False, "controlShare": False, "guestPortReport": False, "guestShareMount": False, "nixosSwitch": False}
                 stages, processes = [], []
                 guest = Mock(spec=bake.Guest)
 
@@ -77,7 +77,6 @@ class BakeTests(unittest.TestCase):
                     return process
 
                 def ssh(command, *positional, **kwargs):
-                    self.assertNotIn("/Volumes/voom-check", command)
                     if "UserShell" in command:
                         stages.append("boot checks")
                     elif "--command home-bootstrap" in command:
@@ -85,8 +84,6 @@ class BakeTests(unittest.TestCase):
                         stages.append("bootstrap")
                         kwargs["stdout"].write("bootstrap output\n")
                     else:
-                        if "guest-services.json" in command:
-                            return subprocess.CompletedProcess([], 0, json.dumps({"schemaVersion": 1, "capabilities": capabilities}))
                         return subprocess.CompletedProcess([], 0, "a" * 40)
                     if stages[-1] == failure:
                         raise RuntimeError(failure)
@@ -186,16 +183,6 @@ class BakeTests(unittest.TestCase):
                 with patch("bake.subprocess.run", return_value=ssh_result, side_effect=ssh_error):
                     with self.assertRaises(expected):
                         guest.shutdown(process)
-
-    def test_guest_capabilities_require_the_installed_service_contract(self):
-        guest = Mock()
-        capabilities = {"controlShare": True, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
-        guest.ssh.return_value = subprocess.CompletedProcess([], 0, json.dumps({"schemaVersion": 1, "capabilities": capabilities}))
-        self.assertEqual(bake.guest_capabilities(guest), capabilities)
-        for services in ({}, {"schemaVersion": 2, "capabilities": capabilities}, {"schemaVersion": 1, "capabilities": {"controlShare": True}}):
-            guest.ssh.return_value.stdout = json.dumps(services)
-            with self.subTest(services=services), self.assertRaises(ValueError):
-                bake.guest_capabilities(guest)
 
     def test_bootstrap_records_git_revisions_from_guest(self):
         guest = Mock()

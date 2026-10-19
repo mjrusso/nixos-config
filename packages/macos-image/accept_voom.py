@@ -10,13 +10,13 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 import uuid
 
 
 VM = "acceptance-vm"
 IMAGE = "acceptance-image"
 HELPERS = ("vfkit", "gvproxy", "voom-macos-identity")
+DISABLED_CAPABILITIES = ("metadataDisk", "controlShare", "guestPortReport", "guestShareMount", "nixosSwitch")
 
 
 def fingerprint_bundle(bundle):
@@ -103,7 +103,7 @@ class Acceptance:
                 flag = "--capabilities" if name == "vfkit" else "-capabilities"
                 result = self.command(flag, executable=bundled, timeout=15)
                 capabilities = json.loads(result.stdout)
-                required = ("gui-lifecycle-v1", "virtiofs-readonly-v1") if name == "vfkit" else ("guest-isolation-v1",)
+                required = ("gui-lifecycle-v1",) if name == "vfkit" else ("guest-isolation-v1",)
                 if any(capabilities.get(capability) != 1 for capability in required):
                     raise RuntimeError(f"bundled {name} lacks required capabilities: {capabilities}")
                 evidence[name]["capabilities"] = capabilities
@@ -157,48 +157,19 @@ class Acceptance:
             raise TimeoutError(f"MacOS guest verification timed out; failing checks: {', '.join(failures) or 'no report'}; see {self.evidence}") from error
         return self.json("info", VM)
 
-    def verify_shares(self):
-        self.ssh(f'''for attempt in $(seq 1 60); do
-    if test -f /Volumes/voom-accept-rw/from-host && test -f /Volumes/voom-accept-ro/from-host; then break; fi
-    sleep 1
-done
-test "$(cat /Volumes/voom-accept-rw/from-host)" = {self.token}
-test "$(cat /Volumes/voom-accept-ro/from-host)" = {self.token}
-printf '%s\\n' {self.token} > /Volumes/voom-accept-rw/from-guest
-if sudo -n /usr/bin/touch /Volumes/voom-accept-ro/forbidden-write; then exit 1; fi
-''')
-        if (self.root / "rw/from-guest").read_text().strip() != self.token or (self.root / "ro/forbidden-write").exists():
-            raise RuntimeError("Shared-file round trip or read-only enforcement failed")
-
-    def verify_forwarding(self, phase):
-        code = '''import functools, http.server, json, os
-handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory="/Volumes/voom-accept-rw")
-server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), handler)
-pid = os.fork()
-if pid:
-    print(json.dumps({"port": server.server_port, "pid": pid}), flush=True)
-    os._exit(0)
-os.setsid()
-with open(os.devnull, "r+b", buffering=0) as null:
-    for descriptor in (0, 1, 2):
-        os.dup2(null.fileno(), descriptor)
-server.serve_forever()
-'''
-        server = json.loads(self.ssh("/run/current-system/sw/bin/python3 -c " + shlex.quote(code)))
-        port, pid = server["port"], server["pid"]
-
-        def installed():
-            rows = self.json("forward", "list", VM)
-            return next((row for row in rows if row["kind"] == "auto" and row["guestPort"] == port and row["installed"]), None)
-
-        row = self.wait_for("automatic TCP forwarding", installed)
-        self.save(f"{phase}-forward.json", row)
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(f"http://127.0.0.1:{row['hostPort']}/from-host", timeout=10) as response:
-            if response.read().decode().strip() != self.token:
-                raise RuntimeError("Forwarded HTTP response did not match the shared file")
-        self.ssh(f"/bin/kill -TERM {int(pid)}")
-        self.wait_for("automatic forward removal", lambda: not any(row["kind"] == "auto" and row["guestPort"] == port for row in self.json("forward", "list", VM)))
+    def verify_configuration(self):
+        self.ssh("""test -L /run/current-system
+test -e /run/current-system
+/nix/var/nix/profiles/default/bin/nix --version
+/nix/var/nix/profiles/default/bin/nix --extra-experimental-features nix-command store info --store daemon --json
+sudo -n true
+test ! -e /Library/LaunchDaemons/org.voom.guest-services.plist
+test ! -L /Library/LaunchDaemons/org.voom.guest-services.plist
+if sudo -n /bin/launchctl print system/org.voom.guest-services >/dev/null 2>&1; then
+    echo 'Obsolete Voom guest service is still loaded' >&2
+    exit 1
+fi
+""")
 
     def run(self):
         print(f"Acceptance evidence: {self.evidence}", flush=True)
@@ -208,26 +179,18 @@ server.serve_forever()
         try:
             manifest = json.loads((self.bundle / "image.json").read_text())
             capabilities = manifest.get("capabilities", {})
-            if not all(capabilities.get(name) is True for name in ("controlShare", "guestShareMount", "guestPortReport")):
-                raise RuntimeError("Re-bake this bundle with Darwin guest services before running acceptance")
+            if not isinstance(capabilities, dict) or any(capabilities.get(name) is not False for name in DISABLED_CAPABILITIES):
+                raise RuntimeError("MacOS acceptance requires disabled guest-service capabilities; re-bake with the current Darwin VM configuration")
             print("Importing a disposable image and creating a VM...", flush=True)
             self.command("image", "import", IMAGE, str(self.bundle), "--ssh-identity", str(self.identity))
             self.save("image.json", self.json("image", "inspect", IMAGE))
             self.command("create", VM, "--image", IMAGE)
-            for name in ("rw", "ro"):
-                directory = self.root / name
-                directory.mkdir()
-                (directory / "from-host").write_text(self.token + "\n")
-                flags = ("--readonly",) if name == "ro" else ()
-                self.command("share", "add", VM, "accept-" + name, str(directory), "/Volumes/voom-accept-" + name, *flags)
-            self.command("forward", "auto", "enable", VM)
             self.command("start", VM)
             first = self.verify_guest("first")
             self.save("first-info.json", first)
-            self.verify_shares()
-            self.verify_forwarding("first")
+            self.verify_configuration()
             self.ssh(f"printf '%s\\n' {self.token} > \"$HOME/voom-accept-marker\"")
-            print("Restarting and checking persistence, shares, and forwarding...", flush=True)
+            print("Restarting and checking SSH, persistence, and Apple identity...", flush=True)
             self.command("stop", VM)
             self.command("start", VM)
             restarted = self.verify_guest("restart")
@@ -235,8 +198,7 @@ server.serve_forever()
             if first["vm"]["macos"]["identitySha256"] != restarted["vm"]["macos"]["identitySha256"]:
                 raise RuntimeError("Apple identity changed across restart")
             self.ssh(f'test "$(cat "$HOME/voom-accept-marker")" = {self.token}')
-            self.verify_shares()
-            self.verify_forwarding("restart")
+            self.verify_configuration()
         finally:
             after = fingerprint_bundle(self.bundle)
             self.save("source-after.json", after)
@@ -247,23 +209,18 @@ server.serve_forever()
         rows = self.json("list")
         if any(row["name"] == VM for row in rows):
             if any(row["name"] == VM and row.get("status") == "running" for row in rows):
-                script = '''set +e
-printf '\\n--- Guest service ---\\n'
-sudo -n /bin/launchctl print system/org.voom.guest-services
-printf '\\n--- Guest service log ---\\n'
-sudo -n /usr/bin/tail -n 100 /var/log/voom-guest-services.log
-printf '\\n--- Mounted filesystems ---\\n'
+                script = """set +e
+/usr/bin/sw_vers
+/usr/bin/uname -sm
+/usr/sbin/sysctl -n kern.boottime
+/bin/ls -ld /run/current-system
 /sbin/mount
-/bin/ls -ld /var/run/voom /Volumes/voom-accept-rw /Volumes/voom-accept-ro
-printf '\\n--- Guest service plist ---\\n'
-/bin/ls -l /Library/LaunchDaemons/*voom*
-/bin/cat /Library/LaunchDaemons/org.voom.guest-services.plist
-'''
+"""
                 try:
                     self.command("ssh", VM, "--", "/bin/sh -c " + shlex.quote(script), check=False, timeout=min(30, self.timeout))
                 except Exception as error:
                     self.save("guest-diagnostics-error.json", {"error": str(error)})
-            for kind in ("vfkit", "gvproxy", "auto-forward", "runtime-watch"):
+            for kind in ("vfkit", "gvproxy", "runtime-watch"):
                 self.command("logs", VM, "--kind", kind, check=False)
             self.command("stop", VM)
             self.command("remove", VM, "--force")
