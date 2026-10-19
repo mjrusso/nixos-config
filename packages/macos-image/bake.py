@@ -284,7 +284,7 @@ def guest_capabilities(guest):
         timeout=30,
     )
     services = json.loads(result.stdout)
-    expected = {"controlShare": True, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
+    expected = {"vsockControl": True, "controlShare": False, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
     if services.get("schemaVersion") != 1 or services.get("capabilities") != expected:
         raise ValueError("The Darwin VM configuration must install Voom guest services")
     return expected

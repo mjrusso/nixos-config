@@ -1,4 +1,7 @@
 import io
+import base64
+import plistlib
+import shlex
 import json
 import os
 from pathlib import Path
@@ -35,7 +38,7 @@ elif args[:2] == ['guest', 'verify']:
     ready = (state / 'checked').exists()
     (state / 'checked').touch()
     if (package / 'missing-shares').exists():
-        print(json.dumps({'checks':[{'name':'ssh-and-architecture','ok':True}, {'name':'control-share','ok':False}]}))
+        print(json.dumps({'checks':[{'name':'ssh-and-architecture','ok':True}, {'name':'control-channel','ok':False}]}))
         sys.exit(1)
     print(json.dumps({'checks':[{'name':'ssh-and-architecture','ok':ready}]}))
     sys.exit(0 if ready else 1)
@@ -51,7 +54,7 @@ elif args[0] == 'create':
     sys.exit(1)
 elif args[0] == 'list': print(json.dumps([{'name':'acceptance-vm', 'status':'running' if (state / 'running').exists() else 'stopped'}] if (state / 'vm').exists() else []))
 elif args[0] == 'ssh':
-    print('guest service failed to mount voom-control', flush=True)
+    print('guest vsock control handshake failed', flush=True)
     if (package / 'refuse-diagnostics').exists(): sys.exit(255)
     if (package / 'hang-diagnostics').exists(): time.sleep(60)
 elif args[0] == 'stop':
@@ -69,6 +72,45 @@ elif args[0] != 'logs': raise RuntimeError(args)
             helper.write_text(f"#!{sys.executable}\nimport json\nprint(json.dumps({{'gui-lifecycle-v1': 1, 'virtiofs-readonly-v1': 1, 'guest-isolation-v1': 1}}))\n")
             helper.chmod(0o755)
         return binary.resolve()
+
+    def test_control_readiness_requires_a_new_report_without_ssh(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            root = Path(directory)
+            acceptance = accept_voom.Acceptance(root / "voom", root, root, root, 10)
+            results = [
+                subprocess.CompletedProcess([], 1, "", "no report"),
+                subprocess.CompletedProcess([], 0, '{"generatedAt":"old"}', ""),
+                subprocess.CompletedProcess([], 0, '{"generatedAt":"new"}', ""),
+            ]
+            with patch.object(acceptance, "command", side_effect=results) as command, patch.object(acceptance, "ssh") as ssh, patch.object(accept_voom.time, "sleep"):
+                self.assertEqual(acceptance.wait_control("restart", "old")["generatedAt"], "new")
+            ssh.assert_not_called()
+            self.assertEqual(command.call_count, 3)
+            self.assertTrue((acceptance.evidence / "restart-control.json").exists())
+
+    def test_clone_agent_install_uses_guard_and_replaces_plist_symlink(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            root = Path(directory)
+            source = root / "agent.py"
+            source.write_text("print('adapter')\n")
+            acceptance = accept_voom.Acceptance(root / "voom", root, root, root, 10, source)
+            commands = []
+
+            def ssh(script):
+                commands.append(script)
+                return "/nix/store/test-python/bin/python3\n" if "os.path.realpath" in script else ""
+
+            with patch.object(acceptance, "ssh", side_effect=ssh), patch.object(acceptance, "command", return_value=subprocess.CompletedProcess([], 0, "shared protocol\n", "")):
+                acceptance.install_agent()
+            uploads = [command for command in commands if " | sudo -n /usr/bin/tee " in command]
+            self.assertEqual(len(uploads), 3)
+            self.assertFalse(any("/Library/LaunchDaemons" in command for command in uploads))
+            upload = next(command for command in uploads if "/guest.plist" in command)
+            plist = plistlib.loads(base64.b64decode(shlex.split(upload)[2]))
+            self.assertEqual(plist["ProgramArguments"][:2], ["/bin/sh", "-c"])
+            self.assertIn("/bin/wait4path /nix/store && exec /nix/store/test-python/bin/python3", plist["ProgramArguments"][2])
+            self.assertEqual(plist["EnvironmentVariables"]["PYTHONPATH"], "/var/lib/voom-test-agent")
+            self.assertTrue(any("/bin/ln -sf /var/lib/voom-test-agent/guest.plist /Library/LaunchDaemons/" in command for command in commands))
 
     def test_environment_is_isolated_and_clears_all_helper_overrides(self):
         original = {"VOOM_VFKIT": "/bad/vfkit", "VOOM_GVPROXY": "/bad/gvproxy", "VOOM_MACOS_IDENTITY": "/bad/identity", "VOOM_STATE_DIR": "/real/state", "SSH_AUTH_SOCK": "/agent"}
@@ -108,7 +150,7 @@ elif args[0] != 'logs': raise RuntimeError(args)
                 bundle.mkdir()
                 for name in ("image.json", "restore.json", "toolchain.json", "HardwareModel", "MachineIdentifier", "AuxiliaryStorage", "disk.raw"):
                     (bundle / name).write_text("golden")
-                (bundle / "image.json").write_text(json.dumps({"capabilities": {"controlShare": True, "guestShareMount": True, "guestPortReport": True}}))
+                (bundle / "image.json").write_text(json.dumps({"capabilities": {"vsockControl": True, "controlShare": False, "guestShareMount": True, "guestPortReport": True}}))
                 before = accept_voom.fingerprint_bundle(bundle)
                 key = root / "key"
                 key.write_text("private test identity")
@@ -149,7 +191,7 @@ elif args[0] != 'logs': raise RuntimeError(args)
             (binary.parent / "missing-shares").touch()
             acceptance = accept_voom.Acceptance(binary, root, root, root, 10)
             with patch.object(accept_voom.time, "monotonic", side_effect=[0, 0, 11]), patch.object(accept_voom.time, "sleep"):
-                with self.assertRaisesRegex(TimeoutError, "control-share") as failure:
+                with self.assertRaisesRegex(TimeoutError, "control-channel") as failure:
                     acceptance.verify_guest("boot")
             self.assertNotIn("waiting for SSH", str(failure.exception))
             report = json.loads((acceptance.evidence / "boot-guest.json").read_text())
@@ -174,7 +216,7 @@ elif args[0] != 'logs': raise RuntimeError(args)
                 self.assertLess(commands.index(ssh), commands.index(["stop", accept_voom.VM]))
                 for probe in ("launchctl print system/org.voom.guest-services", "/var/log/voom-guest-services.log", "/sbin/mount"):
                     self.assertIn(probe, ssh[-1])
-                self.assertIn("failed to mount", next(acceptance.evidence.glob("*-ssh.stdout")).read_text())
+                self.assertIn("handshake failed", next(acceptance.evidence.glob("*-ssh.stdout")).read_text())
                 self.assertFalse((state / "vm").exists())
                 self.assertFalse((state / "image").exists())
 

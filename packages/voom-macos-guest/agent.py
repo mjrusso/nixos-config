@@ -1,11 +1,9 @@
 import ipaddress
-import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
-import time
 from datetime import datetime, timezone
 
 
@@ -36,7 +34,8 @@ def mount_share(tag, target, readonly, mounts):
     current = mounts.get(str(resolved))
     if current is not None:
         source, options = current
-        if source != tag or "virtiofs" not in options or (readonly and "read-only" not in options):
+        valid_source = source == tag or (source == "virtio-fs" and "AppleVirtIOFS" in options)
+        if not valid_source or not ({"virtiofs", "AppleVirtIOFS"} & set(options)) or (readonly and "read-only" not in options):
             raise RuntimeError(f"conflicting mount at {target}: {source}")
         return
     target.mkdir(parents=True, exist_ok=True)
@@ -94,56 +93,25 @@ def report_ports():
     }
 
 
-def publish_report(report):
-    temporary = CONTROL / f".ports.json.{os.getpid()}"
-    try:
-        with temporary.open("w") as stream:
-            json.dump(report, stream)
-            stream.write("\n")
-        temporary.chmod(0o644)
-        temporary.replace(CONTROL / "ports.json")
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def run():
-    failures = {}
-
-    def attempt(name, action):
+def apply_config(config):
+    errors = []
+    mounts = mounted_filesystems()
+    manifest = config["mounts"]
+    if not isinstance(manifest, list):
+        raise ValueError("mounts must contain a list")
+    for share in manifest:
         try:
-            action()
+            if not isinstance(share, dict) or set(share) != {"tag", "guestPath", "readonly"}:
+                raise ValueError("invalid share declaration")
+            tag, target, readonly = share["tag"], share["guestPath"], share["readonly"]
+            if not isinstance(tag, str) or not isinstance(target, str) or type(readonly) is not bool or tag == TAG:
+                raise ValueError("invalid share declaration")
+            mount_share(tag, target, readonly, mounts)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-            message = str(error)
-            if isinstance(error, subprocess.CalledProcessError) and error.stderr:
-                message += ": " + error.stderr.strip()
-            if failures.get(name) != message:
-                print(f"{name}: {message}", file=sys.stderr, flush=True)
-                failures[name] = message
-            return False
-        if name in failures:
-            print(f"{name}: recovered", file=sys.stderr, flush=True)
-            del failures[name]
-        return True
-
-    while True:
-        def synchronize():
-            mounts = mounted_filesystems()
-            mount_share(TAG, CONTROL, False, mounts)
-            manifest = json.loads((CONTROL / "mounts.json").read_text())
-            if not isinstance(manifest, list):
-                raise ValueError("mounts.json must contain a list")
-            for share in manifest:
-                if not isinstance(share, dict) or set(share) != {"tag", "guestPath", "readonly"}:
-                    raise ValueError("invalid share declaration")
-                tag, target, readonly = share["tag"], share["guestPath"], share["readonly"]
-                if not isinstance(tag, str) or not isinstance(target, str) or type(readonly) is not bool or tag == TAG:
-                    raise ValueError("invalid share declaration")
-                attempt(f"share {tag}", lambda: mount_share(tag, target, readonly, mounts))
-            attempt("port report", lambda: publish_report(report_ports()))
-
-        attempt("control share", synchronize)
-        time.sleep(2)
+            errors.append(str(error))
+    return errors
 
 
 if __name__ == "__main__":
-    run()
+    import voom_control
+    voom_control.run(sys.modules[__name__])

@@ -6,6 +6,9 @@ from pathlib import Path
 import platform
 import shlex
 import signal
+import shutil
+import base64
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -39,7 +42,8 @@ def acceptance_environment(root):
 
 
 class Acceptance:
-    def __init__(self, voom, bundle, identity, root, timeout):
+    def __init__(self, voom, bundle, identity, root, timeout, agent_source=None):
+        self.agent_source = agent_source
         self.voom = voom
         self.bundle = bundle
         self.identity = identity
@@ -200,6 +204,47 @@ server.serve_forever()
         self.ssh(f"/bin/kill -TERM {int(pid)}")
         self.wait_for("automatic forward removal", lambda: not any(row["kind"] == "auto" and row["guestPort"] == port for row in self.json("forward", "list", VM)))
 
+    def wait_control(self, phase, previous=None):
+        def probe():
+            result = self.command("guest", "ports", VM, "--output", "json", check=False)
+            if result.returncode:
+                return None
+            report = json.loads(result.stdout)
+            if not report.get("generatedAt") or report["generatedAt"] == previous:
+                return None
+            return report
+
+        report = self.wait_for("vsock report before SSH diagnostics", probe)
+        self.save(phase + "-control.json", report)
+        return report
+
+    def install_agent(self):
+        shared = self.command("guest", "control-source").stdout
+        python = self.ssh("export PATH=/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:$PATH; python3 -c "+shlex.quote("import os,sys; print(os.path.realpath(sys.executable))")).strip()
+        if not python.startswith("/") or "\n" in python:
+            raise RuntimeError("No absolute guest Python interpreter available")
+        directory = "/var/lib/voom-test-agent"
+        plist = {
+            "Label": "org.voom.guest-services",
+            "ProgramArguments": ["/bin/sh", "-c", "/bin/wait4path /nix/store && exec " + shlex.quote(python) + " " + directory + "/agent.py"],
+            "EnvironmentVariables": {"PYTHONPATH": directory},
+            "RunAtLoad": True, "KeepAlive": True, "ThrottleInterval": 5,
+            "StandardOutPath": "/var/log/voom-guest-services.log",
+            "StandardErrorPath": "/var/log/voom-guest-services.log",
+        }
+        files = {
+            directory + "/agent.py": self.agent_source.read_bytes(),
+            directory + "/voom_control.py": shared.encode(),
+            directory + "/guest.plist": plistlib.dumps(plist),
+        }
+        self.ssh("sudo -n /bin/launchctl bootout system/org.voom.guest-services 2>/dev/null || true")
+        self.ssh("sudo -n /bin/mkdir -p " + directory)
+        for path, data in files.items():
+            encoded = base64.b64encode(data).decode()
+            self.ssh("printf %s " + shlex.quote(encoded) + " | /usr/bin/base64 -D | sudo -n /usr/bin/tee " + shlex.quote(path) + " >/dev/null; sudo -n /bin/chmod 0644 " + shlex.quote(path))
+        self.ssh("sudo -n /bin/ln -sf " + directory + "/guest.plist /Library/LaunchDaemons/org.voom.guest-services.plist")
+        self.ssh("sudo -n /bin/launchctl bootstrap system /Library/LaunchDaemons/org.voom.guest-services.plist")
+
     def run(self):
         print(f"Acceptance evidence: {self.evidence}", flush=True)
         self.check_helpers()
@@ -208,10 +253,16 @@ server.serve_forever()
         try:
             manifest = json.loads((self.bundle / "image.json").read_text())
             capabilities = manifest.get("capabilities", {})
-            if not all(capabilities.get(name) is True for name in ("controlShare", "guestShareMount", "guestPortReport")):
-                raise RuntimeError("Re-bake this bundle with Darwin guest services before running acceptance")
+            source = self.bundle
+            if self.agent_source:
+                source = self.root / "test-bundle"
+                subprocess.run(["/bin/cp", "-cR", str(self.bundle), str(source)], check=True, timeout=self.timeout)
+                manifest["capabilities"] = {"controlShare": False, "vsockControl": True, "guestShareMount": True, "guestPortReport": True, "nixosSwitch": False}
+                (source / "image.json").write_text(json.dumps(manifest) + "\n")
+            elif not all(capabilities.get(name) is True for name in ("vsockControl", "guestShareMount", "guestPortReport")):
+                raise RuntimeError("Use --agent-source for a disposable clone upgrade, or bake a bundle with vsock guest services")
             print("Importing a disposable image and creating a VM...", flush=True)
-            self.command("image", "import", IMAGE, str(self.bundle), "--ssh-identity", str(self.identity))
+            self.command("image", "import", IMAGE, str(source), "--ssh-identity", str(self.identity))
             self.save("image.json", self.json("image", "inspect", IMAGE))
             self.command("create", VM, "--image", IMAGE)
             for name in ("rw", "ro"):
@@ -222,14 +273,25 @@ server.serve_forever()
                 self.command("share", "add", VM, "accept-" + name, str(directory), "/Volumes/voom-accept-" + name, *flags)
             self.command("forward", "auto", "enable", VM)
             self.command("start", VM)
+            if self.agent_source:
+                self.wait_for("SSH for agent installation", lambda: self.command("ssh", VM, "--", "true", check=False).returncode == 0)
+                self.install_agent()
+            self.wait_control("first")
             first = self.verify_guest("first")
             self.save("first-info.json", first)
             self.verify_shares()
             self.verify_forwarding("first")
+            previous = self.wait_control("before-agent-restart")["generatedAt"]
+            self.ssh("sudo -n /bin/launchctl kickstart -k system/org.voom.guest-services")
+            self.wait_control("agent-restart", previous)
+            self.verify_guest("agent-restart")
+            self.verify_shares()
+            self.verify_forwarding("agent-restart")
             self.ssh(f"printf '%s\\n' {self.token} > \"$HOME/voom-accept-marker\"")
             print("Restarting and checking persistence, shares, and forwarding...", flush=True)
             self.command("stop", VM)
             self.command("start", VM)
+            self.wait_control("restart")
             restarted = self.verify_guest("restart")
             self.save("restart-info.json", restarted)
             if first["vm"]["macos"]["identitySha256"] != restarted["vm"]["macos"]["identitySha256"]:
@@ -263,7 +325,7 @@ printf '\\n--- Guest service plist ---\\n'
                     self.command("ssh", VM, "--", "/bin/sh -c " + shlex.quote(script), check=False, timeout=min(30, self.timeout))
                 except Exception as error:
                     self.save("guest-diagnostics-error.json", {"error": str(error)})
-            for kind in ("vfkit", "gvproxy", "auto-forward", "runtime-watch"):
+            for kind in ("vfkit", "gvproxy", "auto-forward", "control", "runtime-watch"):
                 self.command("logs", VM, "--kind", kind, check=False)
             self.command("stop", VM)
             self.command("remove", VM, "--force")
@@ -272,6 +334,8 @@ printf '\\n--- Guest service plist ---\\n'
             self.command("image", "remove", IMAGE, "--force")
         if self.json("list") or self.json("image", "list"):
             raise RuntimeError("Acceptance objects remain after cleanup")
+        if (self.root / "test-bundle").exists():
+            shutil.rmtree(self.root / "test-bundle")
 
 
 def interrupt(signum, frame):
@@ -303,6 +367,7 @@ def main():
     parser.add_argument("--identity", type=Path, default=Path("~/.ssh/id_ed25519"))
     parser.add_argument("--work-dir", type=Path, help="new evidence/state directory (default: a new directory under /tmp)")
     parser.add_argument("--timeout", type=int, default=600, help="timeout per command/readiness stage in seconds")
+    parser.add_argument("--agent-source", type=Path, help="install this Darwin agent into a disposable APFS clone before verification; uses the selected Voom binary's shared protocol")
     args = parser.parse_args()
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         parser.error("acceptance requires an Apple Silicon Mac with a graphical login session")
@@ -323,7 +388,10 @@ def main():
             root.mkdir(mode=0o700)
         except OSError as error:
             parser.error(f"--work-dir must be a new directory: {error}")
-    acceptance = Acceptance(voom, bundle, identity, root, args.timeout)
+    agent_source = args.agent_source.expanduser().resolve() if args.agent_source else None
+    if agent_source is not None and not agent_source.is_file():
+        parser.error("--agent-source must be an existing Darwin agent.py")
+    acceptance = Acceptance(voom, bundle, identity, root, args.timeout, agent_source)
     previous = signal.signal(signal.SIGTERM, interrupt)
     try:
         return execute(acceptance)

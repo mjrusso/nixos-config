@@ -46,7 +46,7 @@ class BakeTests(unittest.TestCase):
                                        font_family=None, no_host_fonts=True, install_timeout=10, provision_timeout=10)
                 if failure:
                     self.bundle(args.output, "existing image")
-                capabilities = {"controlShare": True, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
+                capabilities = {"vsockControl": True, "controlShare": False, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
                 stages, processes = [], []
                 guest = Mock(spec=bake.Guest)
 
@@ -189,10 +189,10 @@ class BakeTests(unittest.TestCase):
 
     def test_guest_capabilities_require_the_installed_service_contract(self):
         guest = Mock()
-        capabilities = {"controlShare": True, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
+        capabilities = {"vsockControl": True, "controlShare": False, "guestPortReport": True, "guestShareMount": True, "nixosSwitch": False}
         guest.ssh.return_value = subprocess.CompletedProcess([], 0, json.dumps({"schemaVersion": 1, "capabilities": capabilities}))
         self.assertEqual(bake.guest_capabilities(guest), capabilities)
-        for services in ({}, {"schemaVersion": 2, "capabilities": capabilities}, {"schemaVersion": 1, "capabilities": {"controlShare": True}}):
+        for services in ({}, {"schemaVersion": 2, "capabilities": capabilities}, {"schemaVersion": 1, "capabilities": {"vsockControl": True, "controlShare": False}}):
             guest.ssh.return_value.stdout = json.dumps(services)
             with self.subTest(services=services), self.assertRaises(ValueError):
                 bake.guest_capabilities(guest)

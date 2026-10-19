@@ -55,15 +55,12 @@ let
   '';
 in
 {
-  # nofail mounts are not ordered before local-fs.target. A path unit cannot
-  # detect host-side changes because virtiofs does not report them through
-  # inotify, so live manifest changes require a service or VM restart.
   systemd.services.voom-egress-trust = {
     description = "Prepare the Voom egress environment and browser trust";
     wantedBy = [ "multi-user.target" ];
     requiredBy = [ "systemd-user-sessions.service" ];
-    wants = [ "run-voom.mount" ];
-    after = [ "run-voom.mount" ];
+    wants = [ "voom-guest.service" ];
+    after = [ "voom-guest.service" ];
     before = [ "systemd-user-sessions.service" ];
     serviceConfig = {
       Type = "oneshot";

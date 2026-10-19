@@ -129,7 +129,8 @@ jq -n \
     format: $format,
     capabilities: {
       metadataDisk: false,
-      controlShare: true,
+      controlShare: false,
+      vsockControl: true,
       guestPortReport: true,
       guestShareMount: true,
       nixosSwitch: true

@@ -60,11 +60,17 @@ class AgentTests(unittest.TestCase):
             mounts = agent.mounted_filesystems()
         self.assertEqual(mounts["/Volumes/a on b (files)"], ("src", ["virtiofs", "local", "read-only"]))
 
-    def test_failed_publish_preserves_the_previous_report(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(agent, "CONTROL", Path(directory)):
-            agent.publish_report({"listeners": []})
-            with patch.object(agent.Path, "replace", side_effect=OSError("disconnected share")):
-                with self.assertRaises(OSError):
-                    agent.publish_report({"listeners": [{"port": 8080}]})
-            self.assertEqual(json.loads((agent.CONTROL / "ports.json").read_text()), {"listeners": []})
-            self.assertEqual([path.name for path in agent.CONTROL.iterdir()], ["ports.json"])
+    def test_native_apple_mount_and_readonly_validation(self):
+        target = "/private/var/run/voom-user"
+        listing = f"virtio-fs on {target} (AppleVirtIOFS, nodev, nosuid, read-only)\n"
+        with patch.object(agent.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, listing)):
+            mounts = agent.mounted_filesystems()
+            agent.mount_share("src", target, True, mounts)
+        mounts[target] = ("virtio-fs", ["AppleVirtIOFS", "nodev", "nosuid"])
+        with self.assertRaises(RuntimeError):
+            agent.mount_share("src", target, True, mounts)
+
+    def test_apply_config_rejects_reserved_share(self):
+        with patch.object(agent, "mounted_filesystems", return_value={}):
+            errors = agent.apply_config({"mounts": [{"tag": "voom-control", "guestPath": "/Volumes/control", "readonly": False}]})
+        self.assertEqual(len(errors), 1)

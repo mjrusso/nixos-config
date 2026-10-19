@@ -2,6 +2,7 @@
   lib,
   pkgs,
   userInfo,
+  voom,
   ...
 }:
 let
@@ -27,15 +28,17 @@ in
   environment.etc."voom/guest-services.json".text = builtins.toJSON {
     schemaVersion = 1;
     capabilities = {
-      controlShare = true;
+      controlShare = false;
+      vsockControl = true;
       guestPortReport = true;
       guestShareMount = true;
       nixosSwitch = false;
     };
   };
+  launchd.daemons.voom-guest-services.command = "${guestAgent}/bin/voom-guest-services";
   launchd.daemons.voom-guest-services.serviceConfig = {
     Label = "org.voom.guest-services";
-    ProgramArguments = [ "${guestAgent}/bin/voom-guest-services" ];
+    EnvironmentVariables.PYTHONPATH = "${voom.packages.${pkgs.stdenv.hostPlatform.system}.guest-control}";
     RunAtLoad = true;
     KeepAlive = true;
     ThrottleInterval = 5;

@@ -1,4 +1,4 @@
-{ config, inputs, pkgs, lib, userInfo, ... }:
+{ config, voom, pkgs, lib, userInfo, ... }:
 
 let
   user = userInfo.user;
@@ -13,116 +13,8 @@ let
     lib.optionalString (src != "") '',from="${src}"'';
   backupKeys = lib.optional ((userInfo.voomReadKey or "") != "")
     ''restrict,command="sudo --preserve-env=SSH_ORIGINAL_COMMAND ${pkgs.rrsync}/bin/rrsync -ro /"${voomReadFrom} ${userInfo.voomReadKey}'';
-  voomPortfwd = pkgs.writeShellScript "voom-portfwd" ''
-    set -u
+  guestControl = voom.packages.${pkgs.stdenv.hostPlatform.system}.guest-control;
 
-    output="''${VOOM_PORTFWD_OUTPUT:-/run/voom/ports.json}"
-    interval="''${VOOM_PORTFWD_INTERVAL:-2}"
-    dir="$(${pkgs.coreutils}/bin/dirname "$output")"
-
-    while true; do
-      if ${pkgs.util-linux}/bin/mountpoint -q "$dir"; then
-        tmp="$output.tmp.$$"
-        generated_at="$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%SZ)"
-        listeners="$(
-          ${pkgs.iproute2}/bin/ss -tlnpH 2>/dev/null \
-            | ${pkgs.gawk}/bin/awk '
-                function json_escape(s) {
-                  gsub(/\\/, "\\\\", s)
-                  gsub(/"/, "\\\"", s)
-                  return s
-                }
-                function emit(local, proc, addr, port, pid, name, n) {
-                  if (local ~ /^\[/) {
-                    n = split(local, parts, "]:")
-                    addr = substr(parts[1], 2)
-                    port = parts[2]
-                  } else {
-                    n = split(local, parts, ":")
-                    port = parts[n]
-                    addr = substr(local, 1, length(local) - length(port) - 1)
-                  }
-                  if (addr == "") addr = "*"
-
-                  pid = ""
-                  name = ""
-                  if (match(proc, /pid=[0-9]+/)) pid = substr(proc, RSTART + 4, RLENGTH - 4)
-                  if (match(proc, /"[^"]+"/)) name = substr(proc, RSTART + 1, RLENGTH - 2)
-
-                  printf "{\"proto\":\"tcp\",\"addr\":\"%s\",\"port\":%s", json_escape(addr), port
-                  if (pid != "") printf ",\"pid\":%s", pid
-                  if (name != "") printf ",\"process\":\"%s\"", json_escape(name)
-                  printf "}\n"
-                }
-                $1 == "LISTEN" { emit($4, $0) }
-              ' \
-            | ${pkgs.jq}/bin/jq -s '.'
-        )"
-
-        if ${pkgs.jq}/bin/jq -n \
-          --arg generatedAt "$generated_at" \
-          --argjson listeners "$listeners" \
-          '{schemaVersion: 1, generatedAt: $generatedAt, listeners: $listeners}' > "$tmp"; then
-          ${pkgs.coreutils}/bin/chmod 0644 "$tmp"
-          ${pkgs.coreutils}/bin/mv "$tmp" "$output"
-        else
-          ${pkgs.coreutils}/bin/rm -f "$tmp"
-        fi
-      fi
-
-      ${pkgs.coreutils}/bin/sleep "$interval"
-    done
-  '';
-  voomMountShares = pkgs.writeShellScript "voom-mount-shares" ''
-    set -euo pipefail
-
-    mounts_file="''${VOOM_MOUNTS_FILE:-/run/voom/mounts.json}"
-
-    for i in $(seq 1 10); do
-      [ -f "$mounts_file" ] && break
-      ${pkgs.coreutils}/bin/sleep 1
-    done
-    [ -f "$mounts_file" ] || exit 0
-
-    ${pkgs.jq}/bin/jq -r '
-      .[] | [
-        (.tag // ""),
-        (.guestPath // ""),
-        (if (.readonly // false) then "ro" else "rw" end)
-      ] | @tsv
-    ' "$mounts_file" | while IFS=$'\t' read -r tag guest_path mode; do
-      [ -n "$tag" ] || continue
-      [ -n "$guest_path" ] || continue
-
-      ${pkgs.coreutils}/bin/mkdir -p "$guest_path"
-      if ${pkgs.util-linux}/bin/mountpoint -q "$guest_path" 2>/dev/null; then
-        continue
-      fi
-
-      opts=()
-      if [ "$mode" = "ro" ]; then
-        opts=(-o ro)
-      fi
-
-      ${pkgs.util-linux}/bin/mount -t virtiofs "''${opts[@]}" "$tag" "$guest_path"
-    done
-  '';
-  voomSetHostname = pkgs.writeShellScript "voom-set-hostname" ''
-    set -euo pipefail
-
-    metadata_file="''${VOOM_METADATA_FILE:-/run/voom/metadata.json}"
-    [ -f "$metadata_file" ] || exit 0
-
-    hostname="$(${pkgs.jq}/bin/jq -er '.hostname | strings | select(length > 0 and length <= 63)' "$metadata_file")"
-    case "$hostname" in
-      *[^a-zA-Z0-9_-]*|-*|_*|*-|*_)
-        echo "Invalid voom hostname: $hostname" >&2
-        exit 1
-        ;;
-    esac
-
-    ${pkgs.inetutils}/bin/hostname "$hostname"
-  '';
 in
 {
   imports = [
@@ -144,14 +36,7 @@ in
   # explicitly.
   networking.firewall.enable = lib.mkDefault false;
 
-  boot.kernelModules = [ "virtiofs" ];
-
-  fileSystems."/run/voom" = {
-    device = "voom-control";
-    fsType = "virtiofs";
-    noCheck = true;
-    options = [ "nofail" ];
-  };
+  boot.kernelModules = [ "virtiofs" "vmw_vsock_virtio_transport" "qemu_fw_cfg" ];
 
   systemd.tmpfiles.rules = [
     "d /run/voom 0755 root root -"
@@ -177,40 +62,18 @@ in
     linkConfig.RequiredForOnline = "routable";
   };
 
-  systemd.services.voom-portfwd = {
-    description = "Report guest TCP listeners to voom";
+  systemd.services.voom-guest = {
+    description = "Voom vsock guest control";
     wantedBy = [ "multi-user.target" ];
-    wants = [ "network-online.target" ];
-    after = [ "network-online.target" "run-voom.mount" ];
+    after = [ "systemd-modules-load.service" ];
+    path = [ pkgs.iproute2 pkgs.util-linux pkgs.inetutils ];
+    environment.PYTHONPATH = "${guestControl}";
     serviceConfig = {
-      ExecStart = voomPortfwd;
+      Type = "notify";
+      NotifyAccess = "main";
+      ExecStart = "${pkgs.python3}/bin/python3 ${guestControl}/guest_linux.py";
       Restart = "always";
       RestartSec = "2s";
-    };
-  };
-
-  systemd.services.voom-mount-shares = {
-    description = "Mount voom-declared virtiofs shares";
-    wantedBy = [ "multi-user.target" ];
-    wants = [ "run-voom.mount" ];
-    after = [ "run-voom.mount" ];
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = voomMountShares;
-      RemainAfterExit = true;
-    };
-  };
-
-  systemd.services.voom-set-hostname = {
-    description = "Set hostname from voom metadata";
-    wantedBy = [ "multi-user.target" ];
-    wants = [ "run-voom.mount" ];
-    after = [ "run-voom.mount" ];
-    before = [ "sshd.service" ];
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = voomSetHostname;
-      RemainAfterExit = true;
     };
   };
 
