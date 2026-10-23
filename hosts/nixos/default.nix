@@ -18,8 +18,6 @@ let
     repositoryPath = "";
     passwordFile = "/etc/restic/password";
     identityFile = "/home/${user}/.ssh/id_ed25519_restic";
-    voomGuests = false;
-    voomReadIdentityFile = "/home/${user}/.ssh/id_ed25519_voom_read";
   }
   // (hostInfo.nixosBackup or { });
 in
@@ -29,6 +27,7 @@ in
     ../../modules/nixos/tailscale.nix
     ../../modules/nixos/caddy.nix
     ../../modules/nixos/voom-agent-vault.nix
+    ../../modules/nixos/voom-backup.nix
     ../../modules/nixos/vfio.nix
     ../../modules/nixos/desktop.nix
     ../../modules/shared
@@ -51,10 +50,6 @@ in
     {
       assertion = !backup.enable || (backup.target != "" && backup.repositoryPath != "");
       message = "Set hostInfo.nixosBackup.target and hostInfo.nixosBackup.repositoryPath in host-info.nix when nixosBackup.enable is true.";
-    }
-    {
-      assertion = !(backup.enable && backup.voomGuests) || (userInfo.voomReadKey or "") != "";
-      message = "Set userInfo.voomReadKey in user-info.nix when nixosBackup.voomGuests is true, and rebuild the guests.";
     }
   ];
 
@@ -310,48 +305,6 @@ in
   systemd.services.docker = {
     after = [ "libvirtd.service" ];
     partOf = [ "libvirtd.service" ];
-  };
-
-  # The staging copy is kept between runs, reducing the amount of work that
-  # rsync and restic need to do. Note that the staging copy lives on its own
-  # dataset with snapshots disabled; see modules/nixos/disk-config.nix.
-  systemd.services.voom-backup = lib.mkIf (backup.enable && backup.voomGuests) {
-    description = "Back up running Voom guests into the restic repository";
-    after = [ "network-online.target" ];
-    wants = [ "network-online.target" ];
-    serviceConfig = {
-      Type = "oneshot";
-      User = user;
-      CacheDirectory = "voom-staging";
-    };
-    path = [
-      pkgs.voom
-      pkgs.jq
-      pkgs.rsync
-      pkgs.openssh
-    ]
-    ++ builtins.filter (
-      p: (p.name or "") == "restic-${hostInfo.nixosHostname}"
-    ) config.environment.systemPackages;
-    script = ''
-      # Voom uses HOME for state and XDG_RUNTIME_DIR for running-guest pidfiles.
-      export HOME=${lib.escapeShellArg "/home/${user}"}
-      export XDG_RUNTIME_DIR="/run/user/$UID"
-      export VOOM_BACKUP_USER=${lib.escapeShellArg user}
-      export VOOM_BACKUP_IDENTITY=${lib.escapeShellArg backup.voomReadIdentityFile}
-      export VOOM_BACKUP_RESTIC=${lib.escapeShellArg "restic-${hostInfo.nixosHostname}"}
-      exec ${pkgs.bash}/bin/bash ${../../scripts/voom-backup-linux}
-    '';
-  };
-
-  systemd.timers.voom-backup = lib.mkIf (backup.enable && backup.voomGuests) {
-    description = "Daily Voom guest backup";
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnCalendar = "daily";
-      RandomizedDelaySec = "1h";
-      Persistent = true;
-    };
   };
 
   zramSwap = {

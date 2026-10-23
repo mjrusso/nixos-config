@@ -849,8 +849,6 @@ Additional keys:
 | `targetUser`           | `user` from your system configuration repository's `user-info.nix` |
 | `passwordFile`         | `/etc/restic/password`                                      |
 | `identityFile`         | that user's `~/.ssh/id_ed25519_restic`                      |
-| `voomGuests`           | `false`, see [Linux Voom Hosts](#linux-voom-hosts)          |
-| `voomReadIdentityFile` | that user's `~/.ssh/id_ed25519_voom_read`                   |
 
 Setting `enable = false`, or omitting the block, removes the service and its
 timer.
@@ -949,24 +947,26 @@ restic-<hostname> restore latest --host <hostname> --target / --include <path>
 For guests running on a Mac host, see [MacOS Voom Hosts](#macos-voom-hosts).
 
 To back up Linux [Voom](https://github.com/mjrusso/voom) guests, complete the
-[host backup setup](#backups), then enable `voomGuests` in the same
-`host-info.nix` block:
+[host backup setup](#backups), then enable `services.voomBackup` in the
+host's NixOS configuration through the constructor's `extraModules`:
 
 ``` nix
-nixosBackup = {
-  enable = true;
-  target = "<target>";
-  repositoryPath = "<path-on-target>";
-  voomGuests = true;
-};
+extraModules = [
+  {
+    services.voomBackup.enable = true;
+  }
+];
 ```
 
 This adds `voom-backup.service` and a daily timer with up to one hour of
 random delay. The timer catches up after downtime. The job copies running
 guests' `/home` and `/var/lib/docker/volumes` to
 `/var/cache/voom-staging/<guest>`, then backs up those files into the host's
-Restic repository. Stopped guests are skipped. Snapshots use the guest's
-name as the Restic host and have the `voom` tag.
+Restic repository using its `restic-<hostname>` wrapper and repository
+credentials. Stopped guests are skipped. Snapshots use the guest's name as
+the Restic host and have the `voom` tag. The guest SSH key defaults to
+`~/.ssh/id_ed25519_voom_read`; set `services.voomBackup.identityFile` to use
+a different key.
 
 The guest's virtual disk and Voom configuration live on the host and are
 not captured by this job. VM files under the guest's `/home` are copied

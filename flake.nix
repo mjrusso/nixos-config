@@ -166,12 +166,18 @@
               nixosMainDisk = "/dev/test";
               nixosBackup = {
                 enable = true;
-                voomGuests = true;
                 target = "backup.example.com";
                 repositoryPath = "/repo";
-                voomReadIdentityFile = "/keys/key with spaces";
               };
             };
+            extraModules = [
+              {
+                services.voomBackup = {
+                  enable = true;
+                  identityFile = "/keys/key with spaces";
+                };
+              }
+            ];
           };
         in
         pkgs.runCommand "check-voom-backup"
