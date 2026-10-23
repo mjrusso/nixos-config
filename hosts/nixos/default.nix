@@ -222,12 +222,15 @@ in
           "/home/${user}/vms"
           "/home/${user}/.cache"
           "/home/${user}/.npm"
+          "/home/${user}/.cargo/registry"
+          "/home/${user}/.cargo/git"
           "/home/${user}/.emacs.d.bak"
           "/home/${user}/.config/gh"
           "/home/${user}/.agent-vault/session.json"
           "**/node_modules"
           "**/.direnv"
           "**/result"
+          "**/target/*"
         ]
         ++ lib.optionals config.services.voomAgentVault.enable [
           "${config.services.voomAgentVault.stateDirectory}/attachments/*/token"
