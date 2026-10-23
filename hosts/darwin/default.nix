@@ -91,10 +91,10 @@ let user = userInfo.user;
       };
 
       dock = {
-        autohide = true;
+        autohide = systemType != "vm";
         show-recents = true;
         launchanim = true;
-        orientation = "bottom";
+        orientation = if systemType == "vm" then "left" else "bottom";
         tilesize = 64;
       };
 
