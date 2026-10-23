@@ -202,6 +202,10 @@
       );
 
       checks.x86_64-linux = {
+        llm-agent-policy = import ./tests/llm-agent-policy.nix {
+          inherit inputs;
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
         macos-image = mkMacosImageCheck "x86_64-linux";
         voom-update = mkVoomUpdateCheck "x86_64-linux";
         voom-agent-vault = import ./tests/voom-agent-vault.nix {
@@ -215,6 +219,10 @@
       };
 
       checks.aarch64-darwin = {
+        llm-agent-policy = import ./tests/llm-agent-policy.nix {
+          inherit inputs;
+          pkgs = nixpkgs.legacyPackages.aarch64-darwin;
+        };
         macos-image = mkMacosImageCheck "aarch64-darwin";
         voom-update = mkVoomUpdateCheck "aarch64-darwin";
       };
