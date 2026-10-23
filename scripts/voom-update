@@ -141,7 +141,8 @@ phase_darwin() (
     return 1
   fi
   voom ssh-config "$name" > "$work/ssh-config" || return 1
-  NIX_SSHOPTS="-F $work/ssh-config" nix copy --to "ssh-ng://voom-$name?remote-program=/nix/var/nix/profiles/default/bin/nix-daemon&remote-store=daemon" "$system" || return 1
+  # Locally built outputs are unsigned.
+  NIX_SSHOPTS="-F $work/ssh-config" nix copy --no-check-sigs --to "ssh-ng://voom-$name?remote-program=/nix/var/nix/profiles/default/bin/nix-daemon&remote-store=daemon" "$system" || return 1
   voom ssh "$name" -- sudo -n /bin/sh -s -- "$system" <<'REMOTE'
 set -eu
 system=$1

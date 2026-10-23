@@ -105,6 +105,7 @@ class UpdateTests(unittest.TestCase):
         build = next(call for call in self.calls if call["command"] == "nix" and call["args"][0] == "build")
         self.assertIn(str(self.flake) + '#darwinConfigurations."aarch64-darwin@vm".system', build["args"])
         copy = next(call for call in self.calls if call["command"] == "nix" and call["args"][0] == "copy")
+        self.assertIn("--no-check-sigs", copy["args"])
         self.assertTrue(copy["args"][copy["args"].index("--to") + 1].startswith("ssh-ng://voom-mac?"))
         self.assertIn('IdentityFile "/keys/key with spaces"', copy["config"])
         activation = next(call for call in self.calls if "stdin" in call and "darwin-rebuild" in call["stdin"])
