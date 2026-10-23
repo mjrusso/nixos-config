@@ -346,6 +346,14 @@ os.execv(os.environ["TEST_RSYNC"], ["rsync", *args[args.index("rsync") + 1:]])
         document = users / "guest" / "Documents" / "important.txt"
         document.parent.mkdir(parents=True)
         document.write_text("recover this file\n")
+        devicefs = users / "guest" / "Library" / "Developer" / "CoreDevice" / "DeviceFS"
+        devicefs.mkdir(parents=True)
+        (devicefs / "device-file.txt").write_text("virtual device data\n")
+        (devicefs.parent / "settings.txt").write_text("keep developer settings\n")
+        staged_devicefs = self.stage / "mac" / "Users" / devicefs.relative_to(users)
+        staged_devicefs.mkdir(parents=True)
+        (staged_devicefs / "stale-device-file.txt").write_text("previous device copy\n")
+        (self.stage / "mac" / MARKER).touch()
         ssh = commands / "ssh"
         ssh.write_text("#!" + sys.executable + '''
 import os
@@ -368,6 +376,10 @@ os.execv(os.environ["TEST_RRSYNC"], ["rrsync", "-ro", os.environ["TEST_USERS"]])
         documents = list(restored.rglob("important.txt"))
         self.assertEqual(len(documents), 1)
         self.assertEqual(documents[0].read_text(), document.read_text())
+        self.assertEqual(list(restored.rglob("DeviceFS")), [])
+        settings = list(restored.rglob("settings.txt"))
+        self.assertEqual(len(settings), 1)
+        self.assertEqual(settings[0].read_text(), "keep developer settings\n")
         self.assertEqual(list(restored.rglob(MARKER)), [])
         self.log.unlink()
         result = self.run_backup(VOOM_BACKUP_STAGE=self.env["RESTIC_REPOSITORY"], VM_LIST="[]")

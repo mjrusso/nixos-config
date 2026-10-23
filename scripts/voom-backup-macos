@@ -86,6 +86,7 @@ while IFS= read -r name; do
     --exclude=.cache --exclude=.npm --exclude=node_modules --exclude=.direnv \
     --exclude=result --exclude=.config/gh --exclude=Library/Caches \
     --exclude=Library/Logs --exclude=.Trash \
+    --exclude=Library/Developer/CoreDevice/DeviceFS \
     --exclude=target/ --exclude=.cargo/registry/ --exclude=.cargo/git/ \
     -e "ssh -F /dev/null -p $port -i \"$VOOM_BACKUP_IDENTITY\" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
     "$user@127.0.0.1:." "$dest/" || rc=$?
