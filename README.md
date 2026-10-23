@@ -2421,10 +2421,11 @@ prevents changes through the web interface.
 The host backup excludes agent tokens, the operator session, and generated
 HAProxy maps. Before each host restic backup, NixOS creates a consistent SQLite
 snapshot and copies Agent Vault's encrypted CA state into
-`/var/cache/agent-vault-backup`. This directory is mode `0700`, and snapshot
-files are mode `0600`, owned by `agent-vault`. A snapshot failure does not
-suppress the rest of the host backup. Restic can use the last successful
-snapshot.
+`/var/cache/agent-vault-backup`. Snapshot directories are mode `0750` and
+files are mode `0640`, owned by `agent-vault` with group
+`agent-vault-backup`. The host Restic service receives this group to read
+the snapshots. A snapshot failure does not suppress the rest of the host
+backup. Restic can use the last successful snapshot.
 
 NixOS generates the master password at
 `/var/lib/voom-agent-vault-secrets/master-password`. Store an encrypted copy

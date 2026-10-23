@@ -302,12 +302,13 @@ let
       fi
       temporary="$destination.tmp"
       sqlite3 "$source" ".backup '$temporary'"
-      chmod 0600 "$temporary"
+      chmod 0640 "$temporary"
+      chgrp agent-vault-backup "$temporary"
       mv "$temporary" "$destination"
-      install -d -m 0700 /var/cache/agent-vault-backup/ca
-      install -m 0600 /var/lib/agent-vault/.agent-vault/ca/ca.crt.pem \
+      install -d -m 0750 -g agent-vault-backup /var/cache/agent-vault-backup/ca
+      install -m 0640 -g agent-vault-backup /var/lib/agent-vault/.agent-vault/ca/ca.crt.pem \
         /var/cache/agent-vault-backup/ca/ca.crt.pem
-      install -m 0600 /var/lib/agent-vault/.agent-vault/ca/ca.key.enc \
+      install -m 0640 -g agent-vault-backup /var/lib/agent-vault/.agent-vault/ca/ca.key.enc \
         /var/cache/agent-vault-backup/ca/ca.key.enc
     '';
   };
@@ -404,6 +405,7 @@ in
     environment.variables.AGENT_VAULT_TELEMETRY = "false";
 
     users.groups.agent-vault = { };
+    users.groups.agent-vault-backup = { };
     users.users.agent-vault = {
       isSystemUser = true;
       group = "agent-vault";
@@ -414,7 +416,7 @@ in
     systemd.tmpfiles.rules = [
       "d /var/lib/voom-agent-vault-secrets 0700 root root -"
       "d /var/lib/voom-agent-vault-public 0755 agent-vault agent-vault -"
-      "d /var/cache/agent-vault-backup 0700 agent-vault agent-vault -"
+      "d /var/cache/agent-vault-backup 0750 agent-vault agent-vault-backup -"
       "d /run/voom-agent-vault-firewall 0755 root root -"
     ];
 
@@ -569,7 +571,7 @@ in
       serviceConfig = {
         Type = "oneshot";
         User = "agent-vault";
-        Group = "agent-vault";
+        Group = "agent-vault-backup";
         ExecStart = lib.getExe snapshotDatabase;
         UMask = "0077";
       };

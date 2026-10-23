@@ -89,6 +89,7 @@ in
         {
           wants = [ "voom-agent-vault-database-snapshot.service" ];
           after = [ "voom-agent-vault-database-snapshot.service" ];
+          serviceConfig.SupplementaryGroups = [ "agent-vault-backup" ];
         };
   };
 }

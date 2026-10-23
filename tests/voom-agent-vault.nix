@@ -11,9 +11,16 @@ testPkgs.testers.runNixOSTest {
   name = "voom-agent-vault";
 
   nodes.machine =
-    { pkgs, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ ../modules/nixos/voom-agent-vault.nix ];
+      imports = [
+        ../modules/nixos/host-backup.nix
+        ../modules/nixos/voom-agent-vault.nix
+      ];
+      _module.args = {
+        userInfo.user = "operator";
+        hostInfo.nixosHostname = "backup-test";
+      };
 
       networking.firewall = {
         enable = true;
@@ -30,6 +37,22 @@ testPkgs.testers.runNixOSTest {
         user = "operator";
       };
 
+      services.hostBackup = {
+        enable = true;
+        target = "unused";
+        repositoryPath = "/unused";
+      };
+      services.restic.backups.backup-test = {
+        repository = lib.mkForce "/var/lib/restic-test";
+        extraOptions = lib.mkForce [ ];
+        passwordFile = lib.mkForce (toString (pkgs.writeText "restic-test-password" "test-password\n"));
+      };
+      systemd.tmpfiles.rules = [ "d /var/lib/restic-test 0700 operator users -" ];
+      systemd.timers = {
+        restic-backups-backup-test.enable = lib.mkForce false;
+        voom-agent-vault-database-snapshot.enable = lib.mkForce false;
+      };
+
       environment.systemPackages = [
         pkgs.curl
         pkgs.python3
@@ -38,6 +61,8 @@ testPkgs.testers.runNixOSTest {
     };
 
   testScript = ''
+    from datetime import timedelta
+
     start_all()
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("voom-agent-vault-firewall.service")
@@ -58,7 +83,18 @@ testPkgs.testers.runNixOSTest {
       "systemctl --user show --property MainPID --value voom-agent-vault-bridge.service); "
       "nsenter --target \"$pid\" --mount test ! -e /home/operator/bridge-secret"
     )
-    machine.succeed("test \"$(stat -c %a /var/cache/agent-vault-backup)\" = 700")
+    machine.succeed("systemctl start restic-backups-backup-test.service")
+    machine.fail("runuser -u operator -- test -r /var/cache/agent-vault-backup/agent-vault.db")
+    machine.fail(
+      "runuser -u operator -g agent-vault-backup -- "
+      "test -r /var/lib/agent-vault/.agent-vault/agent-vault.db"
+    )
+    for path in ("agent-vault.db", "ca/ca.crt.pem", "ca/ca.key.enc"):
+        machine.succeed(
+          "umask 077; runuser -u operator -- restic-backup-test dump latest "
+          "/var/cache/agent-vault-backup/" + path + " >/tmp/restored-backup && "
+          "cmp /var/cache/agent-vault-backup/" + path + " /tmp/restored-backup"
+        )
 
     attachment_id = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     attachment_dir = "/home/operator/.local/state/voom-agent-vault/attachments/" + attachment_id
@@ -149,7 +185,7 @@ testPkgs.testers.runNixOSTest {
     machine.wait_until_fails("systemctl is-active --quiet agent-vault.service")
     machine.fail("systemctl start voom-agent-vault-firewall-check.service")
     machine.fail("systemctl is-active --quiet voom-agent-vault-firewall.service")
-    machine.sleep(32)
+    machine.sleep(duration=timedelta(seconds=32))
     machine.fail("systemctl is-active --quiet voom-agent-vault-firewall.service")
     machine.succeed("systemctl restart voom-agent-vault-firewall.service")
     machine.wait_for_unit("agent-vault.service")
