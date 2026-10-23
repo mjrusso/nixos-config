@@ -147,6 +147,59 @@
             shellcheck scripts/voom-update
             touch $out
           '';
+      mkVoomBackupCheck =
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          linuxHost = self.lib.mkNixosConfiguration {
+            inherit system;
+            userInfo = {
+              user = "guest";
+              name = "Test User";
+              email = "test@example.com";
+              sshKeys = [ ];
+              voomReadKey = "test-key";
+            };
+            hostInfo = {
+              nixosHostname = "backup-test";
+              nixosHostId = "01234567";
+              nixosMainDisk = "/dev/test";
+              nixosBackup = {
+                enable = true;
+                voomGuests = true;
+                target = "backup.example.com";
+                repositoryPath = "/repo";
+                voomReadIdentityFile = "/keys/key with spaces";
+              };
+            };
+          };
+        in
+        pkgs.runCommand "check-voom-backup"
+          {
+            VOOM_LINUX_BACKUP_SCRIPT =
+              if pkgs.stdenv.hostPlatform.isLinux then
+                pkgs.writeText "linux-voom-backup" linuxHost.config.systemd.services.voom-backup.script
+              else
+                ./scripts/voom-backup-linux;
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.bash
+              pkgs.jq
+              pkgs.shellcheck
+              pkgs.rsync
+              pkgs.rrsync
+              pkgs.restic
+              pkgs.openssh
+              pkgs.coreutils
+            ];
+          }
+          ''
+            cd ${self}
+            PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_voom_backup.py'
+            shellcheck scripts/voom-backup-macos scripts/voom-backup-linux
+            shellcheck --shell bash "$VOOM_LINUX_BACKUP_SCRIPT"
+            touch $out
+          '';
       mkLinuxApps = system: {
         "build" = mkApp "build" system;
         "build-switch" = mkApp "build-switch" system;
@@ -206,6 +259,7 @@
           inherit inputs;
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
         };
+        voom-backup = mkVoomBackupCheck "x86_64-linux";
         macos-image = mkMacosImageCheck "x86_64-linux";
         voom-update = mkVoomUpdateCheck "x86_64-linux";
         voom-agent-vault = import ./tests/voom-agent-vault.nix {
@@ -223,6 +277,7 @@
           inherit inputs;
           pkgs = nixpkgs.legacyPackages.aarch64-darwin;
         };
+        voom-backup = mkVoomBackupCheck "aarch64-darwin";
         macos-image = mkMacosImageCheck "aarch64-darwin";
         voom-update = mkVoomUpdateCheck "aarch64-darwin";
       };

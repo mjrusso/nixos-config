@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${CACHE_DIRECTORY:?}" "${VOOM_BACKUP_USER:?}" "${VOOM_BACKUP_IDENTITY:?}" "${VOOM_BACKUP_RESTIC:?}"
+
+stage="$CACHE_DIRECTORY"
+
+inventory="$(voom list --output json | jq -ce '
+  if type == "array" and all(.[];
+    (.name | type == "string" and length > 0) and (.status | type == "string"))
+  then . else error("expected a list of VMs with name and status fields") end')"
+known="$(jq -r '.[].name' <<< "$inventory")"
+for directory in "$stage"/*; do
+  [ -d "$directory" ] || continue
+  if ! grep -Fxq -- "${directory##*/}" <<< "$known"; then
+    echo "removing staging for unknown guest ${directory##*/}"
+    rm -rf -- "$directory"
+  fi
+done
+
+guests="$(jq -r '.[] | select(.status == "running") | "\(.name) \(.sshPort)"' <<< "$inventory")"
+
+if [ -z "$guests" ]; then
+  echo "no running guests to back up" >&2
+  exit 0
+fi
+
+failed=0
+while read -r name port; do
+  echo "==> $name"
+  dest="$stage/$name"
+
+  home_ok=1
+  for path in /home /var/lib/docker/volumes; do
+    mkdir -p "$dest$path"
+    # The guest forces sudo rrsync -ro /; --rsync-path cannot supply it.
+    rc=0
+    rsync -aHAXS --delete --timeout=300 \
+      --exclude=.cache --exclude=.npm --exclude=.smolvm --exclude=node_modules \
+      --exclude=.direnv --exclude=result --exclude=.config/gh \
+      -e "ssh -F /dev/null -p $port -i \"$VOOM_BACKUP_IDENTITY\" -o IdentitiesOnly=yes -o BatchMode=yes \
+          -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+          -o LogLevel=ERROR -o StrictHostKeyChecking=no \
+          -o UserKnownHostsFile=/dev/null" \
+      "$VOOM_BACKUP_USER@127.0.0.1:$path/" "$dest$path/" || rc=$?
+    # rsync exit 24 means source files vanished during the live copy.
+    case $rc in
+      0|24) ;;
+      *) echo "!! $name: $path not captured (rsync exit $rc)" >&2
+         failed=1
+         if [ "$path" = /home ]; then home_ok=0; fi ;;
+    esac
+  done
+
+  if [ "$home_ok" = 0 ]; then
+    echo "!! $name: skipped" >&2
+    continue
+  fi
+
+  if ! "$VOOM_BACKUP_RESTIC" backup --host "$name" --tag voom "$dest"; then
+    failed=1
+  fi
+done <<< "$guests"
+exit "$failed"

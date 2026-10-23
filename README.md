@@ -134,6 +134,124 @@ of moving parts, I'm not using
 [nix-homebrew](https://github.com/zhaofengli/nix-homebrew), or
 [nix-darwin](https://github.com/LnL7/nix-darwin/)'s Homebrew-related features.
 
+#### MacOS Voom Hosts
+
+To back up MacOS Voom guests, enable `services.voomBackup` in the host's
+desktop or laptop nix-darwin configuration:
+
+``` nix
+services.voomBackup = {
+  enable = true;
+  volume = "/Volumes/Backups";
+  repository = "/Volumes/Backups/restic/voom";
+};
+```
+
+This installs `voom-backup`, `restic-voom`, and the primary user's
+`org.nixos.voom-backup` LaunchAgent. The job runs when the agent is loaded,
+including at login, and daily at 03:00 while the user is logged in. If the
+Mac is asleep at 03:00, the job runs when it wakes. It backs up running
+MacOS guests and skips Linux guests.
+For Linux hosts, see [Linux Voom Hosts](#linux-voom-hosts).
+
+Each run copies the guest's `/Users` directory over SSH to
+`~/Library/Caches/voom-backup/<guest>/Users`, then backs up those files with
+Restic. Snapshots use the guest's name as the Restic host and have the
+`voom` tag. Only the primary user can access the staging directory. Copies
+exclude `.cache`, `.npm`, `node_modules`, `.direnv`, `result`, `.config/gh`
+(GitHub CLI credentials), `Library/Caches`, `Library/Logs`, and `.Trash`.
+The guest's own virtual disk and Apple platform state are stored on the
+Voom host and are not captured. VM files under the guest's `/Users`
+directory are copied unless another exclusion applies. For databases,
+use their backup tools or stop them before copying files.
+
+After copying the guests, the job applies a Restic retention policy of
+seven daily, four weekly, and six monthly snapshots. The policy considers
+only snapshots tagged `voom`, grouped by guest name and staging path.
+
+After a successful guest listing, the job deletes its staging copies for
+guests that no longer exist. It keeps staging for stopped guests. Failed
+or invalid listings preserve existing staging copies. Deleting staging
+does not delete Restic snapshots.
+
+The staging directory and repository must not overlap, including through
+symlinks.
+
+Before the first run:
+
+1. Install an SSH private key without a passphrase at
+   `~/.ssh/id_ed25519_voom_read` on the Mac host. Its public key must match
+   `userInfo.voomReadKey`. Set `voomReadKeySource` to gvproxy's gateway,
+   normally `192.168.127.1`. The guest restricts this key to
+   `sudo rrsync -ro /Users`. Backup SSH connections ignore the interactive
+   SSH configuration and use only the backup key.
+2. Create the repository password file, readable only by the primary user:
+
+   ``` bash
+   sudo install -d -m 0755 /etc/restic
+   sudo sh -c 'umask 077; set -C; openssl rand -base64 32 > /etc/restic/voom-password'
+   sudo chown "$USER" /etc/restic/voom-password
+   sudo chmod 0400 /etc/restic/voom-password
+   ```
+
+   Keep a copy of the password in your password manager. Do not overwrite
+   this file after the repository is created.
+3. Mount the backup volume and create the repository's parent directory as
+   the primary user. For the example above:
+
+   ``` bash
+   mkdir -p /Volumes/Backups/restic
+   ```
+
+   Restic creates the repository on the first run. The job stops if the
+   volume is not mounted.
+4. From your system configuration repository on the Mac host, update the
+   running guests to authorize the backup key, then rebuild the host to
+   start the backup job. Update stopped guests before backing them up:
+
+   ``` bash
+   nix run .#voom-update -- --darwin
+   nix run .#build-switch
+   ```
+
+5. Run a backup, restore it, and check the files:
+
+   ``` bash
+   voom-backup
+   restic-voom snapshots --host <guest>
+   restic-voom restore latest --host <guest> --target /tmp/voom-restore
+   ```
+
+##### MacOS Backup Operations
+
+Scheduled runs append timestamps, guest names, errors, and Restic output to
+`~/Library/Logs/voom-backup.log`. Read recent entries or follow the log:
+
+``` bash
+tail -n 100 ~/Library/Logs/voom-backup.log
+tail -f ~/Library/Logs/voom-backup.log
+```
+
+Check the job's last exit status or start another run with the same log:
+
+``` bash
+launchctl print "gui/$(id -u)/org.nixos.voom-backup"
+launchctl kickstart "gui/$(id -u)/org.nixos.voom-backup"
+```
+
+Running `voom-backup` directly prints to your terminal. Copy and snapshot
+errors cause a nonzero exit status after the job processes the other
+guests. A failed copy skips that guest's snapshot. MacOS can deny SSH
+access to files even with sudo; check the log for permission errors.
+
+Copies stop after five minutes without rsync I/O. SSH uses a 15-second
+connection timeout and disconnects after three unanswered keepalives sent
+15 seconds apart. A timed-out copy fails that guest's backup; the job
+continues with the next guest and releases its lock when it finishes.
+
+If a killed job leaves `~/Library/Caches/voom-backup/.lock`, check that no
+backup is running, then remove that empty directory.
+
 ### Linux (non-NixOS)
 
 Install Nix, and then perform a [standalone installation of
@@ -732,7 +850,7 @@ Additional keys:
 | `targetUser`           | `user` from your system configuration repository's `user-info.nix` |
 | `passwordFile`         | `/etc/restic/password`                                      |
 | `identityFile`         | that user's `~/.ssh/id_ed25519_restic`                      |
-| `voomGuests`           | `false`, see [Voom Guests](#voom-guests)                    |
+| `voomGuests`           | `false`, see [Linux Voom Hosts](#linux-voom-hosts)          |
 | `voomReadIdentityFile` | that user's `~/.ssh/id_ed25519_voom_read`                   |
 
 Setting `enable = false`, or omitting the block, removes the service and its
@@ -796,49 +914,6 @@ timer.
    The first run uploads everything and will take some time; subsequent runs
    send only what has changed, and will complete more quickly.
 
-##### Voom Guests
-
-Setting `voomGuests = true` in the `nixosBackup` block adds a second daily
-timer that pulls each running [Voom](https://github.com/mjrusso/voom) guest's
-`/home` and Docker volumes into the same repository. (Stopped guests are
-skipped.)
-
-Data for each guest is copied to a staging directory that is persisted between
-runs. Each is recorded under its own name:
-
-``` bash
-restic-<hostname> snapshots --host <guest>
-restic-<hostname> restore latest --host <guest> --target /tmp/restore
-```
-
-This procedure uses a second key, separate from the repository key. To
-configure:
-
-1. Generate the key. As with the repository key, it must have no passphrase:
-
-   ``` bash
-   ssh-keygen -t ed25519 -N "" -C "voom read" \
-     -f ~/.ssh/id_ed25519_voom_read
-   ```
-
-2. Add the public key to `voomReadKey` in your system configuration
-   repository's `user-info.nix`. `voomReadKeySource` is the address a guest
-   sees for a connection originating on the host (i.e., gvproxy's gateway).
-
-3. Push the guest configuration, then rebuild this host, in this order.
-
-   ``` bash
-   nix run .#voom-update
-   nix run .#build-switch
-   ```
-
-To manually trigger a run:
-
-``` bash
-sudo systemctl start voom-backup.service
-journalctl -u voom-backup.service -b
-```
-
 ##### Operating and Troubleshooting
 
 Useful checks:
@@ -854,17 +929,122 @@ the repository, the password file, and the SFTP transport, so restic can be
 run by hand as the backup user without re-supplying any of them:
 
 ``` bash
-restic-<hostname> snapshots
-restic-<hostname> stats latest
+restic-<hostname> snapshots --host <hostname>
+restic-<hostname> stats latest --host <hostname>
 restic-<hostname> check
 ```
 
-To restore, either into a scratch directory or back over the original paths:
+Use `--host <hostname>` to select this host's snapshots; the repository may
+also contain guest snapshots. To restore into a scratch directory or back
+over the original paths:
 
 ``` bash
-restic-<hostname> restore latest --target /tmp/restore
-restic-<hostname> restore latest --target / --include <path>
+restic-<hostname> restore latest --host <hostname> --target /tmp/restore
+restic-<hostname> restore latest --host <hostname> --target / --include <path>
 ```
+
+<a id="voom-guests"></a>
+
+#### Linux Voom Hosts
+
+For guests running on a Mac host, see [MacOS Voom Hosts](#macos-voom-hosts).
+
+To back up Linux [Voom](https://github.com/mjrusso/voom) guests, complete the
+[host backup setup](#backups), then enable `voomGuests` in the same
+`host-info.nix` block:
+
+``` nix
+nixosBackup = {
+  enable = true;
+  target = "<target>";
+  repositoryPath = "<path-on-target>";
+  voomGuests = true;
+};
+```
+
+This adds `voom-backup.service` and a daily timer with up to one hour of
+random delay. The timer catches up after downtime. The job copies running
+guests' `/home` and `/var/lib/docker/volumes` to
+`/var/cache/voom-staging/<guest>`, then backs up those files into the host's
+Restic repository. Stopped guests are skipped. Snapshots use the guest's
+name as the Restic host and have the `voom` tag.
+
+The copies exclude `.cache`, `.npm`, `.smolvm`, `node_modules`, `.direnv`,
+`result`, and `.config/gh` (GitHub CLI credentials). The guest's virtual disk
+and Voom configuration live on the host and are not captured by this job.
+VM files under the guest's `/home` are copied unless another exclusion
+applies. For databases, use their backup tools or stop them before copying
+files.
+
+Staging is kept between runs. After a successful guest listing, the job
+deletes staging for guests that no longer exist. It keeps staging for
+stopped guests. Failed or invalid listings preserve existing staging
+copies. Deleting staging does not delete Restic snapshots. The host's
+daily Restic job applies a retention policy of seven daily, four weekly,
+and six monthly snapshots, grouped by host name and source paths.
+
+Before the first run:
+
+1. Generate the key. As with the repository key, it must have no passphrase:
+
+   ``` bash
+   ssh-keygen -t ed25519 -N "" -C "voom read" \
+     -f ~/.ssh/id_ed25519_voom_read
+   ```
+
+2. Add the public key to `voomReadKey` in your system configuration
+   repository's `user-info.nix`. Set `voomReadKeySource` to gvproxy's
+   gateway, normally `192.168.127.1`. The guest restricts this key to
+   `sudo rrsync -ro /`. This key is separate from the repository key.
+
+3. Update the running guests to authorize the backup key, then rebuild this
+   host, in this order. Update stopped guests before backing them up.
+
+   ``` bash
+   nix run .#voom-update -- --nixos
+   nix run .#build-switch
+   ```
+
+4. Run a backup, restore it, and check the files. Run the Restic commands as
+   the backup user:
+
+   ``` bash
+   sudo systemctl start voom-backup.service
+   restic-<hostname> snapshots --host <guest> --tag voom
+   restic-<hostname> restore latest --host <guest> --tag voom --target /tmp/voom-restore
+   ```
+
+##### Linux Backup Operations
+
+Start a backup, check its status, or read recent logs:
+
+``` bash
+sudo systemctl start voom-backup.service
+systemctl status voom-backup.service
+systemctl list-timers voom-backup.timer
+journalctl -u voom-backup.service -n 100
+```
+
+Follow the guest backup log:
+
+``` bash
+journalctl -fu voom-backup.service
+```
+
+Run these commands on the Voom host. Logs include guest names, copy errors,
+and Restic output. Copy or snapshot errors cause a nonzero exit status
+after the job processes the other guests. A failed `/home` copy skips that
+guest's snapshot. If only the Docker volume copy fails, the job still
+attempts a snapshot of the staged files and reports a failure. That
+snapshot can contain partial or older Docker volume data. Files removed
+during a copy (rsync exit 24) do not fail the job. An incomplete Restic
+snapshot (exit 3) fails the job.
+
+Backup SSH connections ignore the interactive SSH configuration and use
+only the backup key. Copies stop after five minutes without rsync I/O.
+SSH uses a 15-second connection timeout and disconnects after three
+unanswered keepalives sent 15 seconds apart. A timeout fails that guest's
+copy and the job continues with the other guests.
 
 #### ZFS Layout Drift
 

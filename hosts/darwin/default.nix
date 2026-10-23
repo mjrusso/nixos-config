@@ -13,6 +13,7 @@ let user = userInfo.user;
 
   imports = [
     ../../modules/darwin/home-manager.nix
+    ../../modules/darwin/voom-backup.nix
     ../../modules/shared
     ../../modules/shared/caches
   ];

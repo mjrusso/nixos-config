@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+: "${RESTIC_REPOSITORY:?}" "${RESTIC_PASSWORD_FILE:?}"
+: "${VOOM_BACKUP_VOLUME:?}" "${VOOM_BACKUP_STAGE:?}" "${VOOM_BACKUP_IDENTITY:?}"
+
+printf '==> Voom backup started at %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+if ! mount | grep -Fq " on $VOOM_BACKUP_VOLUME ("; then
+  echo "Backup volume is not mounted: $VOOM_BACKUP_VOLUME" >&2
+  exit 1
+fi
+for file in "$RESTIC_PASSWORD_FILE" "$VOOM_BACKUP_IDENTITY"; do
+  if [[ ! -r "$file" ]]; then
+    echo "Required backup file is not readable: $file" >&2
+    exit 1
+  fi
+done
+
+stage_path=$(realpath -m -- "$VOOM_BACKUP_STAGE")
+repository_path=$(realpath -m -- "$RESTIC_REPOSITORY")
+if [[ "$stage_path/" == "${repository_path%/}/"* ||
+      "$repository_path/" == "${stage_path%/}/"* ||
+      "$stage_path" -ef "$repository_path" ]]; then
+  echo "Staging directory and Restic repository must not overlap" >&2
+  exit 1
+fi
+
+marker_name=.voom-backup-owned
+mkdir -p "$VOOM_BACKUP_STAGE"
+chmod 700 "$VOOM_BACKUP_STAGE"
+if ! mkdir "$VOOM_BACKUP_STAGE/.lock"; then
+  echo "Backup lock exists: $VOOM_BACKUP_STAGE/.lock" >&2
+  exit 1
+fi
+trap 'rmdir "$VOOM_BACKUP_STAGE/.lock"' EXIT
+
+inventory=$(voom list --output json | jq -ce '
+  if type == "array" and all(.[];
+    (.name | type == "string" and length > 0) and (.status | type == "string"))
+  then . else error("expected a list of VMs with name and status fields") end')
+known=$(jq -r '.[].name' <<< "$inventory")
+names=$(jq -r '.[] | select(.status == "running") | .name' <<< "$inventory")
+
+for directory in "$VOOM_BACKUP_STAGE"/*; do
+  [[ -d "$directory" && ! -L "$directory" && -f "$directory/$marker_name" ]] || continue
+  if ! grep -Fxq -- "${directory##*/}" <<< "$known"; then
+    echo "removing staging for unknown guest ${directory##*/}"
+    rm -rf -- "$directory"
+  fi
+done
+
+if [[ ! -f "$RESTIC_REPOSITORY/config" ]]; then
+  restic init
+fi
+
+failed=0
+while IFS= read -r name; do
+  [[ -n "$name" ]] || continue
+  if ! info=$(voom info "$name" --output json); then
+    echo "$name: inspection failed; skipping snapshot" >&2
+    failed=1
+    continue
+  fi
+  if [[ $(jq -r '.vm.arch' <<< "$info") != aarch64-darwin ]]; then
+    continue
+  fi
+  port=$(jq -er '.vm.network.sshPort' <<< "$info")
+  user=$(jq -er '.vm.access.sshUser' <<< "$info")
+  echo "==> $name"
+  guest_stage="$VOOM_BACKUP_STAGE/$name"
+  marker="$guest_stage/$marker_name"
+  if [[ -L "$guest_stage" || ( -e "$guest_stage" && ! -f "$marker" ) ]]; then
+    echo "$name: staging directory is not owned by voom-backup; skipping snapshot" >&2
+    failed=1
+    continue
+  fi
+  dest="$guest_stage/Users"
+  mkdir -p "$dest"
+  touch "$marker"
+
+  # The guest runs read-only rrsync with /Users as the remote root.
+  rc=0
+  rsync -aHXS --delete --no-owner --no-group --timeout=300 \
+    --exclude=.cache --exclude=.npm --exclude=node_modules --exclude=.direnv \
+    --exclude=result --exclude=.config/gh --exclude=Library/Caches \
+    --exclude=Library/Logs --exclude=.Trash \
+    -e "ssh -F /dev/null -p $port -i \"$VOOM_BACKUP_IDENTITY\" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+    "$user@127.0.0.1:." "$dest/" || rc=$?
+  case $rc in
+    0|24) ;;
+    *) echo "$name: copy failed (rsync exit $rc); skipping snapshot" >&2
+       failed=1
+       continue ;;
+  esac
+
+  if ! restic backup --host "$name" --tag voom --exclude "$marker" "$guest_stage"; then
+    failed=1
+  fi
+done <<< "$names"
+
+restic forget --tag voom --group-by host,paths --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+echo "==> Voom backup finished (exit $failed)"
+exit "$failed"
