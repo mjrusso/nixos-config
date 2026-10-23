@@ -822,27 +822,31 @@ journalctl -u syncthing -b
 
 #### Backups
 
-Physical NixOS hosts back up the user's home directory (minus some exceptions)
-to a remote target over SFTP using [restic](https://restic.net/). The job is
-defined in [`hosts/nixos/default.nix`](./hosts/nixos/default.nix) and driven by
-the `nixosBackup` block in your system configuration repository's
-`host-info.nix`. Container and VM images do not enable backups.
+Physical NixOS hosts can back up the user's home directory over SFTP using
+[restic](https://restic.net/). Enable `services.hostBackup` in the host's
+NixOS configuration through the constructor's `extraModules`. The shared
+[host backup module](./modules/nixos/host-backup.nix) defines the job.
+Container and VM images do not enable backups.
 
 ``` nix
-nixosBackup = {
-  enable = true;
-  target = "<target>";
-  repositoryPath = "<path-on-target>";
-};
+extraModules = [
+  {
+    services.hostBackup = {
+      enable = true;
+      target = "<target>";
+      repositoryPath = "<repository-path-on-target>";
+    };
+  }
+];
 ```
 
-`target` is an SSH destination reachable from this host; add it to
-`nixosExtraHosts` if it has no DNS entry. `repositoryPath` is a directory on
-the target, and the repository is created inside it under a directory named
-after `nixosHostname`, so several hosts can share one target drive without
-colliding.
+`target` is an SSH host reachable from this machine; add it to
+`nixosExtraHosts` if it has no DNS entry. `repositoryPath` is the full
+repository path on the target, such as `/backups/restic/<hostname>`. Include
+a per-host directory when sharing a target drive; the module uses this
+path as written.
 
-Additional keys:
+Additional `services.hostBackup` options:
 
 | Key                    | Default                                                     |
 |------------------------|-------------------------------------------------------------|
@@ -850,8 +854,9 @@ Additional keys:
 | `passwordFile`         | `/etc/restic/password`                                      |
 | `identityFile`         | that user's `~/.ssh/id_ed25519_restic`                      |
 
-Setting `enable = false`, or omitting the block, removes the service and its
-timer.
+Setting `services.hostBackup.enable = false`, or omitting the configuration,
+removes the service and its timer. Disable `services.voomBackup` too if it
+uses this host backup.
 
 ##### Initial Setup
 
@@ -864,15 +869,18 @@ timer.
      -f ~/.ssh/id_ed25519_restic
    ```
 
-   Authorize it by adding the public key to `resticKey` in your system
-   configuration repository's `user-info.nix`, then rebuild the target host.
-   The target's configuration confines the key to sftp, and
-   `resticKeySource` defines the address it can connect from.
+   For a Mac target using this configuration, add the public key to
+   `resticKey` in your system configuration repository's `user-info.nix`,
+   then rebuild the target. The Mac confines the key to SFTP, and
+   `resticKeySource` defines the addresses it can connect from:
 
    ``` nix
    resticKey = "ssh-ed25519 AAAA...";
    resticKeySource = "<source>";
    ```
+
+   For other targets, authorize the key on the SFTP server and grant write
+   access to the repository directory.
 
    Verify access from the source to the target:
 
@@ -885,7 +893,7 @@ timer.
    directory itself, but not missing parents:
 
    ``` bash
-   ssh <user>@<target> 'mkdir -p <path-on-target>'
+   ssh <user>@<target> 'mkdir -p <repository-parent-directory>'
    ```
 
 3. Generate the repository password and install it on this host. _Record it in

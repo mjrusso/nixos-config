@@ -164,14 +164,14 @@
               nixosHostname = "backup-test";
               nixosHostId = "01234567";
               nixosMainDisk = "/dev/test";
-              nixosBackup = {
-                enable = true;
-                target = "backup.example.com";
-                repositoryPath = "/repo";
-              };
             };
             extraModules = [
               {
+                services.hostBackup = {
+                  enable = true;
+                  target = "backup.example.com";
+                  repositoryPath = "/repo/backup-test";
+                };
                 services.voomBackup = {
                   enable = true;
                   identityFile = "/keys/key with spaces";

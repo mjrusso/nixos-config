@@ -11,19 +11,11 @@
 let
   user = userInfo.user;
   keys = userInfo.sshKeys;
-  backup = {
-    enable = false;
-    target = "";
-    targetUser = user;
-    repositoryPath = "";
-    passwordFile = "/etc/restic/password";
-    identityFile = "/home/${user}/.ssh/id_ed25519_restic";
-  }
-  // (hostInfo.nixosBackup or { });
 in
 {
   imports = [
     ../../modules/nixos/disk-config.nix
+    ../../modules/nixos/host-backup.nix
     ../../modules/nixos/tailscale.nix
     ../../modules/nixos/caddy.nix
     ../../modules/nixos/voom-agent-vault.nix
@@ -46,10 +38,6 @@ in
     {
       assertion = hostInfo.nixosMainDisk != "/dev/disk/by-id/...";
       message = "Set hostInfo.nixosMainDisk in host-info.nix to the target drive's stable /dev/disk/by-id path before building the NixOS host.";
-    }
-    {
-      assertion = !backup.enable || (backup.target != "" && backup.repositoryPath != "");
-      message = "Set hostInfo.nixosBackup.target and hostInfo.nixosBackup.repositoryPath in host-info.nix when nixosBackup.enable is true.";
     }
   ];
 
@@ -195,56 +183,6 @@ in
     gvfs.enable = true; # Mount, trash, and other functionalities
     tumbler.enable = true; # Thumbnail support for images
 
-    restic.backups = lib.mkIf backup.enable {
-      "${hostInfo.nixosHostname}" = {
-        inherit user;
-        initialize = true;
-        repository = "sftp:${backup.targetUser}@${backup.target}:${backup.repositoryPath}/${hostInfo.nixosHostname}";
-        passwordFile = backup.passwordFile;
-        paths = [
-          "/home/${user}"
-        ]
-        ++ lib.optionals config.services.voomAgentVault.enable [
-          "/var/cache/agent-vault-backup"
-        ];
-
-        extraOptions = [
-          "sftp.command='ssh ${backup.targetUser}@${backup.target} -i ${backup.identityFile} -o IdentitiesOnly=yes -s sftp'"
-        ];
-
-        exclude = [
-          "/home/${user}/.local/share/voom"
-          "/home/${user}/vms"
-          "/home/${user}/.cache"
-          "/home/${user}/.npm"
-          "/home/${user}/.cargo/registry"
-          "/home/${user}/.cargo/git"
-          "/home/${user}/.emacs.d.bak"
-          "/home/${user}/.config/gh"
-          "/home/${user}/.agent-vault/session.json"
-          "**/node_modules"
-          "**/.direnv"
-          "**/result"
-          "**/target/*"
-        ]
-        ++ lib.optionals config.services.voomAgentVault.enable [
-          "${config.services.voomAgentVault.stateDirectory}/attachments/*/token"
-        ];
-
-        timerConfig = {
-          OnCalendar = "daily";
-          RandomizedDelaySec = "1h";
-          Persistent = true;
-        };
-
-        pruneOpts = [
-          "--keep-daily 7"
-          "--keep-weekly 4"
-          "--keep-monthly 6"
-        ];
-      };
-    };
-
     zfs = {
       autoScrub.enable = true;
       trim.enable = true;
@@ -255,13 +193,6 @@ in
       ZED_DEBUG_LOG = "/var/log/zed.log";
     };
   };
-
-  systemd.services."restic-backups-${hostInfo.nixosHostname}" =
-    lib.mkIf (backup.enable && config.services.voomAgentVault.enable)
-      {
-        wants = [ "voom-agent-vault-database-snapshot.service" ];
-        after = [ "voom-agent-vault-database-snapshot.service" ];
-      };
 
   # Enable sound
   # sound.enable = true;
