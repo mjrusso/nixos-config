@@ -35,9 +35,10 @@ while read -r name port; do
     mkdir -p "$dest$path"
     # The guest forces sudo rrsync -ro /; --rsync-path cannot supply it.
     rc=0
-    rsync -aHAXS --delete --timeout=300 \
+    rsync -aHAXS --delete --delete-excluded --timeout=300 \
       --exclude=.cache --exclude=.npm --exclude=.smolvm --exclude=node_modules \
       --exclude=.direnv --exclude=result --exclude=.config/gh \
+      --exclude=target/ --exclude=.cargo/registry/ --exclude=.cargo/git/ \
       -e "ssh -F /dev/null -p $port -i \"$VOOM_BACKUP_IDENTITY\" -o IdentitiesOnly=yes -o BatchMode=yes \
           -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
           -o LogLevel=ERROR -o StrictHostKeyChecking=no \

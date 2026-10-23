@@ -157,9 +157,8 @@ For Linux hosts, see [Linux Voom Hosts](#linux-voom-hosts).
 Each run copies the guest's `/Users` directory over SSH to
 `~/Library/Caches/voom-backup/<guest>/Users`, then backs up those files with
 Restic. Snapshots use the guest's name as the Restic host and have the
-`voom` tag. Only the primary user can access the staging directory. Copies
-exclude `.cache`, `.npm`, `node_modules`, `.direnv`, `result`, `.config/gh`
-(GitHub CLI credentials), `Library/Caches`, `Library/Logs`, and `.Trash`.
+`voom` tag. Only the primary user can access the staging directory.
+
 The guest's own virtual disk and Apple platform state are stored on the
 Voom host and are not captured. VM files under the guest's `/Users`
 directory are copied unless another exclusion applies. For databases,
@@ -969,12 +968,10 @@ guests' `/home` and `/var/lib/docker/volumes` to
 Restic repository. Stopped guests are skipped. Snapshots use the guest's
 name as the Restic host and have the `voom` tag.
 
-The copies exclude `.cache`, `.npm`, `.smolvm`, `node_modules`, `.direnv`,
-`result`, and `.config/gh` (GitHub CLI credentials). The guest's virtual disk
-and Voom configuration live on the host and are not captured by this job.
-VM files under the guest's `/home` are copied unless another exclusion
-applies. For databases, use their backup tools or stop them before copying
-files.
+The guest's virtual disk and Voom configuration live on the host and are
+not captured by this job. VM files under the guest's `/home` are copied
+unless another exclusion applies. For databases, use their backup tools
+or stop them before copying files.
 
 Staging is kept between runs. After a successful guest listing, the job
 deletes staging for guests that no longer exist. It keeps staging for
