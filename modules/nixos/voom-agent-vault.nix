@@ -314,6 +314,8 @@ let
   };
 in
 {
+  imports = [ ./agent-vault-shared-proxy.nix ];
+
   options.services.voomAgentVault = {
     enable = lib.mkEnableOption "the Agent Vault broker for Voom guests";
     user = lib.mkOption {

@@ -262,6 +262,10 @@
       );
 
       checks.x86_64-linux = {
+        agent-vault-shared-proxy = import ./tests/agent-vault-shared-proxy.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          voomPackage = inputs.voom.packages.x86_64-linux.default;
+        };
         llm-agent-policy = import ./tests/llm-agent-policy.nix {
           inherit inputs;
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
