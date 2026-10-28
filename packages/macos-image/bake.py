@@ -308,8 +308,12 @@ class Guest:
 
 
 def bootstrap_home(guest, timeout, log):
+    command = (
+        "if command -q agent-vault-proxy; agent-vault-proxy direct -- home-bootstrap; "
+        "else; home-bootstrap; end"
+    )
     guest.ssh(
-        "/run/current-system/sw/bin/fish --login --command home-bootstrap",
+        shlex.join(["/run/current-system/sw/bin/fish", "--login", "--command", command]),
         timeout=timeout,
         stdout=log,
         stderr=log,

@@ -5,6 +5,8 @@ import hashlib
 import io
 import itertools
 import json
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,6 +31,45 @@ RECIPE = {
 
 
 class BakeTests(unittest.TestCase):
+    def test_bootstrap_with_and_without_proxy_login_tooling(self):
+        fish = shutil.which("fish")
+        proxy = shutil.which("agent-vault-proxy")
+        self.assertIsNotNone(fish)
+        self.assertIsNotNone(proxy)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bootstrap = root / "home-bootstrap"
+            bootstrap.write_text(
+                f"#!{sys.executable}\nimport json, os\nfrom pathlib import Path\n"
+                "Path(os.environ['RESULT']).write_text(json.dumps(dict(os.environ)))\n"
+            )
+            bootstrap.chmod(0o700)
+            result = root / "environment.json"
+            variables = dict.fromkeys(
+                ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"],
+                "http://unavailable.invalid:3128",
+            )
+            environment = {"PATH": directory, "HOME": directory, "RESULT": str(result), **variables}
+
+            def ssh(command, **kwargs):
+                if "rev-parse" in command:
+                    return subprocess.CompletedProcess([], 0, "a" * 40)
+                return subprocess.run(
+                    [fish, "--no-config", *shlex.split(command)[1:]],
+                    env=environment, check=True, **kwargs,
+                )
+
+            guest = Mock(spec=bake.Guest)
+            guest.ssh.side_effect = ssh
+            for installed in (False, True):
+                with self.subTest(proxy_helper=installed), tempfile.TemporaryFile(mode="w+") as log:
+                    if installed:
+                        (root / "agent-vault-proxy").symlink_to(proxy)
+                    bake.bootstrap_home(guest, 10, log)
+                    values = json.loads(result.read_text())
+                    for variable, value in variables.items():
+                        self.assertEqual(values.get(variable), None if installed else value)
+
     def test_bake_publication_and_failure_recovery_without_integration_tests(self):
         recipe = bake.parse_recipe(RECIPE)
         for failure in (None, "boot checks", "bootstrap", "first SSH", "authentication", "installation", "provisioning options"):
@@ -97,7 +138,7 @@ class BakeTests(unittest.TestCase):
                     self.assertNotIn(password, command)
                     if "UserShell" in command:
                         stages.append("boot checks")
-                    elif "--command home-bootstrap" in command:
+                    elif "home-bootstrap" in command:
                         self.assertIn("boot checks", stages)
                         stages.append("bootstrap")
                         kwargs["stdout"].write("bootstrap output\n")

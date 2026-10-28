@@ -120,6 +120,11 @@
             nativeBuildInputs = [
               (pkgs.python3.withPackages (python: [ python.fonttools ]))
               pkgs.shellcheck
+              pkgs.fish
+              (pkgs.callPackage ./packages/agent-vault-proxy.nix {
+                credentialFile = "/missing-proxy-credential";
+                environment.HTTPS_PROXY = "http://unavailable.invalid:3128";
+              })
             ];
           }
           ''
