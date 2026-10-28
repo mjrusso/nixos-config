@@ -14,6 +14,7 @@ let user = userInfo.user;
   imports = [
     ../../modules/darwin/home-manager.nix
     ../../modules/darwin/voom-backup.nix
+    ../../modules/darwin/agent-vault-tunnel.nix
     ../../modules/shared
     ../../modules/shared/caches
   ];

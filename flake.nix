@@ -266,6 +266,9 @@
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
           voomPackage = inputs.voom.packages.x86_64-linux.default;
         };
+        agent-vault-tunnel =
+          nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/agent-vault-tunnel
+            { };
         llm-agent-policy = import ./tests/llm-agent-policy.nix {
           inherit inputs;
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
@@ -284,6 +287,9 @@
       };
 
       checks.aarch64-darwin = {
+        agent-vault-tunnel =
+          nixpkgs.legacyPackages.aarch64-darwin.callPackage ./packages/agent-vault-tunnel
+            { };
         llm-agent-policy = import ./tests/llm-agent-policy.nix {
           inherit inputs;
           pkgs = nixpkgs.legacyPackages.aarch64-darwin;
