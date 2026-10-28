@@ -252,6 +252,7 @@
           agent-vault = pkgs.callPackage ./packages/agent-vault.nix { };
           disk-usage = pkgs.callPackage ./packages/disk-usage.nix { };
           voom-agent-vault = pkgs.callPackage ./packages/voom-agent-vault { };
+          proxy = pkgs.callPackage ./packages/proxy.nix { };
           voom-egress-run = pkgs.callPackage ./packages/voom-egress-run.nix { };
           voom-egress-skip = pkgs.callPackage ./packages/voom-egress-skip.nix { };
           voom-shutdown = pkgs.callPackage ./packages/voom-shutdown.nix {

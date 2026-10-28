@@ -77,6 +77,7 @@ in
   };
 
   environment.systemPackages = [
+    (pkgs.callPackage ../../packages/proxy.nix { })
     voomEgressRun
     voomEgressSkip
   ];

@@ -197,14 +197,14 @@ testPkgs.testers.runNixOSTest {
 
     attached.succeed(
       "runuser -u operator -- env HOME=/home/operator XDG_RUNTIME_DIR=/run/user/1000 "
-      "GH_TOKEN=__github_some_org_pat__ voom-egress-run -- sh -c "
+      "GH_TOKEN=__github_some_org_pat__ proxy run -- sh -c "
       "'test \"$HTTPS_PROXY\" = http://192.168.127.1:3128; "
       "test \"$NO_PROXY\" = ${noProxy}; "
       "test \"$GH_TOKEN\" = __github_some_org_pat__'"
     )
     attached.succeed(
       "env HTTP_PROXY=http://192.168.127.1:3128 SSL_CERT_FILE=/run/voom-egress/ca-bundle.pem "
-      "GH_TOKEN=__github_token__ voom-egress-skip -- sh -c "
+      "GH_TOKEN=__github_token__ proxy bypass -- sh -c "
       "'test -z \"''${HTTP_PROXY+x}\"; test -z \"''${SSL_CERT_FILE+x}\"; "
       "test -z \"''${GH_TOKEN+x}\"'"
     )
