@@ -1758,7 +1758,7 @@ Run these commands on the host to import the bundle and create a VM:
 ``` bash
 voom image import macos "$HOME/vms/golden-aarch64-darwin" \
   --ssh-identity "$HOME/.ssh/id_ed25519"
-voom create macos-dev --image macos
+voom create macos-example --image macos
 ```
 
 MacOS guests support VM lifecycle operations, the graphical console, and SSH.
@@ -1768,8 +1768,8 @@ attachment are unsupported.
 Start the VM and connect over SSH:
 
 ``` bash
-voom start macos-dev
-voom ssh macos-dev
+voom start macos-example
+voom ssh macos-example
 ```
 
 The image already includes the results of `home-bootstrap`. You can
@@ -1792,7 +1792,7 @@ Run `exit` to return to the host shell. To open the VM's graphical display,
 run this command on the host:
 
 ``` bash
-voom gui macos-dev
+voom gui macos-example
 ```
 
 Log in with the username from `user-info.nix` and the chosen initial password,
@@ -1824,7 +1824,9 @@ with standalone vfkit using NAT networking. It checks boot and configuration
 before copying fonts and running `home-bootstrap` as the guest user. Bootstrap
 output is saved as `bootstrap.log`. A bootstrap failure fails
 the bake; `--provision-timeout` controls its timeout. Bootstrap does not sign
-in to GitHub or install credentials.
+in to GitHub or install credentials. If the guest has `agent-vault-proxy`,
+the builder uses its `direct` mode for bootstrap so public repository clones
+work before runtime proxy login. Proxy passwords stay out of the base image.
 
 Bootstrap clones the repositories' current HEADs. Their commit IDs and paths
 within the guest home are recorded in `image.json` under
@@ -1869,8 +1871,12 @@ and HTTP/HTTPS proxy. Agent Vault stores credentials on the host and adds them
 to outbound requests that match configured services. Voom guests send requests
 through the proxy without storing the actual credentials.
 
+This section covers Linux hosts and Linux guests. For MacOS guests using a
+Linux vault through a Mac host, see [Shared Agent Vault Access for MacOS
+Guests](#shared-agent-vault-access-for-macos-guests).
+
 The `services.voomAgentVault` module runs one Agent Vault instance for all Voom
-VMs on a host. The manager creates one Agent Vault agent and token for each
+VMs on a Linux host. The manager creates one Agent Vault agent and token for each
 assigned VM. The token stays on the host and grants access to one exact vault.
 
 HAProxy listens on a separate host Unix socket for each VM. Voom attaches that
@@ -1953,7 +1959,7 @@ an unlisted host-local resolver. If the host gets its resolver through DHCP
 or another runtime service, verify `/etc/resolv.conf` after switching instead
 of inferring the address from the Nix configuration.
 
-##### Initial Setup
+##### Agent Vault Initial Setup
 
 Apply the system configuration before you start an attached VM. The module
 starts Agent Vault on `127.0.0.1:14321`, its proxy on `127.0.0.1:14322`, and
@@ -2224,11 +2230,11 @@ when a command does not use the proxy.
 An attached VM with an invalid manifest does not permit user sessions. A VM
 without an attachment starts normally without the egress environment.
 
-Use `voom-egress-run` to apply the egress settings explicitly to a command or
+Use `proxy run` to apply the egress settings explicitly to a command or
 to diagnose its environment:
 
 ``` bash
-voom-egress-run -- curl --fail https://api.github.com/user
+proxy run -- curl --fail https://api.github.com/user
 ```
 
 The helper requires a readable explicit egress manifest and a valid
@@ -2271,17 +2277,53 @@ codex
 claude
 ```
 
+Both Linux and MacOS guests provide the same commands for explicit proxy use
+and direct access:
+
+``` bash
+proxy run -- gh api user --jq .login
+proxy bypass -- curl https://example.com
+```
+
+In Linux guests with an enabled Voom egress attachment, new Fish shells load
+the prepared proxy environment automatically. In MacOS guests with
+`programs.agentVaultProxy` enabled, new Fish shells load authenticated proxy
+settings after `agent-vault-proxy login`. Existing shells keep their previous
+environment. Use `proxy run` to load the settings explicitly for one command.
+Applications must support the proxy environment variables; this does not route
+all guest traffic through the proxy. Configured `NO_PROXY` destinations are
+still reached directly.
+
+The guest configuration selects the backend: `voom-egress-run` on Linux and
+`agent-vault-proxy run` on MacOS. Both use `voom-egress-skip` for `bypass`. On
+MacOS, use `agent-vault-proxy login`, `agent-vault-proxy check`, and
+`agent-vault-proxy env` for credential setup, diagnostics, and shell
+configuration.
+
 Remove the session egress environment for one command with:
 
 ``` bash
-voom-egress-skip -- gh auth status
+proxy bypass -- gh auth status
 ```
 
-`voom-egress-skip` removes the inherited proxy and Agent Vault CA variables. It
-also removes the session's default
-`GH_TOKEN=__github_token__`. It leaves a `GH_TOKEN` supplied by shell
-configuration unchanged, including a multi-PAT placeholder. The command does
-not disable the VM's egress attachment.
+`proxy bypass` removes the inherited proxy and Agent Vault CA variables for the
+command and its children. It also removes `GH_TOKEN` when its value is the
+default placeholder `__github_token__`, preserving other values, including
+multi-PAT placeholders. It leaves the parent shell, installed CA trust, and
+guest attachment or tunnel unchanged. Direct requests cannot use credentials
+held by Agent Vault. Application-specific proxy settings can still apply.
+
+For a Fish session without the inherited proxy settings, skip the startup
+configuration that would load them again:
+
+``` bash
+proxy bypass -- fish --no-config
+```
+
+Run `exit` to return to the parent shell. Other Fish startup configuration is
+also skipped in this session. Run `proxy --help` for command syntax. The
+wrapper preserves command arguments and exit status; bypass does not require a
+proxy credential or an active proxy connection.
 
 HAProxy allows 10 seconds to establish an upstream connection. It applies a
 15-minute idle timeout to clients, servers, CONNECT tunnels, WebSockets, and
@@ -2294,7 +2336,7 @@ For a vault that uses one PAT, run these commands after you attach a VM:
 
 ``` bash
 gh api user --jq .login
-voom-egress-run -- curl --fail https://api.github.com/user
+proxy run -- curl --fail https://api.github.com/user
 git ls-remote https://github.com/<owner>/<private-repository>.git HEAD
 git -C <repository> fetch
 git -C <repository> push --dry-run origin HEAD
@@ -2305,7 +2347,7 @@ For a vault that uses multiple PATs, enter a repository directory whose
 
 ``` bash
 gh api repos/<owner>/<private-repository> --jq .full_name
-voom-egress-run -- curl --fail \
+proxy run -- curl --fail \
   --header "Authorization: Bearer $GH_TOKEN" \
   https://api.github.com/repos/<owner>/<private-repository>
 git ls-remote https://github.com/<owner>/<private-repository>.git HEAD
@@ -2327,15 +2369,15 @@ New VMs must not receive a GitHub credential. For an existing VM, first
 supplies its old credential without printing the credential value:
 
 ``` bash
-voom-egress-skip -- gh auth status --hostname github.com
-voom-egress-skip -- env | sed 's/=.*//' | grep -E '^(GH_TOKEN|GITHUB_TOKEN)$'
-voom-egress-skip -- git config --show-origin --get-regexp '^credential\.' || true
+proxy bypass -- gh auth status --hostname github.com
+proxy bypass -- env | sed 's/=.*//' | grep -E '^(GH_TOKEN|GITHUB_TOKEN)$'
+proxy bypass -- git config --show-origin --get-regexp '^credential\.' || true
 ```
 
 If GitHub CLI stores the credential, remove it with:
 
 ``` bash
-voom-egress-skip -- gh auth logout --hostname github.com
+proxy bypass -- gh auth logout --hostname github.com
 ```
 
 Remove real tokens supplied by shell configuration, environment files, Git
@@ -2346,9 +2388,9 @@ shell.
 Verify that direct authenticated access fails:
 
 ``` bash
-voom-egress-skip -- gh api user --jq .login        # must fail
-voom-egress-skip -- curl --fail https://api.github.com/user # must fail with HTTP 401
-voom-egress-skip -- env GIT_TERMINAL_PROMPT=0 \
+proxy bypass -- gh api user --jq .login        # must fail
+proxy bypass -- curl --fail https://api.github.com/user # must fail with HTTP 401
+proxy bypass -- env GIT_TERMINAL_PROMPT=0 \
   git ls-remote https://github.com/<owner>/<private-repository>.git HEAD # must fail
 ```
 
@@ -2508,6 +2550,527 @@ Complete these remaining checks:
    token.
 6. Restore the Agent Vault database, encrypted CA state, and master password in
    an isolated test before relying on the backup.
+
+#### Shared Agent Vault Access for MacOS Guests
+
+MacOS guests authenticate with an access identity and password through one SSH
+tunnel on their Mac host. Linux maps each identity to a vault and supplies that
+vault's proxy-only Agent Vault token. Service credentials and Agent Vault
+tokens stay on Linux; guests hold only their proxy access password.
+
+Give each VM its own identity for individual revocation, or share an identity
+among VMs that should lose access together. Multiple identities can use the
+same vault. Disabling an identity closes existing connections by restarting the
+shared Linux bridge, briefly interrupting every guest. Other identities can
+reconnect immediately. No Voom integration is required.
+
+##### Configuration
+
+This reuses the Linux Agent Vault server. Complete [Agent Vault Initial
+Setup](#agent-vault-initial-setup) to initialize its vaults and service
+credentials. Keep `sharedProxy.enable` disabled until the runtime files below
+are provisioned. The parent `services.voomAgentVault` must be enabled; its
+`assignments` can be empty when no Linux guests use it.
+
+On the Linux Agent Vault host:
+
+``` nix
+services.voomAgentVault.sharedProxy = {
+  enable = true;
+  vaults = {
+    personal = { };
+    work = { };
+  };
+  identities = {
+    personal.vault = "personal";
+    work.vault = "work";
+  };
+};
+```
+
+The example uses one shared identity per vault, with matching names. Each
+identity has a separate password file. Add `personal-test.vault = "personal";`
+for another independently revocable credential to the same vault. Several VMs
+can log in with one identity. The guest cannot select a different vault by
+changing its request headers. An empty identity map denies all requests.
+
+On the Mac host, use its reserved LAN IPv4 address:
+
+``` nix
+services.agentVaultTunnel = {
+  enable = true;
+  host = "linux-host";
+  listenAddress = "192.168.1.10";
+};
+```
+
+In the MacOS guest configuration:
+
+``` nix
+programs.agentVaultProxy = {
+  enable = true;
+  url = "http://192.168.1.10:3128";
+  caCertificate = ./certificates/agent-vault.pem;
+};
+```
+
+Copy the Linux server's public certificate from
+`/var/lib/voom-agent-vault-public/ca.pem` to the configured certificate path.
+It can be committed to the configuration repository. Guest activation adds it
+to the CA bundle and System Keychain. Proxy and CA variables are set for
+shells. After login, new Fish shells load the proxy password from the runtime
+credential file and supply `GH_TOKEN=__github_token__` when unset or empty;
+existing values are preserved. Other shells can use `proxy run`. Add direct
+destinations to `programs.agentVaultProxy.noProxy` with `lib.mkAfter`.
+
+##### Provision Vault Tokens, Access Passwords, and the SSH Key
+
+Run these commands in Bash. Have the updated public and system configuration
+checkouts on both hosts. Git flakes exclude untracked files; add new files
+to Git before building. They do not need to be committed for local builds.
+
+On Linux, use the operator's existing Agent Vault session to create one
+proxy-only agent per vault. Each vault listed under `sharedProxy.vaults`
+must already exist and have its service credentials configured; Nix does not
+create these vaults. Confirm them with `agent-vault vault list`; if necessary,
+run `agent-vault auth login --address http://127.0.0.1:14321` as the operator.
+Before enabling the bridge, provision any missing runtime files:
+
+``` bash
+(
+  set -euo pipefail
+  umask 077
+  sudo install -d -m 0755 /var/lib/agent-vault-shared-proxy
+  sudo install -d -m 0700 /var/lib/voom-agent-vault-secrets
+  token_file=$(mktemp)
+  trap 'rm -f "$token_file"' EXIT
+  for vault in personal work; do
+    destination="/var/lib/voom-agent-vault-secrets/macos-$vault-token"
+    if sudo test -s "$destination"; then continue; fi
+    agent-vault agent create "macos-$vault" --role no-access \
+      --vault "$vault:proxy" --token-only > "$token_file"
+    test -s "$token_file"
+    sudo install -m 0600 "$token_file" "$destination"
+  done
+)
+```
+
+Each agent has instance role `no-access` and a `proxy` grant for just its
+vault. To rotate `personal`, write the output of `agent-vault agent rotate
+macos-personal --token-only` to a private temporary file, install it at
+`/var/lib/voom-agent-vault-secrets/macos-personal-token`, and restart the Linux
+bridge. Rotate other vaults individually using their agent names and token
+paths. Keep tokens out of Nix values and guest images. If an agent already
+exists but its token file is missing, use this rotation procedure for that
+vault to recover it.
+
+Generate a password for each configured access identity. This skips files
+that already exist, so rerunning it preserves installed passwords:
+
+``` bash
+(
+  set -e
+  umask 077
+  sudo install -d -m 0700 /var/lib/agent-vault-shared-proxy/passwords
+  password_file=$(mktemp)
+  trap 'rm -f "$password_file"' EXIT
+  for identity in personal work; do
+    password_path="/var/lib/agent-vault-shared-proxy/passwords/$identity"
+    if sudo test -e "$password_path"; then continue; fi
+    openssl rand -hex 32 > "$password_file"
+    sudo install -m 0600 "$password_file" "$password_path"
+  done
+)
+```
+
+The default vault token path is
+`/var/lib/voom-agent-vault-secrets/macos-VAULT-token`; the default access
+password path is `/var/lib/agent-vault-shared-proxy/passwords/IDENTITY`.
+Override `vaults.NAME.tokenFile` or `identities.NAME.passwordFile` for other
+runtime paths. Nix stores paths and assignments, never the secret values. All
+configured files must exist, including those for disabled identities. Use a
+separate random password for each identity; share an identity when VMs should
+share a password. Never use the Agent Vault owner or master password as a proxy
+access password.
+
+On the Mac host, generate a dedicated SSH key:
+
+``` bash
+sudo install -d -m 0700 /etc/agent-vault-tunnel
+if ! sudo test -f /etc/agent-vault-tunnel/id_ed25519; then
+  sudo ssh-keygen -t ed25519 -N '' -f /etc/agent-vault-tunnel/id_ed25519
+fi
+```
+
+Verify that `ssh linux-host true` succeeds using a trusted host key, replacing
+`linux-host` with `services.agentVaultTunnel.host`. On the Mac, append the
+public key to Linux's root-owned authorized key file:
+
+``` bash
+set -o pipefail
+sudo cat /etc/agent-vault-tunnel/id_ed25519.pub |
+  ssh linux-host 'sudo -n tee -a /var/lib/agent-vault-shared-proxy/authorized_keys >/dev/null'
+ssh linux-host 'sudo -n chmod 0644 /var/lib/agent-vault-shared-proxy/authorized_keys'
+```
+
+The Linux operator needs noninteractive sudo for this transfer. The SSH account
+`agent-vault-tunnel` allows forwarding to the shared socket. It denies shell
+sessions, TCP destinations, and reverse forwarding, and cannot read the token.
+
+On the Mac, pin the Linux host key from an existing, verified `known_hosts`
+entry. Run this in Bash, replacing `linux-host` with the literal
+`services.agentVaultTunnel.host` value:
+
+``` bash
+(
+  set -euo pipefail
+  pin_file=$(mktemp)
+  trap 'rm -f "$pin_file"' EXIT
+  ssh-keygen -F linux-host -f "$HOME/.ssh/known_hosts" > "$pin_file"
+  test -s "$pin_file"
+  sudo install -m 0644 "$pin_file" /etc/agent-vault-tunnel/known_hosts
+)
+```
+
+The tunnel uses these root-owned files and ignores user SSH configuration.
+
+##### Deploy the Host and Guest Configurations
+
+Before activation, compare the Linux server and committed public CA
+[fingerprints](#agent-vault-troubleshooting). Replace the committed public
+certificate if they differ.
+
+From your system configuration repository, apply the Linux configuration
+first, then the Mac host configuration. For a pinned public input, run this
+on each host:
+
+``` bash
+nix run .#build-switch
+```
+
+To use a sibling public working tree, pass the override to both the launcher
+and its rebuild command:
+
+``` bash
+nix run .#build-switch \
+  --override-input nixos-config path:../nixos-config \
+  -- --override-input nixos-config path:../nixos-config
+```
+
+On Linux, confirm the services are active and the intended identities are
+enabled:
+
+``` bash
+sudo systemctl status --no-pager agent-vault.service agent-vault-shared-proxy.service
+sudo agent-vault-access status
+```
+
+On the Mac host, check the listener and firewall rule using
+[Tunnel Status and Restart](#tunnel-status-and-restart) and
+[Firewall Checks](#firewall-checks), then update the running guest:
+
+``` bash
+nix run .#voom-update -- --darwin macos-example
+```
+
+For a sibling public working tree, use:
+
+``` bash
+nix run .#voom-update \
+  --override-input nixos-config path:../nixos-config \
+  -- --public-flake ../nixos-config --darwin macos-example
+```
+
+Complete [Guest Login and Commands](#guest-login-and-commands), then verify
+authenticated API and private Git access. Test disable/enable and LAN
+exclusion as described under [Firewall Checks](#firewall-checks). Repeat the
+guest and LAN checks after rebooting the Mac.
+
+##### Guest Login and Commands
+
+After updating a guest, install its credential. From Bash on the Mac host,
+replace `linux-host` and `macos-example` with the host and VM names:
+
+``` bash
+set -o pipefail
+ssh linux-host 'sudo -n agent-vault-access export personal' | \
+  voom ssh macos-example -- agent-vault-proxy login
+```
+
+The Linux operator must be allowed to run the export through noninteractive
+sudo. Export writes a secret to stdout; pipe it directly to the guest rather
+than displaying it. Login validates the input and atomically installs
+`~/.config/agent-vault-proxy/credential.json` with mode `0600`. A failed
+export or invalid input leaves an existing guest credential unchanged.
+Login is per Unix user; run it as the guest account that will use the proxy.
+Set `programs.agentVaultProxy.credentialFile` to use a different runtime path.
+
+Repeat with the same identity for VMs that should share access, or export a
+different identity for each VM. Credential copies, including those in VM
+clones and backups, share the same access and revocation. Keep access
+passwords out of Nix configuration and shared base images.
+
+The guest installs `proxy` and `agent-vault-proxy`. Use `proxy run` and
+`proxy bypass` for daily use on either guest OS; see
+[Guest Commands](#guest-commands) for shared behavior and the bypassed Fish
+session example. Use
+`agent-vault-proxy` for login, diagnostics, and shell configuration. These
+commands work without opening a new shell after an update:
+
+``` bash
+agent-vault-proxy check
+proxy run -- gh api user --jq .login
+proxy run -- git ls-remote https://github.com/OWNER/PRIVATE-REPO.git HEAD
+proxy bypass -- curl -q https://example.com
+```
+
+`agent-vault-proxy check` makes an HTTPS request through the configured proxy
+to GitHub's `/user` API. Success prints `GitHub API: HTTP 200` and exits zero.
+It uses the nonsecret default GitHub placeholder, ignores `NO_PROXY`, and
+verifies TLS with the configured CA bundle. This checks the tunnel, Linux
+bridge, vault authentication, CA, and default GitHub API credential. It
+requires the vault's default GitHub API service to be configured. A vault using
+only [organization-specific placeholders](#multiple-github-pats) can reject
+this check even when the tunnel works. For that vault, set the intended
+`GH_TOKEN` placeholder and use `proxy run -- gh api repos/OWNER/REPO`. Check
+other services separately.
+
+On MacOS, `proxy run` sets the configured proxy, bypass list, and CA variables
+for one command. It preserves an existing `GH_TOKEN`, including
+organization-specific placeholders, and supplies the default placeholder when
+absent or empty. It replaces inherited proxy settings, including `NO_PROXY=*`,
+and clears `ALL_PROXY` and `all_proxy`. The child command's arguments and exit
+status are preserved. Missing credentials or files accessible to other users
+cause `proxy run` and `agent-vault-proxy check` to fail.
+
+New Fish shells load the credential automatically. For an existing Bash shell,
+use `eval "$(agent-vault-proxy env)"`; for Fish, use `agent-vault-proxy env
+--fish | source`. The `env` output contains the proxy password; do not paste it
+into logs or support messages. Use `proxy run` to read the current credential
+without changing the parent shell.
+
+`proxy bypass` works before login and when the tunnel is unavailable. The
+System Keychain trust remains installed. Applications already running need to
+be restarted to receive new settings. Authenticated proxy URLs in a process's
+environment contain the access password. Avoid publishing environment dumps or
+verbose HTTP traces.
+
+After validating brokered API and private Git access, remove any existing
+guest-held GitHub credentials using [Migrating an Existing
+VM](#migrating-an-existing-vm). The `proxy bypass --` commands work on both
+guest OSes; the guest checks above replace Linux attachment validation. Proxy
+login does not remove old service credentials.
+
+##### Disable, Enable, and Rotate Access
+
+On Linux:
+
+``` bash
+sudo agent-vault-access status
+sudo agent-vault-access disable personal
+sudo agent-vault-access enable personal
+```
+
+Status lists each configured identity, its vault, and whether access is
+enabled. It does not check service health. Disable writes a persistent hold
+under `/var/lib/agent-vault-shared-proxy/disabled/` and restarts the bridge,
+closing active CONNECT tunnels as well as other requests. The hold survives
+service restarts, host reboots, and configuration rebuilds; `enable` removes it
+and restarts the bridge. Both operations briefly interrupt every identity. All
+VMs sharing the disabled identity lose access together. The Mac tunnel can stay
+running.
+
+To replace an access password, disable its identity, generate and install a new
+password in its configured file, repeat guest login for each VM using that
+identity, then enable it. The provisioning loop above skips existing password
+files; replace the chosen file explicitly when rotating. Export and login work
+while access is disabled; requests remain denied until enabled. Old copies will
+receive HTTP 407. To move an identity to another vault, change its `vault`
+assignment and apply the Linux configuration; no guest change is needed.
+
+The bridge logs the authenticated access identity. Agent Vault sees the vault's
+proxy-only agent, so its request logs and per-agent rate limits are shared by
+all access identities assigned to that vault.
+
+##### Recover MacOS Proxy Access
+
+With the default paths, the Linux host backup includes Agent Vault's database
+and encrypted CA state, but omits the shared proxy's vault tokens, access
+passwords, authorized keys, and disabled-marker directory. Guest backups also
+do not include the Mac host's SSH key or host-key pin. Keep protected copies of
+runtime files and holds, or plan to recreate them.
+
+After restoring the Linux host, keep `sharedProxy.enable` disabled until you
+have restored or rotated the vault tokens, restored or replaced the access
+passwords, and restored the disabled markers. If the hold state is unknown,
+create a marker for every configured identity under
+`/var/lib/agent-vault-shared-proxy/disabled/` before enabling the bridge.
+Enable identities individually after review. `voom-agent-vault sync` manages
+Linux VM attachments; it does not recreate these MacOS access files.
+
+Restore or reprovision the Mac host's SSH key and verified host-key pin using
+the provisioning steps above. Repeat guest login after changing passwords.
+MacOS guest backups include the runtime credential under `/Users`; restoring or
+cloning one preserves that identity's access. Use a separate identity for a
+restored VM that needs independent revocation.
+
+##### Tunnel Status and Restart
+
+On the Mac host:
+
+``` bash
+sudo launchctl print system/org.nixos.agent-vault-tunnel
+sudo /usr/sbin/lsof -nP -iTCP:3128 -sTCP:LISTEN
+sudo tail -n 50 /var/log/agent-vault-tunnel.log
+```
+
+Look for `state = running` and a PID in the launchd output, and an `ssh`
+listener at `192.168.1.10:3128`. A running supervisor or open listener does
+not prove that Linux can serve requests; run `agent-vault-proxy check` in a
+guest to test that path.
+
+To restart the shared tunnel:
+
+``` bash
+sudo launchctl kill SIGTERM system/org.nixos.agent-vault-tunnel
+```
+
+The supervisor closes SSH and exits. Launchd starts it again; allow about
+15 seconds, then repeat the status and guest checks. A restart interrupts
+requests from every guest.
+
+On Linux, inspect the bridge and Agent Vault server:
+
+``` bash
+sudo systemctl status agent-vault-shared-proxy.service agent-vault.service
+sudo journalctl -u agent-vault-shared-proxy.service -b -n 50 --no-pager
+sudo journalctl -u agent-vault.service -b -n 50 --no-pager
+```
+
+Restart the bridge after replacing a vault token or to recover a failed bridge:
+
+``` bash
+sudo systemctl restart agent-vault-shared-proxy.service
+```
+
+Restarting `agent-vault.service` also restarts its bridge. The Mac SSH
+connection can remain running across a bridge restart.
+
+##### Agent Vault Troubleshooting
+
+Start with `agent-vault-proxy check` in the guest, then inspect the Mac log
+and Linux services above. Use the configured address and port in commands
+below; `192.168.1.10:3128` is an example.
+Inspect request records in Agent Vault's web interface; see
+[Agent Vault Initial Setup](#agent-vault-initial-setup) for the administrator connection.
+
+| Symptom | Check |
+|---------|-------|
+| `proxy: command not found` | Update the guest configuration. On MacOS, enable `programs.agentVaultProxy`; check that `/run/current-system/sw/bin` is on `PATH`. |
+| `agent-vault-proxy: command not found` | Update the guest configuration and check that `/run/current-system/sw/bin` is on `PATH`. |
+| Connection refused or curl error 7 | Inspect the Mac service, listener, and log. Check that the guest URL uses the Mac's LAN address. Guest `127.0.0.1` points to the guest. |
+| Connection timeout or curl error 28 | Confirm the Mac still owns the configured IP. On the Mac, `/sbin/route -n get 192.168.1.10` must show `interface: lo0`. Check the PF rules below. |
+| `Could not find service` from launchctl | The host configuration has not loaded the daemon. Apply the Mac host configuration; a guest update does not install host services. |
+| `Address already in use` in the Mac log | Use `lsof` above to identify the listener. Stop the conflicting service before restarting the tunnel. |
+| `Can't assign requested address` in the Mac log | The Mac's IP changed. Restore its reserved IP or update both the host listener and guest URL. |
+| `Permission denied (publickey)` in the Mac log | Check the dedicated key and Linux authorized key as described below. The tunnel does not use your SSH agent. |
+| `Host key verification failed` in the Mac log | Compare the pinned key with the Linux host's key through a trusted connection. Replace the pin only after verifying the change. |
+| `connect failed: No such file or directory` in the Mac log | Check the Linux bridge service and `/run/agent-vault-shared-proxy/proxy.sock`. SSH can start forwarding before this socket exists. |
+| `administratively prohibited` in the Mac log | Apply the Linux SSH configuration. It must allow the tunnel account to forward to `/run/agent-vault-shared-proxy/proxy.sock`. |
+| No proxy credential or private-file error | Repeat guest login. Check `ls -l ~/.config/agent-vault-proxy/credential.json`; it must be a private regular file. Use `chmod 0600` to fix permissions. Do not print its contents. |
+| HTTP 407 or curl error 56 during CONNECT | On Linux, run `sudo agent-vault-access status`. Check the identity is enabled and assigned to the intended vault. Repeat guest login after a password change. Check bridge and Agent Vault logs: if the bridge accepted the identity but upstream refused it, confirm that vault's runtime token is current and has the vault's `proxy` grant. Restart the bridge after replacing a token. |
+| Linux service reports a missing credential file | Provision every configured vault token and access password, even for disabled identities. Run `sudo journalctl -u agent-vault-shared-proxy.service -b -n 50 --no-pager` to find the path, then restart the bridge. |
+| HTTP 401 or 403 from GitHub | Check the vault agent, service match, placeholder, and credential injection in Agent Vault's request log. A multi-PAT vault may require an organization-specific placeholder instead of the default used by `check`. Check the GitHub credential's validity and permissions. |
+| Certificate verification failure or curl error 60 | Compare the committed public CA with the Linux server's current CA. Update the certificate and guest configuration after a CA change. Keep TLS verification enabled. |
+| `check` works but another command fails | Try `proxy run -- COMMAND`. If it works, inspect the command's inherited environment. Otherwise check its proxy support, vault service rules, and credential placeholder. A private Git request also needs the Git-over-HTTPS service. |
+
+For SSH authentication failures, inspect file ownership and permissions without
+printing the private key or token. On the Mac:
+
+``` bash
+sudo ls -ld /etc/agent-vault-tunnel
+sudo ls -l /etc/agent-vault-tunnel/id_ed25519 /etc/agent-vault-tunnel/known_hosts
+sudo ssh-keygen -lf /etc/agent-vault-tunnel/id_ed25519.pub
+sudo ssh-keygen -lf /etc/agent-vault-tunnel/known_hosts
+```
+
+The directory must be root-owned with mode `0700`; the private key must be
+root-owned with mode `0600`. On Linux:
+
+``` bash
+sudo ls -ld /var/lib/agent-vault-shared-proxy
+sudo ls -l /var/lib/agent-vault-shared-proxy/authorized_keys
+sudo ssh-keygen -lf /var/lib/agent-vault-shared-proxy/authorized_keys
+sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+sudo ls -ld /run/agent-vault-shared-proxy
+sudo ls -l /run/agent-vault-shared-proxy/proxy.sock
+```
+
+Compare the Mac public key fingerprint with `authorized_keys`, and the pinned
+host key with Linux's host key of the same type. The runtime socket directory
+belongs to `agent-vault-shared-proxy:agent-vault-tunnel` with mode `0750`;
+the socket has mode `0660`.
+
+For certificate failures, compare the SHA-256 fingerprints. On Linux:
+
+``` bash
+openssl x509 -in /var/lib/voom-agent-vault-public/ca.pem -noout -sha256 -fingerprint
+```
+
+In the guest configuration checkout:
+
+``` bash
+openssl x509 -in certificates/agent-vault.pem -noout -sha256 -fingerprint
+```
+
+If they differ, replace the committed public certificate and update the
+guest. If `check` succeeds but a MacOS application reports an untrusted CA,
+reapply the guest configuration to restore System Keychain trust. The check
+uses the CA bundle; applications can use the Keychain or their own trust store.
+
+##### Firewall Checks
+
+The tunnel installs this restriction under `com.apple/agent-vault-tunnel`:
+
+``` text
+block drop in quick on ! lo0 inet proto tcp from any to 192.168.1.10 port = 3128
+```
+
+Each guest's gvproxy reaches the Mac's own LAN address through `lo0`. The
+rule blocks connections arriving from other machines. Inspect it on the Mac:
+
+``` bash
+sudo /sbin/pfctl -s info
+sudo /sbin/pfctl -sr
+sudo /sbin/pfctl -a com.apple/agent-vault-tunnel -sr
+```
+
+PF must be enabled, the main ruleset must contain
+`anchor "com.apple/*" all`, and the child anchor must contain the restriction
+for the configured address and port. The `No ALTQ support in kernel` message
+is harmless. If the main anchor is missing, inspect `/etc/pf.conf` and restore
+the host's PF configuration before restarting the tunnel. The daemon loads
+only its own child anchor.
+
+The supervisor checks PF after each one-second SSH wait. If PF is disabled,
+the anchor disappears, or the restriction changes, it closes SSH and launchd
+retries. Detection is periodic; a firewall change can briefly precede tunnel
+shutdown. Stopping the service leaves the block rule installed.
+
+After setup and after a Mac reboot, run the guest check and a private Git
+request. Confirm `macos-personal` or `macos-work` and the intended vault in
+Agent Vault's request log. The bridge log records the access identity without
+its password. Test revocation with `disable`, confirm an existing proxy
+session closes and new requests fail, then `enable` and rerun the guest check.
+From a separate LAN machine, this command must fail to connect:
+
+``` bash
+curl -q --noproxy '*' --connect-timeout 5 --max-time 6 \
+  --output /dev/null http://192.168.1.10:3128/
+```
+
+Any HTTP response means the listener is reachable from that machine. A
+successful public Git request alone does not verify credential injection.
 
 #### Publishing VM Web Apps Over Tailscale
 
