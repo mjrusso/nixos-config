@@ -15,6 +15,7 @@ let user = userInfo.user;
     ../../modules/darwin/home-manager.nix
     ../../modules/darwin/voom-backup.nix
     ../../modules/darwin/agent-vault-tunnel.nix
+    ../../modules/darwin/agent-vault-guest.nix
     ../../modules/shared
     ../../modules/shared/caches
   ];

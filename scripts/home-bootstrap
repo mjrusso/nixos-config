@@ -17,7 +17,8 @@ log_manual_secret_setup() {
 [home-bootstrap]   Linux guests: use Agent Vault on the host. Stop the VM and follow
 [home-bootstrap]   "Attach a New VM" in the nixos-config README.
 [home-bootstrap]
-[home-bootstrap]   MacOS guests: this configuration does not support Agent Vault attachment.
+[home-bootstrap]   MacOS guests: configure the shared proxy, CA trust, and access login. Follow
+[home-bootstrap]   "Shared Agent Vault Access for MacOS Guests" in the nixos-config README.
 
 EOF
     return

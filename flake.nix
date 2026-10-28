@@ -262,6 +262,9 @@
       );
 
       checks.x86_64-linux = {
+        agent-vault-proxy = import ./tests/agent-vault-proxy.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        };
         agent-vault-shared-proxy = import ./tests/agent-vault-shared-proxy.nix {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
           voomPackage = inputs.voom.packages.x86_64-linux.default;
@@ -287,6 +290,9 @@
       };
 
       checks.aarch64-darwin = {
+        agent-vault-proxy = import ./tests/agent-vault-proxy.nix {
+          pkgs = nixpkgs.legacyPackages.aarch64-darwin;
+        };
         agent-vault-tunnel =
           nixpkgs.legacyPackages.aarch64-darwin.callPackage ./packages/agent-vault-tunnel
             { };
