@@ -152,7 +152,10 @@ in
     '';
     systemd.services.agent-vault-shared-proxy = {
       description = "Authenticated Agent Vault access for macOS guests";
-      wantedBy = [ "agent-vault.service" ];
+      wantedBy = [
+        "multi-user.target"
+        "agent-vault.service"
+      ];
       requires = [ "agent-vault.service" ];
       after = [ "agent-vault.service" ];
       partOf = [ "agent-vault.service" ];

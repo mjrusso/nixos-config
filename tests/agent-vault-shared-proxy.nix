@@ -70,7 +70,7 @@ testPkgs.testers.runNixOSTest {
       enable = true;
       user = "operator";
       sharedProxy = {
-        enable = true;
+        enable = false;
         vaults = {
           personal.tokenFile = "/etc/personal-token";
           work.tokenFile = "/etc/work-token";
@@ -101,7 +101,10 @@ testPkgs.testers.runNixOSTest {
       ExecStart = lib.mkForce "${pkgs.python3}/bin/python3 ${backend}";
       ExecStartPost = lib.mkForce [ ];
     };
+    specialisation.with-shared-proxy.configuration.services.voomAgentVault.sharedProxy.enable =
+      lib.mkForce true;
     specialisation.no-access.configuration.services.voomAgentVault.sharedProxy = {
+      enable = lib.mkForce true;
       vaults = lib.mkForce { };
       identities = lib.mkForce { };
     };
@@ -118,6 +121,11 @@ testPkgs.testers.runNixOSTest {
     import json
 
     machine.start()
+    machine.wait_for_unit("agent-vault.service")
+    vault_pid = machine.succeed("systemctl show -p MainPID --value agent-vault.service")
+    machine.fail("systemctl cat agent-vault-shared-proxy.service")
+    machine.succeed("/run/current-system/specialisation/with-shared-proxy/bin/switch-to-configuration test")
+    assert machine.succeed("systemctl show -p MainPID --value agent-vault.service") == vault_pid
     machine.wait_for_unit("agent-vault-shared-proxy.service")
     machine.wait_until_succeeds("test -S /run/agent-vault-shared-proxy/proxy.sock")
     machine.wait_for_unit("sshd.service")
@@ -189,7 +197,7 @@ testPkgs.testers.runNixOSTest {
     machine.fail("runuser -u agent-vault-tunnel -- test -r /etc/personal-token")
     machine.fail("runuser -u agent-vault-tunnel -- test -r /run/agent-vault-shared-proxy/access.map")
     machine.fail("runuser -u nobody -- python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('/run/agent-vault-shared-proxy/proxy.sock')\"")
-    machine.succeed("/run/current-system/specialisation/no-access/bin/switch-to-configuration test")
+    machine.succeed("/run/booted-system/specialisation/no-access/bin/switch-to-configuration test")
     machine.wait_until_succeeds("test -S /run/agent-vault-shared-proxy/proxy.sock")
     assert machine.succeed(curl + " --proxy-user work:work-password -o /dev/null -w '%{http_code}' http://unused.invalid/") == "407"
     machine.succeed(ssh + " -o ControlPath=/tmp/proxy-control -O exit " + destination)
