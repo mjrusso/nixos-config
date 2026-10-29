@@ -3436,45 +3436,9 @@ can copy it and other installed host fonts when selected through
 
 #### Emacs
 
-Emacs is installed via Nix, using a custom build
-([mjrusso/emacs-flake](https://github.com/mjrusso/emacs-flake)).
-
-The Emacs flake is automatically built and
-[cached](https://garnix.io/docs/ci/caching/) by [Garnix](https://garnix.io/).
-
-- Garnix's binary cache is configured automatically for Darwin and NixOS hosts
-  (see [modules/shared/caches/](./modules/shared/caches)).
-
-  - However, on first run, the caches module will not have been activated yet.
-    Bootstrap by exporting `NIX_CONFIG` for the initial `build-switch` (note
-    that once that switch completes, `/etc/nix/nix.conf` should contain the
-    Garnix-related entries, so the manual override will no longer be needed):
-
-      ``` bash
-      export NIX_CONFIG='extra-substituters = https://cache.garnix.io
-      extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g='
-      nix run .#build-switch
-      ```
-
-- For Linux (non-NixOS) hosts, the Garnix cache must be configured manually.
-  _(See [Garnix's documentation](https://garnix.io/docs/ci/caching/#caching).)_
-  Add the following to `/etc/nix/nix.conf` (or `~/.config/nix/nix.conf` if your
-  user is trusted):
-
-    ```
-    extra-substituters = https://cache.garnix.io
-    extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
-    ```
-
-To verify the Garnix substituter is active on the current machine:
-
-``` bash
-nix config show substituters | grep garnix
-nix config show trusted-public-keys | grep garnix
-```
-
-If nothing matches, Nix won't query Garnix, and any build that depends on a
-pre-built artifact there (such as Emacs) will fall through to building from source.
+Emacs (see [overlays/emacs/](./overlays/emacs)) is installed via Nix from stock
+nixpkgs, with a few additional packages and a custom MacOS app icon by [Darrin
+Henein](https://darrinhenein.com/blog/emacs-icon/).
 
 Note that my [Emacs configuration](https://github.com/mjrusso/.emacs.d) is not
 part of the shared repository (and not managed by _home-manager_). It is cloned

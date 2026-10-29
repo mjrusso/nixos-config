@@ -1,4 +1,4 @@
-{ config, osConfig, pkgs, emacs-flake, voom, herdlord, llm-agents, ... }:
+{ config, osConfig, pkgs, voom, herdlord, llm-agents, ... }:
 
 {
 
@@ -13,7 +13,6 @@
     overlays =
       [
         (final: prev: {
-          my-emacs-with-packages = emacs-flake.packages.${prev.stdenv.hostPlatform.system}.default;
           voom = voom.packages.${prev.stdenv.hostPlatform.system}.default;
           herdlord = herdlord.packages.${prev.stdenv.hostPlatform.system}.default;
           agent-browser = llm-agents.packages.${prev.stdenv.hostPlatform.system}.agent-browser;

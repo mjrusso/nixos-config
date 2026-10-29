@@ -19,10 +19,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    emacs-flake = {
-      url = "github:mjrusso/emacs-flake";
-    };
-
     voom = {
       # For local development, use `path:../voom` (assuming a sibling checkout).
       url = "github:mjrusso/voom";

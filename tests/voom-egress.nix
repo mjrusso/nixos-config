@@ -11,8 +11,8 @@ let
       allowUnsupportedSystem = true;
     };
     overlays = [
+      (import ../overlays/emacs)
       (_final: _previous: {
-        my-emacs-with-packages = inputs.emacs-flake.packages.${system}.default;
         voom = inputs.voom.packages.${system}.default;
         herdlord = inputs.herdlord.packages.${system}.default;
         agent-browser = inputs.llm-agents.packages.${system}.agent-browser;
