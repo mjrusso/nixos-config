@@ -6,7 +6,7 @@ let
   # The hash covers Caddy's Go modules as well as the plugin's, so it is valid
   # only for the Caddy version it was computed against.
   caddyCloudflareHashCaddyVersion = "2.11.7";
-  caddyCloudflareHash = "sha256-xRJ5evsAJ2akg47j3Bt6YDXJOgX88B/rKNP50KSVyNY=";
+  caddyCloudflareHash = "sha256-tubXIDCJnO2mvdnPlZclwDhNGaeeYLSt7lnni3+pXDo=";
 
   routeModule = lib.types.submodule {
     options = {

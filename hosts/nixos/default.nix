@@ -62,7 +62,6 @@ in
       "sd_mod"
       "igb"
     ];
-    initrd.systemd.enable = true;
     initrd.systemd.network.enable = true;
     initrd.network = {
       enable = true;
