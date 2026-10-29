@@ -205,6 +205,7 @@ let
       chmod 0644 "$temporary"
       mv "$temporary" /run/voom-agent-vault-firewall/status.json
       if [[ $rc -ne 0 ]]; then
+        printf '%s\n' "$output" >&2
         systemctl stop agent-vault.service
       fi
       exit "$rc"
