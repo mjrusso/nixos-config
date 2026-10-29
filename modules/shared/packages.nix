@@ -50,7 +50,7 @@ with pkgs; [
   uv
   rustc
   cargo
-  ruby_3_3
+  ruby_3_4
 
   # Editors
   nano
