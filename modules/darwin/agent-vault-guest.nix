@@ -60,10 +60,6 @@ in
       }
     ];
     security.pki.certificateFiles = [ certificate ];
-    system.activationScripts.postActivation.text = ''
-      /usr/bin/security add-trusted-cert -d -r trustRoot \
-        -k /Library/Keychains/System.keychain ${lib.escapeShellArg certificate}
-    '';
     environment.variables = environment;
     environment.systemPackages = [
       helper

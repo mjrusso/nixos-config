@@ -47,10 +47,16 @@ def main():
         command.add_argument("command", nargs=argparse.REMAINDER)
     commands.add_parser("check", help="verify the proxy and default GitHub API credential")
     commands.add_parser("login", help="install an exported credential from stdin")
+    commands.add_parser("trust", help="trust the CA in System Keychain; run in a guest GUI terminal")
     shell = commands.add_parser("env", help="emit shell assignments containing the proxy credential")
     shell.add_argument("--fish", action="store_true")
     shell.add_argument("--if-present", action="store_true")
     args = parser.parse_args(sys.argv[2:])
+    if args.action == "trust":
+        os.execv("/usr/bin/sudo", [
+            "/usr/bin/sudo", "/usr/bin/security", "add-trusted-cert", "-d", "-r", "trustRoot",
+            "-k", "/Library/Keychains/System.keychain", config["environment"]["NODE_EXTRA_CA_CERTS"],
+        ])
     if args.action in ("run", "direct"):
         if args.command[:1] == ["--"]:
             args.command.pop(0)

@@ -2298,7 +2298,8 @@ The guest configuration selects the backend: `voom-egress-run` on Linux and
 `agent-vault-proxy run` on MacOS. Both use `voom-egress-skip` for `bypass`. On
 MacOS, use `agent-vault-proxy login`, `agent-vault-proxy check`, and
 `agent-vault-proxy env` for credential setup, diagnostics, and shell
-configuration.
+configuration. Use `agent-vault-proxy trust` in a guest GUI terminal to install
+the CA in System Keychain.
 
 Remove the session egress environment for one command with:
 
@@ -2617,11 +2618,12 @@ programs.agentVaultProxy = {
 Copy the Linux server's public certificate from
 `/var/lib/voom-agent-vault-public/ca.pem` to the configured certificate path.
 It can be committed to the configuration repository. Guest activation adds it
-to the CA bundle and System Keychain. Proxy and CA variables are set for
-shells. After login, new Fish shells load the proxy password from the runtime
-credential file and supply `GH_TOKEN=__github_token__` when unset or empty;
-existing values are preserved. Other shells can use `proxy run`. Add direct
-destinations to `programs.agentVaultProxy.noProxy` with `lib.mkAfter`.
+to the CA bundle. System Keychain trust requires the separate GUI step under
+[Guest Login and Commands](#guest-login-and-commands). Proxy and CA variables
+are set for shells. After login, new Fish shells load the proxy password from
+the runtime credential file and supply `GH_TOKEN=__github_token__` when unset or
+empty; existing values are preserved. Other shells can use `proxy run`. Add
+direct destinations to `programs.agentVaultProxy.noProxy` with `lib.mkAfter`.
 
 ##### Provision Vault Tokens, Access Passwords, and the SSH Key
 
@@ -2824,6 +2826,18 @@ proxy run -- git ls-remote https://github.com/OWNER/PRIVATE-REPO.git HEAD
 proxy bypass -- curl -q https://example.com
 ```
 
+For applications that use System Keychain, install the CA once from a terminal
+in the guest's graphical session. Open the guest with `voom gui macos-example`
+on the Mac host, then run this inside the guest:
+
+``` bash
+agent-vault-proxy trust
+```
+
+Approve the macOS authentication prompt. Repeat this step if the CA changes.
+This works before proxy login. Keychain trust can require GUI authorization
+even as root; command-line tools use the CA bundle installed during activation.
+
 `agent-vault-proxy check` makes an HTTPS request through the configured proxy
 to GitHub's `/user` API. Success prints `GitHub API: HTTP 200` and exits zero.
 It uses the nonsecret default GitHub placeholder, ignores `NO_PROXY`, and
@@ -2849,11 +2863,11 @@ use `eval "$(agent-vault-proxy env)"`; for Fish, use `agent-vault-proxy env
 into logs or support messages. Use `proxy run` to read the current credential
 without changing the parent shell.
 
-`proxy bypass` works before login and when the tunnel is unavailable. The
-System Keychain trust remains installed. Applications already running need to
-be restarted to receive new settings. Authenticated proxy URLs in a process's
-environment contain the access password. Avoid publishing environment dumps or
-verbose HTTP traces.
+`proxy bypass` works before login and when the tunnel is unavailable. It
+preserves any installed System Keychain trust. Applications already running
+need to be restarted to receive new settings. Authenticated proxy URLs in a
+process's environment contain the access password. Avoid publishing environment
+dumps or verbose HTTP traces.
 
 After validating brokered API and private Git access, remove any existing
 guest-held GitHub credentials using [Migrating an Existing
@@ -2913,6 +2927,8 @@ the provisioning steps above. Repeat guest login after changing passwords.
 MacOS guest backups include the runtime credential under `/Users`; restoring or
 cloning one preserves that identity's access. Use a separate identity for a
 restored VM that needs independent revocation.
+After recreating a guest, repeat the GUI trust step for applications that use
+System Keychain.
 
 ##### Tunnel Status and Restart
 
@@ -2982,6 +2998,7 @@ Inspect request records in Agent Vault's web interface; see
 | Linux service reports a missing credential file | Provision every configured vault token and access password, even for disabled identities. Run `sudo journalctl -u agent-vault-shared-proxy.service -b -n 50 --no-pager` to find the path, then restart the bridge. |
 | HTTP 401 or 403 from GitHub | Check the vault agent, service match, placeholder, and credential injection in Agent Vault's request log. A multi-PAT vault may require an organization-specific placeholder instead of the default used by `check`. Check the GitHub credential's validity and permissions. |
 | Certificate verification failure or curl error 60 | Compare the committed public CA with the Linux server's current CA. Update the certificate and guest configuration after a CA change. Keep TLS verification enabled. |
+| `SecTrustSettingsSetTrustSettings` reports no user interaction possible | Run `agent-vault-proxy trust` from a terminal in the guest's graphical session and approve the macOS prompt. Update the guest configuration if this occurs during activation. |
 | `check` works but another command fails | Try `proxy run -- COMMAND`. If it works, inspect the command's inherited environment. Otherwise check its proxy support, vault service rules, and credential placeholder. A private Git request also needs the Git-over-HTTPS service. |
 
 For SSH authentication failures, inspect file ownership and permissions without
@@ -3025,8 +3042,9 @@ openssl x509 -in certificates/agent-vault.pem -noout -sha256 -fingerprint
 
 If they differ, replace the committed public certificate and update the
 guest. If `check` succeeds but a MacOS application reports an untrusted CA,
-reapply the guest configuration to restore System Keychain trust. The check
-uses the CA bundle; applications can use the Keychain or their own trust store.
+run `agent-vault-proxy trust` in a guest GUI terminal to install System Keychain
+trust. The check uses the CA bundle; applications can use the Keychain or their
+own trust store.
 
 ##### Firewall Checks
 
