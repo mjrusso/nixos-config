@@ -4,7 +4,9 @@ let
   cfg = config.services.tailnetCaddy;
   caddyCloudflareVersion = "v0.2.4";
   # The hash covers Caddy's Go modules as well as the plugin's, so it is valid
-  # only for the Caddy version it was computed against.
+  # only for the Caddy version it was computed against. A nixpkgs update can
+  # also change it without changing the Caddy version, which the assertion
+  # below cannot detect; the build then fails with a hash mismatch instead.
   caddyCloudflareHashCaddyVersion = "2.11.7";
   caddyCloudflareHash = "sha256-tubXIDCJnO2mvdnPlZclwDhNGaeeYLSt7lnni3+pXDo=";
 
