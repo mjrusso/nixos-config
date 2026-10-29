@@ -42,9 +42,9 @@
 
           default = pkgs.mkShell {
             packages = basePackages ++ devPackages
-              ++ pkgs.lib.optionals pkgs.stdenv.isLinux
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux
               (with pkgs; [ inotify-tools libnotify ])
-              ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.terminal-notifier ];
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.terminal-notifier ];
 
             inherit env shellHook;
           };

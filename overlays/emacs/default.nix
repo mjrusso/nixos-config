@@ -4,7 +4,7 @@
 # compiled locally.
 self: super:
 let
-  base = if super.stdenv.isDarwin then super.emacs else super.emacs-gtk;
+  base = if super.stdenv.hostPlatform.isDarwin then super.emacs else super.emacs-gtk;
 
   withPackages = base.pkgs.withPackages (epkgs: [
     epkgs.vterm
@@ -14,7 +14,7 @@ let
 in
 {
   my-emacs-with-packages =
-    if super.stdenv.isDarwin then
+    if super.stdenv.hostPlatform.isDarwin then
       # The wrapper copies Resources/ into its own output, so the icon can be
       # replaced here without rebuilding Emacs.
       withPackages.overrideAttrs (old: {
