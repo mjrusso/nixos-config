@@ -1,5 +1,21 @@
-{ pkgs }:
+{ pkgs, darwin }:
 let
+  guest = darwin.lib.darwinSystem {
+    system = "aarch64-darwin";
+    specialArgs.systemType = "vm";
+    modules = [
+      ../modules/darwin/agent-vault-guest.nix
+      {
+        programs.agentVaultProxy = {
+          enable = true;
+          url = "http://192.0.2.1:3128";
+          caCertificate = ./fixtures/agent-vault-ca.pem;
+        };
+      }
+    ];
+  };
+  ca = guest.config.environment.variables.NODE_EXTRA_CA_CERTS;
+  activation = guest.config.system.activationScripts.postActivation.text;
   proxy = pkgs.callPackage ../packages/agent-vault-proxy.nix {
     credentialFile = "./credential.json";
     environment = {
@@ -15,6 +31,12 @@ let
     ];
   };
 in
+assert pkgs.lib.assertMsg (
+  builtins.getContext ca != { }
+) "The guest CA must be a runtime dependency so nix copy transfers it.";
+assert pkgs.lib.assertMsg (builtins.hasAttr (builtins.unsafeDiscardStringContext ca) (
+  builtins.getContext activation
+)) "Keychain activation must retain the guest CA dependency.";
 pkgs.runCommand "agent-vault-proxy-check"
   {
     nativeBuildInputs = [

@@ -268,6 +268,7 @@
 
       checks.x86_64-linux = {
         agent-vault-proxy = import ./tests/agent-vault-proxy.nix {
+          inherit (inputs) darwin;
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
         };
         agent-vault-shared-proxy = import ./tests/agent-vault-shared-proxy.nix {
@@ -296,6 +297,7 @@
 
       checks.aarch64-darwin = {
         agent-vault-proxy = import ./tests/agent-vault-proxy.nix {
+          inherit (inputs) darwin;
           pkgs = nixpkgs.legacyPackages.aarch64-darwin;
         };
         agent-vault-tunnel =

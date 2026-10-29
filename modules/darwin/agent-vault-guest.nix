@@ -7,6 +7,7 @@
 }:
 let
   cfg = config.programs.agentVaultProxy;
+  certificate = "${cfg.caCertificate}";
   bundle = "/etc/ssl/certs/ca-certificates.crt";
   noProxy = lib.concatStringsSep "," cfg.noProxy;
   environment = {
@@ -20,7 +21,7 @@ let
     CURL_CA_BUNDLE = bundle;
     REQUESTS_CA_BUNDLE = bundle;
     GIT_SSL_CAINFO = bundle;
-    NODE_EXTRA_CA_CERTS = toString cfg.caCertificate;
+    NODE_EXTRA_CA_CERTS = certificate;
     NODE_USE_ENV_PROXY = "1";
     DENO_CERT = bundle;
   };
@@ -58,10 +59,10 @@ in
         message = "Enable agentVaultProxy only in macOS guests.";
       }
     ];
-    security.pki.certificateFiles = [ cfg.caCertificate ];
+    security.pki.certificateFiles = [ certificate ];
     system.activationScripts.postActivation.text = ''
       /usr/bin/security add-trusted-cert -d -r trustRoot \
-        -k /Library/Keychains/System.keychain ${lib.escapeShellArg (toString cfg.caCertificate)}
+        -k /Library/Keychains/System.keychain ${lib.escapeShellArg certificate}
     '';
     environment.variables = environment;
     environment.systemPackages = [
