@@ -75,7 +75,11 @@ head -c 4 /dev/urandom | od -A n -t x1 | tr -d ' '
 ```
 
 `nixosMainDisk` is the stable `/dev/disk/by-id/...` path of the disk that disko
-partitions and installs onto (see the NixOS install section below).
+partitions and installs onto (see the NixOS install section below). The
+optional `nixosVmDisk` is the `by-id` path of a second disk for VM storage.
+When set, the voom, libvirt, and voom-staging datasets live on a separate
+`vmpool` on that disk, encrypted with a raw key at `/etc/zfs/keys/vmpool.key`,
+instead of on `rpool`.
 `nixosExtraHosts` is an attribute set of static `/etc/hosts` entries, mapping
 an IP address to a list of names, for example `{ "192.168.1.10" = [
 "fileserver" ]; }`.

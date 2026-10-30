@@ -1,98 +1,137 @@
-{ hostInfo, userInfo, ... }:
+{ hostInfo, userInfo, lib, ... }:
 
+let
+  vmDisk = hostInfo.nixosVmDisk or null;
+
+  vmDiskOptions = {
+    recordsize = "64K";
+    primarycache = "metadata";
+    logbias = "throughput";
+    "com.sun:auto-snapshot" = "false";
+  };
+
+  vmDatasets = {
+    voom = {
+      type = "zfs_fs";
+      mountpoint = "/home/${userInfo.user}/.local/share/voom";
+      options = vmDiskOptions;
+    };
+    # Persistent rsync staging for the backup of voom guests. Snapshots are
+    # disabled because this is a copy of data already backed up elsewhere.
+    voom-staging = {
+      type = "zfs_fs";
+      mountpoint = "/var/cache/voom-staging";
+      options = {
+        primarycache = "metadata";
+        "com.sun:auto-snapshot" = "false";
+      };
+    };
+    vms = {
+      type = "zfs_fs";
+      mountpoint = "/var/lib/libvirt/images";
+      options = vmDiskOptions;
+    };
+  };
+
+  poolFsOptions = {
+    compression = "zstd";
+    atime = "off";
+    xattr = "sa";
+    acltype = "posixacl";
+    mountpoint = "none";
+    encryption = "aes-256-gcm";
+    "com.sun:auto-snapshot" = "false";
+  };
+in
 {
   disko.devices = {
-    disk.main = {
-      device = hostInfo.nixosMainDisk;
-      type = "disk";
-      content = {
-        type = "gpt";
-        partitions = {
-          ESP = {
-            type = "EF00";
-            size = "1G";
-            content = {
-              type = "filesystem";
-              format = "vfat";
-              mountpoint = "/boot";
-              mountOptions = [ "umask=0077" ];
+    disk = {
+      main = {
+        device = hostInfo.nixosMainDisk;
+        type = "disk";
+        content = {
+          type = "gpt";
+          partitions = {
+            ESP = {
+              type = "EF00";
+              size = "1G";
+              content = {
+                type = "filesystem";
+                format = "vfat";
+                mountpoint = "/boot";
+                mountOptions = [ "umask=0077" ];
+              };
+            };
+            zfs = {
+              size = "100%";
+              content = {
+                type = "zfs";
+                pool = "rpool";
+              };
             };
           };
-          zfs = {
+        };
+      };
+    }
+    // lib.optionalAttrs (vmDisk != null) {
+      vms = {
+        device = vmDisk;
+        type = "disk";
+        content = {
+          type = "gpt";
+          partitions.zfs = {
             size = "100%";
             content = {
               type = "zfs";
-              pool = "rpool";
+              pool = "vmpool";
             };
           };
         };
       };
     };
 
-    zpool.rpool = {
-      type = "zpool";
-      options.ashift = "12";
-      rootFsOptions = {
-        compression = "zstd";
-        atime = "off";
-        xattr = "sa";
-        acltype = "posixacl";
-        mountpoint = "none";
-        encryption = "aes-256-gcm";
-        keyformat = "passphrase";
-        keylocation = "prompt";
-        "com.sun:auto-snapshot" = "false";
+    zpool = {
+      rpool = {
+        type = "zpool";
+        options.ashift = "12";
+        rootFsOptions = poolFsOptions // {
+          keyformat = "passphrase";
+          keylocation = "prompt";
+        };
+        datasets = {
+          root = {
+            type = "zfs_fs";
+            mountpoint = "/";
+            options = {
+              "com.sun:auto-snapshot" = "true";
+              # Guarantees the host can still write when a guest fills the pool.
+              refreservation = "8G";
+            };
+          };
+          home = {
+            type = "zfs_fs";
+            mountpoint = "/home";
+            options."com.sun:auto-snapshot" = "true";
+          };
+          nix = {
+            type = "zfs_fs";
+            mountpoint = "/nix";
+            options."com.sun:auto-snapshot" = "false";
+          };
+        }
+        // lib.optionalAttrs (vmDisk == null) vmDatasets;
       };
-      datasets = {
-        root = {
-          type = "zfs_fs";
-          mountpoint = "/";
-          options = {
-            "com.sun:auto-snapshot" = "true";
-            # Guarantees the host can still write when a guest fills the pool.
-            refreservation = "8G";
-          };
+    }
+    // lib.optionalAttrs (vmDisk != null) {
+      # The key file must stay on rpool, which the boot passphrase unlocks first.
+      vmpool = {
+        type = "zpool";
+        options.ashift = "12";
+        rootFsOptions = poolFsOptions // {
+          keyformat = "raw";
+          keylocation = "file:///etc/zfs/keys/vmpool.key";
         };
-        home = {
-          type = "zfs_fs";
-          mountpoint = "/home";
-          options."com.sun:auto-snapshot" = "true";
-        };
-        nix = {
-          type = "zfs_fs";
-          mountpoint = "/nix";
-          options."com.sun:auto-snapshot" = "false";
-        };
-        voom = {
-          type = "zfs_fs";
-          mountpoint = "/home/${userInfo.user}/.local/share/voom";
-          options = {
-            recordsize = "64K";
-            primarycache = "metadata";
-            logbias = "throughput";
-            "com.sun:auto-snapshot" = "false";
-          };
-        };
-        # Persistent rsync staging for the backup of voom guests. Snapshots are
-        # disabled because this is a copy of data already backed up elsewhere.
-        voom-staging = {
-          type = "zfs_fs";
-          mountpoint = "/var/cache/voom-staging";
-          options = {
-            primarycache = "metadata";
-            "com.sun:auto-snapshot" = "false";
-          };
-        };
-        vms = {
-          type = "zfs_fs";
-          mountpoint = "/var/lib/libvirt/images";
-          options = {
-            recordsize = "64K";
-            primarycache = "metadata";
-            logbias = "throughput";
-            "com.sun:auto-snapshot" = "false";
-          };
-        };
+        datasets = vmDatasets;
       };
     };
   };
