@@ -16,7 +16,7 @@ let
         voom = inputs.voom.packages.${system}.default;
         herdlord = inputs.herdlord.packages.${system}.default;
         agent-browser = inputs.llm-agents.packages.${system}.agent-browser;
-        herdr = inputs.llm-agents.packages.${system}.herdr;
+        herdr = inputs.llm-agents-herdr.packages.${system}.herdr;
       })
     ];
   };

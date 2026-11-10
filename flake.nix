@@ -35,6 +35,12 @@
       url = "github:numtide/llm-agents.nix";
     };
 
+    # herdr only, so that it is updated independently of the other software
+    # installed from llm-agents, such as agent-browser.
+    llm-agents-herdr = {
+      url = "github:numtide/llm-agents.nix";
+    };
+
     nixos-generators = {
       url = "github:nix-community/nixos-generators";
       inputs.nixpkgs.follows = "nixpkgs";

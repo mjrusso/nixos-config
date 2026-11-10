@@ -1,4 +1,4 @@
-{ config, osConfig, pkgs, voom, herdlord, llm-agents, ... }:
+{ config, osConfig, pkgs, voom, herdlord, llm-agents, llm-agents-herdr, ... }:
 
 {
 
@@ -16,7 +16,7 @@
           voom = voom.packages.${prev.stdenv.hostPlatform.system}.default;
           herdlord = herdlord.packages.${prev.stdenv.hostPlatform.system}.default;
           agent-browser = llm-agents.packages.${prev.stdenv.hostPlatform.system}.agent-browser;
-          herdr = llm-agents.packages.${prev.stdenv.hostPlatform.system}.herdr;
+          herdr = llm-agents-herdr.packages.${prev.stdenv.hostPlatform.system}.herdr;
         })
       ] ++
       # Apply each overlay found in the /overlays directory
