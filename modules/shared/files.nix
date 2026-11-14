@@ -8,5 +8,6 @@ in {
   ".aider.conf.yml" = import ./config/aider.nix;
   "${xdg_configHome}/ghostty/config" = import ./config/ghostty.nix;
   "${xdg_configHome}/herdr/config.toml" = import ./config/herdr.nix;
+  "${xdg_configHome}/rex/init.lua".source = ./config/rex/init.lua;
   "${xdg_configHome}/workmux/config.yaml" = import ./config/workmux.nix;
 }
