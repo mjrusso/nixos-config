@@ -118,6 +118,13 @@ in
     if test -z "$SYSTEM_APPEARANCE"
 ${indentFish systemAppearanceFish}
     end
+
+    # Rex puts its server's `rex` first in PATH, but NixOS and nix-darwin reset
+    # PATH, which can drop it or put another version first. This must stay
+    # after the Homebrew reordering above.
+    if set -q REX_BIN_DIR
+        fish_add_path --path --prepend --move $REX_BIN_DIR
+    end
   '';
 
   interactiveShellInit = ''
