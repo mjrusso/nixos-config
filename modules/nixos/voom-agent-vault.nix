@@ -10,6 +10,8 @@ let
   agentVaultPackage = pkgs.callPackage ../../packages/agent-vault.nix { };
   managerPackage = pkgs.callPackage ../../packages/voom-agent-vault { };
   chain = "VOOM_AGENT_VAULT";
+  tailnetIPv4Subnet = "100.64.0.0/10";
+  tailnetIPv6Subnet = "fd7a:115c:a1e0::/48";
   configFile = pkgs.writeText "voom-agent-vault-config.json" (
     builtins.toJSON {
       agentVault = lib.getExe agentVaultPackage;
@@ -46,17 +48,19 @@ let
     text = ''
       install_family() {
         local tool=$1
+        local subnet
         "$tool" -w -t filter -N ${chain} 2>/dev/null || true
         "$tool" -w -t filter -F ${chain}
         "$tool" -w -t filter -A ${chain} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
         if [[ $tool == *ip6tables ]]; then
-          :
+          subnet=${tailnetIPv6Subnet}
           ${dnsRules "\"$tool\"" 6}
         else
-          :
+          subnet=${tailnetIPv4Subnet}
           ${dnsRules "\"$tool\"" 4}
         fi
         "$tool" -w -t filter -A ${chain} -m conntrack --ctstate NEW -m addrtype --dst-type LOCAL -j REJECT
+        "$tool" -w -t filter -A ${chain} -d "$subnet" -j REJECT
         "$tool" -w -t filter -A ${chain} -j RETURN
         while "$tool" -w -t filter -C OUTPUT -m owner --uid-owner agent-vault -j ${chain} 2>/dev/null; do
           "$tool" -w -t filter -D OUTPUT -m owner --uid-owner agent-vault -j ${chain}
@@ -95,6 +99,7 @@ let
       verify_family() {
         local tool=$1
         local family=$2
+        local subnet
         local uid first jump_count target_count expected_count chain_rule_count
         local -a rules chain_rules
         uid=$(id -u agent-vault)
@@ -120,6 +125,7 @@ let
         }
         "$tool" -w -t filter -C ${chain} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
         if [[ $family == IPv6 ]]; then
+          subnet=${tailnetIPv6Subnet}
           ${lib.concatMapStringsSep "\n" (
             address:
             lib.optionalString (lib.hasInfix ":" address) ''
@@ -127,10 +133,11 @@ let
               "$tool" -w -t filter -C ${chain} -d ${lib.escapeShellArg address} -p tcp --dport 53 -j ACCEPT
             ''
           ) cfg.localDNSAddresses}
-          expected_count=$((4 + ${
+          expected_count=$((5 + ${
             toString (2 * builtins.length (builtins.filter (lib.hasInfix ":") cfg.localDNSAddresses))
           }))
         else
+          subnet=${tailnetIPv4Subnet}
           ${lib.concatMapStringsSep "\n" (
             address:
             lib.optionalString (!lib.hasInfix ":" address) ''
@@ -138,13 +145,14 @@ let
               "$tool" -w -t filter -C ${chain} -d ${lib.escapeShellArg address} -p tcp --dport 53 -j ACCEPT
             ''
           ) cfg.localDNSAddresses}
-          expected_count=$((4 + ${
+          expected_count=$((5 + ${
             toString (
               2 * builtins.length (builtins.filter (address: !lib.hasInfix ":" address) cfg.localDNSAddresses)
             )
           }))
         fi
         "$tool" -w -t filter -C ${chain} -m conntrack --ctstate NEW -m addrtype --dst-type LOCAL -j REJECT
+        "$tool" -w -t filter -C ${chain} -d "$subnet" -j REJECT
         "$tool" -w -t filter -C ${chain} -j RETURN
         [[ $("$tool" -w -t filter -S ${chain} | wc -l) -eq $expected_count ]] || {
           echo "$family ${chain} contains unexpected or duplicate rules" >&2
@@ -152,7 +160,7 @@ let
         }
         mapfile -t chain_rules < <("$tool" -w -t filter -S ${chain} | sed -n '/^-A ${chain} /p')
         chain_rule_count=''${#chain_rules[@]}
-        [[ $chain_rule_count -ge 3 ]] || {
+        [[ $chain_rule_count -ge 4 ]] || {
           echo "$family ${chain} is incomplete" >&2
           return 1
         }
@@ -161,8 +169,12 @@ let
           echo "$family ${chain} does not begin with the established-connection rule" >&2
           return 1
         }
-        [[ ''${chain_rules[chain_rule_count - 2]} == "-A ${chain} -m conntrack --ctstate NEW -m addrtype --dst-type LOCAL -j REJECT"* ]] || {
+        [[ ''${chain_rules[chain_rule_count - 3]} == "-A ${chain} -m conntrack --ctstate NEW -m addrtype --dst-type LOCAL -j REJECT"* ]] || {
           echo "$family ${chain} does not reject new local traffic before returning" >&2
+          return 1
+        }
+        [[ ''${chain_rules[chain_rule_count - 2]} == "-A ${chain} -d $subnet -j REJECT"* ]] || {
+          echo "$family ${chain} does not reject tailnet traffic before returning" >&2
           return 1
         }
         [[ ''${chain_rules[chain_rule_count - 1]} == "-A ${chain} -j RETURN" ]] || {
@@ -259,35 +271,51 @@ let
       exit 1
     '';
   };
-  verifyResolver = pkgs.writeShellApplication {
-    name = "voom-agent-vault-resolver-verify";
-    runtimeInputs = [ pkgs.gawk ];
-    text = ''
-      allowed=( ${lib.concatMapStringsSep " " lib.escapeShellArg cfg.localDNSAddresses} )
-      is_allowed() {
-        local candidate=$1
-        local configured
-        for configured in "''${allowed[@]}"; do
-          if [[ $candidate == "$configured" ]]; then
-            return 0
-          fi
-        done
-        return 1
-      }
+  verifyResolver = pkgs.writers.writePython3Bin "voom-agent-vault-resolver-verify" { } ''
+    from ipaddress import ip_address, ip_network
+    from pathlib import Path
+    import subprocess
+    import sys
 
-      while read -r address; do
-        if [[ $address == *:* ]]; then
-          route=$(${pkgs.iproute2}/bin/ip -6 route get "$address" 2>/dev/null || true)
-        else
-          route=$(${pkgs.iproute2}/bin/ip route get "$address" 2>/dev/null || true)
-        fi
-        if [[ $route == local\ * ]] && ! is_allowed "$address"; then
-          echo "host-local resolver $address is not listed in services.voomAgentVault.localDNSAddresses" >&2
-          exit 1
-        fi
-      done < <(awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf)
-    '';
-  };
+
+    def parse_address(raw):
+        try:
+            return ip_address(raw)
+        except ValueError:
+            sys.exit(f"invalid DNS resolver address: {raw}")
+
+
+    allowed = set(map(parse_address, [
+    ${lib.concatMapStringsSep "\n" (address: "    ${builtins.toJSON address},") cfg.localDNSAddresses}
+    ]))
+    tailnet = (
+        ip_network("${tailnetIPv4Subnet}"),
+        ip_network("${tailnetIPv6Subnet}"),
+    )
+    ip_exe = "${pkgs.iproute2}/bin/ip"
+    for line in Path("/etc/resolv.conf").read_text().splitlines():
+        fields = line.split()
+        if len(fields) < 2 or fields[0] != "nameserver":
+            continue
+        raw = fields[1]
+        address = parse_address(raw)
+        if address in allowed:
+            continue
+        if any(address in subnet for subnet in tailnet):
+            sys.exit(
+                f"tailnet resolver {raw} is blocked by the firewall; "
+                "use an allowed host-local resolver"
+            )
+        route = subprocess.run(
+            [ip_exe, "-6" if address.version == 6 else "-4", "route", "get", raw],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        ).stdout
+        if route.startswith("local "):
+            sys.exit(
+                f"host-local resolver {raw} is not listed in "
+                "services.voomAgentVault.localDNSAddresses"
+            )
+  '';
   snapshotDatabase = pkgs.writeShellApplication {
     name = "voom-agent-vault-snapshot-database";
     runtimeInputs = [
@@ -447,7 +475,7 @@ in
     };
 
     systemd.services.voom-agent-vault-firewall = {
-      description = "Restrict Agent Vault connections to host-local addresses";
+      description = "Block Agent Vault connections to host-local and tailnet addresses";
       wantedBy = [ "multi-user.target" ];
       wants = [ "agent-vault.service" ];
       requires = [ "firewall.service" ];

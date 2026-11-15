@@ -958,6 +958,21 @@ restic-<hostname> restore latest --host <hostname> --target / --include <path>
 
 For guests running on a Mac host, see [MacOS Voom Hosts](#macos-voom-hosts).
 
+Voom blocks direct guest TCP and UDP connections to `100.64.0.0/10` and
+`fd7a:115c:a1e0::/48` so guests cannot use the host's Tailscale identity.
+Set exceptions for exact IP and port pairs in your `host-info.nix`:
+
+``` nix
+nixosVoomAllowedDestinations = [ "100.64.0.10:443" ];
+```
+
+The list defaults to empty and applies to all VMs owned by the configured user.
+Each exception permits TCP and UDP. Home Manager writes the list to
+`~/.config/voom/network.json`; edit it through Nix because the CLI refuses to
+replace the managed symlink. Restart VMs after changing the list;
+`voom doctor` checks their active policies. These exceptions apply only to
+direct guest traffic.
+
 To back up Linux [Voom](https://github.com/mjrusso/voom) guests, complete the
 [host backup setup](#backups), then enable `services.voomBackup` in the
 host's NixOS configuration through the constructor's `extraModules`:
@@ -1926,8 +1941,8 @@ For the lower-level attachment interface and recovery behavior, see Voom's
 
 > [!IMPORTANT]
 >
-> Explicit mode does not block direct guest networking or remove existing
-> guest credentials. After you validate brokered access, remove each
+> Explicit mode does not route all guest traffic through the proxy or remove
+> existing guest credentials. After you validate brokered access, remove each
 > guest-held credential. Access to that credential then depends on the proxy.
 
 The shared repository defines this module, but it does not assign VMs. Put the
@@ -1949,6 +1964,10 @@ The attribute name is the exact Voom VM name. The value is the exact Agent
 Vault vault name. A changed mapping is a profile change. A removed mapping is
 a detach request on the next authenticated synchronization.
 
+The host firewall blocks Agent Vault connections to host-local and tailnet
+addresses. DNS exceptions permit only TCP and UDP port 53 to exact resolver
+addresses.
+
 Before you apply the system configuration, inspect the host resolver:
 
 ``` bash
@@ -1957,11 +1976,21 @@ ip route get <resolver-address>
 ```
 
 If a resolver route starts with `local`, add its exact address to
-`services.voomAgentVault.localDNSAddresses`. The module permits only TCP and
-UDP port 53 to those addresses. Agent Vault refuses to start when it detects
-an unlisted host-local resolver. If the host gets its resolver through DHCP
-or another runtime service, verify `/etc/resolv.conf` after switching instead
-of inferring the address from the Nix configuration.
+`services.voomAgentVault.localDNSAddresses`. Use `ip -6 route get` for an IPv6
+resolver. If the host uses Tailscale DNS at `100.100.100.100` or
+`fd7a:115c:a1e0::53`, use systemd-resolved's local DNS listener:
+
+``` nix
+services.resolved.enable = true;
+services.voomAgentVault.localDNSAddresses = [ "127.0.0.53" ];
+```
+
+Agent Vault queries the local listener. Systemd-resolved forwards to the host's
+upstream DNS servers, including those supplied by Tailscale. `/etc/resolv.conf`
+must list `127.0.0.53`; `resolvectl status` shows the upstream servers.
+
+A blocked resolver prevents Agent Vault from starting. Periodic verification
+also stops a running instance if its resolver becomes blocked.
 
 ##### Agent Vault Initial Setup
 

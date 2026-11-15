@@ -35,7 +35,9 @@ testPkgs.testers.runNixOSTest {
       services.voomAgentVault = {
         enable = true;
         user = "operator";
+        localDNSAddresses = [ "127.0.0.53" ];
       };
+      services.resolved.enable = true;
 
       services.hostBackup = {
         enable = true;
@@ -54,7 +56,9 @@ testPkgs.testers.runNixOSTest {
       };
 
       environment.systemPackages = [
+        pkgs.bind.dnsutils
         pkgs.curl
+        pkgs.dnsmasq
         pkgs.python3
         pkgs.util-linux
       ];
@@ -147,9 +151,11 @@ testPkgs.testers.runNixOSTest {
       "python3 -m http.server 18081 --bind :: >/tmp/http6.log 2>&1 &"
     )
     machine.wait_until_succeeds("curl --noproxy '*' --fail http://192.0.2.10:18080/")
+    machine.wait_until_succeeds("curl --noproxy '*' --fail http://127.0.0.53:18080/")
     machine.wait_until_succeeds("curl --noproxy '*' --fail 'http://[2001:db8::10]:18081/'")
     for address in (
       "http://localhost:18080/",
+      "http://127.0.0.53:18080/",
       "http://192.0.2.10:18080/",
       "http://[::1]:18081/",
       "http://[2001:db8::10]:18081/",
@@ -160,21 +166,80 @@ testPkgs.testers.runNixOSTest {
         )
 
     machine.succeed(
-      "target=$(readlink -f /etc/resolv.conf); cp \"$target\" /tmp/resolv.conf.backup; "
-      "printf 'nameserver 127.0.0.53\\n' >\"$target\""
+      "ip netns add tailnet; ip link add test-host type veth peer name test-peer; "
+      "ip link set test-peer netns tailnet; ip link set test-host up; "
+      "ip addr add 100.64.0.1/30 dev test-host; "
+      "ip -6 addr add fd7a:115c:a1e0::1/64 dev test-host nodad; "
+      "ip addr add 192.0.2.1/30 dev test-host; "
+      "ip netns exec tailnet ip link set lo up; "
+      "ip netns exec tailnet ip link set test-peer up; "
+      "ip netns exec tailnet ip addr add 100.64.0.2/30 dev test-peer; "
+      "ip netns exec tailnet ip -6 addr add fd7a:115c:a1e0::2/64 dev test-peer nodad; "
+      "ip netns exec tailnet ip addr add 192.0.2.2/30 dev test-peer"
     )
-    machine.fail("systemctl start voom-agent-vault-firewall-check.service")
-    machine.wait_until_fails("systemctl is-active --quiet agent-vault.service")
-    machine.succeed("grep -Fq 'host-local resolver 127.0.0.53' /run/voom-agent-vault-firewall/status.json")
     machine.succeed(
-      "target=$(readlink -f /etc/resolv.conf); cp /tmp/resolv.conf.backup \"$target\"; "
-      "systemctl restart voom-agent-vault-firewall.service"
+      "ip netns exec tailnet python3 -m http.server 18080 --bind 0.0.0.0 >/tmp/tailnet4.log 2>&1 & "
+      "ip netns exec tailnet python3 -m http.server 18081 --bind :: >/tmp/tailnet6.log 2>&1 &"
     )
-    machine.wait_for_unit("agent-vault.service")
-    machine.succeed(verify)
+    for address in ("http://100.64.0.2:18080/", "http://[fd7a:115c:a1e0::2]:18081/"):
+        machine.wait_until_succeeds("curl --noproxy '*' --fail --connect-timeout 2 '" + address + "'")
+        machine.fail(
+          "runuser -u agent-vault -- curl --noproxy '*' --fail --connect-timeout 2 '" + address + "'"
+        )
+    machine.succeed(
+      "runuser -u agent-vault -- curl --noproxy '*' --fail --connect-timeout 2 http://192.0.2.2:18080/"
+    )
+
+    machine.succeed(
+      "ip netns exec tailnet ip addr add 100.100.100.100/32 dev test-peer; "
+      "ip netns exec tailnet ip -6 addr add fd7a:115c:a1e0::53/128 dev test-peer nodad; "
+      "ip route add 100.100.100.100/32 via 100.64.0.2 dev test-host"
+    )
+    machine.succeed(
+      "ip netns exec tailnet dnsmasq --no-daemon --no-resolv --no-hosts "
+      "--bind-interfaces --listen-address=100.100.100.100,fd7a:115c:a1e0::53 "
+      "--address=/resolver.test/192.0.2.2 --local=/resolver.test/ >/tmp/dns.log 2>&1 &"
+    )
+    for address in ("100.100.100.100", "fd7a:115c:a1e0::53"):
+        machine.succeed("resolvectl dns test-host " + address)
+        machine.succeed("resolvectl domain test-host '~.'; resolvectl flush-caches")
+        for transport in ("+notcp", "+tcp"):
+            query = "dig +short +timeout=2 +tries=1 " + transport + " resolver.test A"
+            machine.wait_until_succeeds("test \"$(" + query + " @" + address + ")\" = 192.0.2.2")
+            machine.fail("runuser -u agent-vault -- " + query + " @" + address)
+            machine.wait_until_succeeds(
+                "test \"$(runuser -u agent-vault -- " + query + ")\" = 192.0.2.2"
+            )
+
+    machine.succeed("cp $(readlink -f /etc/resolv.conf) /tmp/resolv.conf.backup")
+    for address, kind in (
+        ("100.100.100.100", "tailnet"),
+        ("fd7a:115c:a1e0::53", "tailnet"),
+        ("127.0.0.54", "host-local"),
+    ):
+        machine.succeed(
+            "systemctl reset-failed voom-agent-vault-resolver-check.service "
+            "voom-agent-vault-firewall-check.service"
+        )
+        machine.succeed(
+            "target=$(readlink -f /etc/resolv.conf); printf 'nameserver "
+            + address + "\\n' >\"$target\""
+        )
+        machine.fail("systemctl restart voom-agent-vault-resolver-check.service")
+        machine.fail("systemctl restart voom-agent-vault-firewall-check.service")
+        machine.wait_until_fails("systemctl is-active --quiet agent-vault.service")
+        machine.succeed(
+            "grep -Fq '" + kind + " resolver " + address + "' /run/voom-agent-vault-firewall/status.json"
+        )
+        machine.succeed(
+            "target=$(readlink -f /etc/resolv.conf); cp /tmp/resolv.conf.backup \"$target\"; "
+            "systemctl restart voom-agent-vault-firewall.service"
+        )
+        machine.wait_for_unit("agent-vault.service")
+        machine.succeed(verify)
 
     machine.succeed("iptables -t filter -I OUTPUT 1 -j ACCEPT")
-    machine.fail("systemctl start voom-agent-vault-firewall-check.service")
+    machine.fail("systemctl restart voom-agent-vault-firewall-check.service")
     machine.wait_until_fails("systemctl is-active --quiet agent-vault.service")
     machine.succeed("iptables -t filter -D OUTPUT 1")
     machine.succeed("systemctl restart voom-agent-vault-firewall.service")
@@ -183,7 +248,7 @@ testPkgs.testers.runNixOSTest {
 
     machine.succeed("systemctl stop voom-agent-vault-firewall.service")
     machine.wait_until_fails("systemctl is-active --quiet agent-vault.service")
-    machine.fail("systemctl start voom-agent-vault-firewall-check.service")
+    machine.fail("systemctl restart voom-agent-vault-firewall-check.service")
     machine.fail("systemctl is-active --quiet voom-agent-vault-firewall.service")
     machine.sleep(duration=timedelta(seconds=32))
     machine.fail("systemctl is-active --quiet voom-agent-vault-firewall.service")
@@ -199,7 +264,7 @@ testPkgs.testers.runNixOSTest {
     )
     machine.fail("systemctl reload firewall.service")
     machine.succeed(verify)
-    machine.succeed("systemctl start voom-agent-vault-firewall-check.service")
+    machine.succeed("systemctl restart voom-agent-vault-firewall-check.service")
     machine.succeed("systemctl is-active --quiet agent-vault.service")
     machine.succeed(
       "rm /run/systemd/system/firewall.service.d/fail-reload.conf; "

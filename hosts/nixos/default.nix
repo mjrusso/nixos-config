@@ -41,6 +41,10 @@ in
     }
   ];
 
+  home-manager.users.${user}.xdg.configFile."voom/network.json".text = builtins.toJSON {
+    allowedDestinations = hostInfo.nixosVoomAllowedDestinations or [ ];
+  };
+
   # Use the systemd-boot EFI boot loader.
   boot = {
     loader = {
