@@ -46,8 +46,7 @@ bind("z", "pane.zoom")
 bind("f", "pane.float")
 bind("o", "pane.focus_next")
 bind("shift+o", "pane.focus_previous")
-bind("a", "pane.view_activity")
-bind("shift+a", "pane.go_to")
+bind("a", "client.palette.toggle")
 
 for _, direction in ipairs({ "left", "down", "up", "right" }) do
   bind(direction, "pane.focus", { direction = direction })
