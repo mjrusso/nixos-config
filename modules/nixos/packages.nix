@@ -3,7 +3,6 @@
 with pkgs;
 let
   shared-packages = import ../shared/packages.nix { inherit pkgs; };
-  voom-shutdown = pkgs.callPackage ../../packages/voom-shutdown.nix { };
 in
 shared-packages
 ++ [
@@ -17,7 +16,6 @@ shared-packages
   docker-compose
   qemu
   voom
-  voom-shutdown
 
   openssh
 

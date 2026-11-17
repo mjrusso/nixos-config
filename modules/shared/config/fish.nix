@@ -161,15 +161,10 @@ ${indentFish systemAppearanceFish}
   };
 
   functions = {
-    # Fish's default title plus the Herdr session name. Herdr has no session
-    # token, so the name reaches the window title through `{terminal_title}` in
-    # Herdr's `window_title`.
     fish_title = ''
       set -l prefix
       set -q SSH_TTY
       and set -a prefix "["(prompt_hostname | string sub -l 10 | string collect)"]"
-      set -l session (string match -r -- '/sessions/([^/]+)/herdr\.sock$' "$HERDR_SOCKET_PATH")[2]
-      and set -a prefix "[$session]"
       set -l command $argv[1]
       set -q argv[1]; or set command (status current-command)
       test "$command" = fish; and set command

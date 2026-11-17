@@ -14,9 +14,7 @@ let
       (import ../overlays/emacs)
       (_final: _previous: {
         voom = inputs.voom.packages.${system}.default;
-        herdlord = inputs.herdlord.packages.${system}.default;
         agent-browser = inputs.llm-agents.packages.${system}.agent-browser;
-        herdr = inputs.llm-agents-herdr.packages.${system}.herdr;
       })
     ];
   };

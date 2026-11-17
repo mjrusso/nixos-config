@@ -25,19 +25,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    herdlord = {
-      # For local development, use `path:../herdlord` (assuming a sibling checkout).
-      url = "github:mjrusso/herdlord";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     llm-agents = {
-      url = "github:numtide/llm-agents.nix";
-    };
-
-    # herdr only, so that it is updated independently of the other software
-    # installed from llm-agents, such as agent-browser.
-    llm-agents-herdr = {
       url = "github:numtide/llm-agents.nix";
     };
 
@@ -262,9 +250,6 @@
           proxy = pkgs.callPackage ./packages/proxy.nix { };
           voom-egress-run = pkgs.callPackage ./packages/voom-egress-run.nix { };
           voom-egress-skip = pkgs.callPackage ./packages/voom-egress-skip.nix { };
-          voom-shutdown = pkgs.callPackage ./packages/voom-shutdown.nix {
-            voom = inputs.voom.packages.${system}.default;
-          };
         }
       );
 

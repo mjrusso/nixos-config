@@ -129,8 +129,6 @@ with pkgs; [
   tree
   tmux
   agent-browser
-  herdr
-  herdlord
   zoxide
   unrar
   unzip
