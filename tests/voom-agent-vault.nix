@@ -225,9 +225,10 @@ testPkgs.testers.runNixOSTest {
             "target=$(readlink -f /etc/resolv.conf); printf 'nameserver "
             + address + "\\n' >\"$target\""
         )
-        machine.fail("systemctl restart voom-agent-vault-resolver-check.service")
-        machine.fail("systemctl restart voom-agent-vault-firewall-check.service")
+        # The timer may run the check first; then this run skips.
+        machine.execute("systemctl restart voom-agent-vault-firewall-check.service")
         machine.wait_until_fails("systemctl is-active --quiet agent-vault.service")
+        machine.fail("systemctl restart voom-agent-vault-resolver-check.service")
         machine.succeed(
             "grep -Fq '" + kind + " resolver " + address + "' /run/voom-agent-vault-firewall/status.json"
         )
@@ -239,7 +240,7 @@ testPkgs.testers.runNixOSTest {
         machine.succeed(verify)
 
     machine.succeed("iptables -t filter -I OUTPUT 1 -j ACCEPT")
-    machine.fail("systemctl restart voom-agent-vault-firewall-check.service")
+    machine.execute("systemctl restart voom-agent-vault-firewall-check.service")
     machine.wait_until_fails("systemctl is-active --quiet agent-vault.service")
     machine.succeed("iptables -t filter -D OUTPUT 1")
     machine.succeed("systemctl restart voom-agent-vault-firewall.service")
@@ -248,7 +249,7 @@ testPkgs.testers.runNixOSTest {
 
     machine.succeed("systemctl stop voom-agent-vault-firewall.service")
     machine.wait_until_fails("systemctl is-active --quiet agent-vault.service")
-    machine.fail("systemctl restart voom-agent-vault-firewall-check.service")
+    machine.succeed("systemctl restart voom-agent-vault-firewall-check.service")
     machine.fail("systemctl is-active --quiet voom-agent-vault-firewall.service")
     machine.sleep(duration=timedelta(seconds=32))
     machine.fail("systemctl is-active --quiet voom-agent-vault-firewall.service")

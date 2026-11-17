@@ -506,6 +506,9 @@ in
       onFailure = [ "voom-agent-vault-firewall-failed.service" ];
       serviceConfig = {
         Type = "oneshot";
+        # A switch stops Agent Vault and its firewall rules together, and the
+        # timer can fire before both start again.
+        ExecCondition = "${pkgs.systemd}/bin/systemctl is-active --quiet agent-vault.service";
         ExecStart = lib.getExe publishFirewallStatus;
       };
     };
