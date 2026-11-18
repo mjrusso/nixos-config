@@ -17,4 +17,5 @@ in {
   ssh = import ./config/ssh.nix commonArgs;
   zoxide = import ./config/zoxide.nix commonArgs;
   tmux = import ./config/tmux.nix commonArgs;
+  worktrunk = import ./config/worktrunk.nix commonArgs;
 }

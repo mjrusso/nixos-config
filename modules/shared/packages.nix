@@ -61,7 +61,6 @@ with pkgs; [
   just
   shellcheck
   git-recent # Run: `git recent` to see a list of recent git branches.
-  worktrunk
 
   # Dictionary
   # https://emacs.stackexchange.com/a/80721

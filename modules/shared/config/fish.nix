@@ -239,6 +239,29 @@ ${indentFish systemAppearanceFish}
       end
     '';
 
+    # worktrunk shell integration, which lets `wt switch` change the shell's
+    # directory. This is the stub that `wt config shell install` writes. On
+    # its first call, it replaces itself with the function that
+    # `wt config shell init fish` prints. Keep the stub: `wt config show`
+    # reports any other function body as outdated.
+    #
+    # `wt config show` also warns that completions are not configured. The
+    # package installs them in `vendor_completions.d`, so ignore the warning.
+    wt = ''
+      if set -q COMPLETE
+          command wt $argv
+          return
+      end
+      command wt config shell init fish | source
+      # If either command failed, this stub is still defined, and calling
+      # `wt` below would recurse forever.
+      set -l wt_status $pipestatus[1]
+      set -l source_status $pipestatus[2]
+      test $wt_status -eq 0; or return $wt_status
+      test $source_status -eq 0; or return $source_status
+      wt $argv
+    '';
+
     # md2pdf: render a markdown file to PDF via pandoc + typst.
     #
     # Usage: md2pdf <input.md> [output.pdf]
