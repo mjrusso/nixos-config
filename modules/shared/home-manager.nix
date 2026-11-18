@@ -13,6 +13,7 @@ in {
   gh = import ./config/gh.nix commonArgs;
   git = import ./config/git.nix commonArgs;
   jujutsu = import ./config/jujutsu.nix commonArgs;
+  navi = import ./config/navi.nix commonArgs;
   npm = import ./config/npm.nix commonArgs;
   ssh = import ./config/ssh.nix commonArgs;
   zoxide = import ./config/zoxide.nix commonArgs;
