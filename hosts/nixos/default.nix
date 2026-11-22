@@ -10,6 +10,7 @@
 
 let
   user = userInfo.user;
+  voomAllowedDestinations = hostInfo.nixosVoomAllowedDestinations or [ ];
   keys = userInfo.sshKeys;
 in
 {
@@ -41,9 +42,10 @@ in
     }
   ];
 
-  home-manager.users.${user}.xdg.configFile."voom/network.json".text = builtins.toJSON {
-    allowedDestinations = hostInfo.nixosVoomAllowedDestinations or [ ];
-  };
+  home-manager.users.${user}.xdg.configFile."voom/network.json" =
+    lib.mkIf (voomAllowedDestinations != [ ]) {
+      text = builtins.toJSON { allowedDestinations = voomAllowedDestinations; };
+    };
 
   # Use the systemd-boot EFI boot loader.
   boot = {

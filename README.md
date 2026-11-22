@@ -966,12 +966,13 @@ Set exceptions for exact IP and port pairs in your `host-info.nix`:
 nixosVoomAllowedDestinations = [ "100.64.0.10:443" ];
 ```
 
-The list defaults to empty and applies to all VMs owned by the configured user.
-Each exception permits TCP and UDP. Home Manager writes the list to
-`~/.config/voom/network.json`; edit it through Nix because the CLI refuses to
-replace the managed symlink. Restart VMs after changing the list;
-`voom doctor` checks their active policies. These exceptions apply only to
-direct guest traffic.
+Each entry allows direct TCP and UDP traffic to that destination from every
+VM owned by the configured user. With a nonempty list, Home Manager owns
+`~/.config/voom/network.json`. Make changes in `host-info.nix`. With an empty
+or omitted list, use `voom config allowed-destinations`.
+
+Restart the VMs after changing the list. Run `voom doctor` to check their
+active policies.
 
 To back up Linux [Voom](https://github.com/mjrusso/voom) guests, complete the
 [host backup setup](#backups), then enable `services.voomBackup` in the
