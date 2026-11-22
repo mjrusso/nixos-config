@@ -130,6 +130,7 @@ in
     ../../modules/shared/caches
     ../../modules/container/voom-egress.nix
     ../../modules/container/nvidia.nix
+    ../../modules/container/tailnet-caddy-guest.nix
     ../../modules/nixos/desktop.nix
   ];
 

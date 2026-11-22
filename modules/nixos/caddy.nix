@@ -2,6 +2,8 @@
 
 let
   cfg = config.services.tailnetCaddy;
+  # Must match the tag in the README's join command and tailnet policy.
+  peerTag = "tag:voom-vm";
   caddyCloudflareVersion = "v0.2.4";
   # The hash covers Caddy's Go modules as well as the plugin's, so it is valid
   # only for the Caddy version it was computed against. A nixpkgs update can
@@ -18,17 +20,14 @@ let
       };
 
       syncer = lib.mkOption {
-        type = lib.types.enum [ "voom" "docker" "none" ];
-        default = "voom";
+        type = lib.types.enum [ "tailnet" "docker" "none" ];
+        default = "tailnet";
         description = ''
-          Which syncer owns this route's dynamic route list. Exactly one unit
-          may PATCH a given route's subroute, so this also selects which unit is
-          generated: "voom" publishes Voom forwards, "docker" publishes Docker
-          containers labelled `caddy.host`, and "none" generates no syncer,
-          leaving the route empty for ad-hoc PATCHes.
+          The `tailnet` syncer publishes guests tagged `${peerTag}`. The
+          `docker` syncer publishes containers with a `caddy.host` label.
+          Use `none` to manage the route list through the Caddy admin API.
         '';
       };
-
     };
   };
 
@@ -65,355 +64,6 @@ let
     ];
     terminal = true;
   };
-
-  mkVoomSyncPackage = routeName: routeCfg:
-    let
-      commandName = if routeName == "voom" then
-        "voom-caddy-sync"
-      else
-        "voom-caddy-sync-${routeName}";
-    in pkgs.writeShellApplication {
-      name = commandName;
-      runtimeInputs = [ pkgs.coreutils pkgs.curl pkgs.jq ];
-      text = ''
-        set -euo pipefail
-
-        usage() {
-          cat <<'EOF'
-        Usage: ${commandName} [options]
-
-        Sync installed Voom HTTP(S) forwards into this route's Caddy route list.
-
-        Options:
-          --admin URL             Caddy admin API URL (default: http://localhost:2019)
-          --voom PATH             Voom executable (default: voom)
-          --vm NAME               Limit sync to one VM
-          --all-tcp               Publish every installed non-SSH TCP forward without probing
-          --include-manual        Include manual forwards (default: only auto forwards)
-          --watch                 Keep running, re-syncing on Voom VM/forward events
-          --dry-run               Print generated routes instead of patching Caddy
-          --timeout SECONDS       HTTP probe timeout (default: 1)
-          --help                  Show this help
-
-        Generated hostnames are:
-          <vm>-<guest-port>.${routeCfg.domain}
-        EOF
-        }
-
-        admin_url="http://localhost:2019"
-        route_id=${lib.escapeShellArg (routeId routeName)}
-        voom_bin="voom"
-        domain=${lib.escapeShellArg routeCfg.domain}
-        vm_name=""
-        all_tcp=0
-        include_manual=0
-        watch=0
-        dry_run=0
-        probe_timeout=1
-        skipped_previous=""
-        skipped_now=()
-        new_skips=0
-
-        while [[ $# -gt 0 ]]; do
-          case "$1" in
-            --admin)
-              admin_url="''${2:?missing value for --admin}"
-              shift 2
-              ;;
-            --voom)
-              voom_bin="''${2:?missing value for --voom}"
-              shift 2
-              ;;
-            --vm)
-              vm_name="''${2:?missing value for --vm}"
-              shift 2
-              ;;
-            --all-tcp)
-              all_tcp=1
-              shift
-              ;;
-            --include-manual)
-              include_manual=1
-              shift
-              ;;
-            --watch)
-              watch=1
-              shift
-              ;;
-            --dry-run)
-              dry_run=1
-              shift
-              ;;
-            --timeout)
-              probe_timeout="''${2:?missing value for --timeout}"
-              shift 2
-              ;;
-            --help|-h)
-              usage
-              exit 0
-              ;;
-            *)
-              echo "unknown argument: $1" >&2
-              usage >&2
-              exit 2
-              ;;
-          esac
-        done
-
-        log() {
-          echo "${commandName}: $*" >&2
-        }
-
-        dns_label() {
-          local label="$1"
-
-          label="''${label,,}"
-          label="''${label//_/-}"
-
-          if [[ ''${#label} -gt 63 || ! "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
-            return 1
-          fi
-
-          printf '%s\n' "$label"
-        }
-
-        dial_host() {
-          case "$1" in
-            ""|"*"|"0.0.0.0"|"::"|"[::]")
-              printf '127.0.0.1\n'
-              ;;
-            *)
-              printf '%s\n' "$1"
-              ;;
-          esac
-        }
-
-        format_authority() {
-          if [[ "$1" == *:* && "$1" != \[*\] ]]; then
-            printf '[%s]:%s\n' "$1" "$2"
-          else
-            printf '%s:%s\n' "$1" "$2"
-          fi
-        }
-
-        is_http() {
-          local scheme="$1"
-          local authority="$2"
-          local host="$3"
-          local tls_flag=()
-
-          if [[ "$scheme" == "https" ]]; then
-            tls_flag=(-k)
-          fi
-
-          # No -f: any HTTP response (including 401/403/404) means the upstream
-          # speaks HTTP and should be published; -f would skip auth-gated apps
-          # and apps without a root route.
-          curl -sS "''${tls_flag[@]}" \
-            --max-time "$probe_timeout" \
-            -H "Host: $host" \
-            -o /dev/null \
-            "$scheme://$authority/" >/dev/null 2>&1
-        }
-
-        if ! command -v "$voom_bin" >/dev/null 2>&1; then
-          log "required command not found: $voom_bin"
-          exit 1
-        fi
-
-        sync_once() {
-          new_skips=0
-
-          # Voom reads live VM/forward state from the user's runtime dir, which a
-          # system service does not inherit from a login session. Resolve it on
-          # every sync rather than once at startup.
-          if [[ -z "''${XDG_RUNTIME_DIR:-}" ]]; then
-            runtime_dir="/run/user/$(id -u)"
-            if [[ -d "$runtime_dir" ]]; then
-              export XDG_RUNTIME_DIR="$runtime_dir"
-            fi
-          fi
-
-          voom_args=(forward ls --output json)
-          if [[ -n "$vm_name" ]]; then
-            voom_args+=("$vm_name")
-          fi
-
-          # --watch calls sync_once with errexit suppressed, so a bare assignment
-          # here would fall through on failure and PATCH away every live route.
-          if ! forwards="$("$voom_bin" "''${voom_args[@]}")"; then
-            log "could not read Voom forwards"
-            return 1
-          fi
-
-          route_list=()
-          skipped_now=()
-
-          while IFS= read -r forward; do
-            vm="$(jq -r '.vm' <<<"$forward")"
-            bind="$(jq -r '.bind // ""' <<<"$forward")"
-            host_port="$(jq -r '.hostPort | tostring' <<<"$forward")"
-            guest_port="$(jq -r '.guestPort | tostring' <<<"$forward")"
-
-            [[ -n "$vm" ]] || continue
-
-            vm_label="$(dns_label "$vm")" || {
-              log "skipping forward with VM name that is not a DNS label: $vm"
-              continue
-            }
-
-            upstream_host="$(dial_host "$bind")"
-            upstream_authority="$(format_authority "$upstream_host" "$host_port")"
-            host="$vm_label-$guest_port.$domain"
-            scheme=""
-
-            if [[ "$all_tcp" -eq 1 ]]; then
-              scheme="http"
-            elif is_http http "$upstream_authority" "$host"; then
-              scheme="http"
-            elif is_http https "$upstream_authority" "$host"; then
-              scheme="https"
-            else
-              skipped_now+=("$vm_label:$host_port")
-              continue
-            fi
-
-            route_list+=("$(jq -cn \
-              --arg host "$host" \
-              --arg dial "$upstream_authority" \
-              --arg scheme "$scheme" \
-              '{
-                match: [{host: [$host]}],
-                handle: [{
-                  handler: "reverse_proxy",
-                  stream_close_delay: "1h",
-                  upstreams: [{dial: $dial}]
-                }]
-              }
-              | if $scheme == "https" then
-                  .handle[0].transport = {
-                    protocol: "http",
-                    tls: {insecure_skip_verify: true}
-                  }
-                else
-                  .
-                end')")
-          done < <(
-            jq -r \
-              --argjson include_manual "$include_manual" \
-              '
-                map(select(
-                  .installed == true
-                  and .protocol == "tcp"
-                  and .guestPort != 22
-                  and (($include_manual == 1) or .kind == "auto")
-                ))[]
-                | {
-                    vm,
-                    bind,
-                    hostPort,
-                    guestPort
-                  }
-                | @json
-              ' <<<"$forwards"
-          )
-
-          for key in "''${skipped_now[@]}"; do
-            if [[ " $skipped_previous " != *" $key "* ]]; then
-              new_skips=1
-            fi
-          done
-          skipped_previous="''${skipped_now[*]}"
-
-          if [[ ''${#route_list[@]} -eq 0 ]]; then
-            routes='[]'
-          else
-            routes="$(printf '%s\n' "''${route_list[@]}" | jq -s .)"
-          fi
-
-          if [[ "$dry_run" -eq 1 ]]; then
-            jq . <<<"$routes"
-            return 0
-          fi
-
-          status="$(curl -sS -o /dev/null -w '%{http_code}' "$admin_url/id/$route_id/routes" || true)"
-          case "$status" in
-            200)
-              ;;
-            404)
-              log "Caddy route target @id=$route_id does not exist"
-              return 1
-              ;;
-            *)
-              log "could not inspect Caddy route target @id=$route_id: HTTP $status"
-              return 1
-              ;;
-          esac
-
-          if ! curl -fsS -X PATCH \
-            -H 'Content-Type: application/json' \
-            --data-binary "$routes" \
-            "$admin_url/id/$route_id/routes" >/dev/null; then
-            log "could not patch Caddy route target @id=$route_id"
-            return 1
-          fi
-
-          count="$(jq 'length' <<<"$routes")"
-          log "synced $count Caddy route(s) from Voom forwards"
-        }
-
-        if [[ "$watch" -eq 0 ]]; then
-          sync_once
-          exit 0
-        fi
-
-        retries=0
-        arm_retries() {
-          if [[ "$new_skips" -eq 1 ]]; then
-            retries=3
-          elif [[ ''${#skipped_now[@]} -eq 0 ]]; then
-            retries=0
-          fi
-        }
-
-        sync_once || log "initial sync failed (continuing)"
-        arm_retries
-        log "watching Voom VM and forward events"
-
-        while :; do
-          rc=0
-          if [[ "$retries" -gt 0 ]]; then
-            IFS= read -r -t "$(( 40 >> retries ))" _ || rc=$?
-          else
-            IFS= read -r _ || rc=$?
-          fi
-
-          if [[ "$rc" -gt 128 ]]; then
-            retries=$(( retries - 1 ))
-          elif [[ "$rc" -ne 0 ]]; then
-            break
-          else
-            # Coalesce bursts: booting a VM installs every auto forward as its own
-            # event, and each sync PATCHes the whole route list anyway.
-            while IFS= read -r -t 1 _; do :; done
-          fi
-
-          sync_once || log "sync failed (continuing)"
-          arm_retries
-        done < <(
-          # A short lookback covers the window between the initial sync above and
-          # the reader positioning itself: without it, a forward installed while
-          # that sync was probing is skipped as history and never published.
-          "$voom_bin" events \
-            --since 1m \
-            --filter type=vm \
-            --filter type=forward
-        )
-
-        log "Voom event stream ended"
-        exit 1
-      '';
-    };
 
   mkDockerSyncPackage = routeName: routeCfg:
     let
@@ -758,6 +408,110 @@ let
       '';
     };
 
+  mkPeerSyncPackage = routeName: routeCfg:
+    let
+      commandName = "tailnet-caddy-peer-sync-${routeName}";
+    in pkgs.writeShellApplication {
+      name = commandName;
+      runtimeInputs = [ pkgs.coreutils pkgs.curl pkgs.jq config.services.tailscale.package ];
+      text = ''
+        admin_url="http://localhost:2019/id/${routeId routeName}/routes"
+        dry_run=0
+
+        case "''${1:-}" in
+          "") ;;
+          --dry-run) dry_run=1 ;;
+          *) echo "usage: ${commandName} [--dry-run]" >&2; exit 2 ;;
+        esac
+
+        log() {
+          echo "${commandName}: $*" >&2
+        }
+
+        # Keep offline peers so Caddy returns 502 for an unreachable guest.
+        # The policy lets tagged peers reach this host on port 443, so the first
+        # route refuses every source except this host and untagged peers. That
+        # includes a guest that joined since the last poll.
+        peer_routes() {
+          tailscale status --json | jq -cS \
+            --arg tag ${lib.escapeShellArg peerTag} \
+            --arg domain ${lib.escapeShellArg (lib.escapeRegex routeCfg.domain)} \
+            --arg port ${toString (import ../../packages/tailnet-caddy-guest-port.nix)} '
+              def tagged: (.Tags // []) | index($tag) != null;
+              [ (.Peer // {})[] ] as $peers
+              | ([ (.Self.TailscaleIPs // [])[], ($peers[] | select(tagged | not) | .TailscaleIPs[]) ]
+                  | sort) as $allowed
+              | [ {
+                  match: [ { not: [ { remote_ip: { ranges: $allowed } } ] } ],
+                  handle: [ {
+                    handler: "static_response",
+                    status_code: 403,
+                    body: "source not allowed\n"
+                  } ]
+                } ]
+              + ([
+                  $peers[]
+                  | select(tagged)
+                  | (.DNSName | split(".")[0]) as $name
+                  | (.TailscaleIPs | map(select(test("^[0-9.]+$"))) | first) as $ip
+                  | select($ip != null)
+                  | {
+                      match: [ {
+                        vars_regexp: {
+                          "{http.request.host}": {
+                            pattern: ("^" + $name + "-[0-9]+\\." + $domain + "$")
+                          }
+                        }
+                      } ],
+                      handle: [ {
+                        handler: "reverse_proxy",
+                        stream_close_delay: "1h",
+                        upstreams: [ { dial: ($ip + ":" + $port) } ]
+                      } ]
+                    }
+                ]
+                | sort_by(.match[0].vars_regexp[].pattern))'
+        }
+
+        if [[ "$dry_run" -eq 1 ]]; then
+          peer_routes | jq .
+          exit 0
+        fi
+
+        # Caddy clears its route list on restart.
+        while :; do
+          if ! want="$(peer_routes)"; then
+            log "could not read tailscale status"
+          elif ! have="$(curl -fsS "$admin_url" | jq -cS .)"; then
+            log "could not read Caddy routes at $admin_url"
+          elif [[ "$want" != "$have" ]]; then
+            if curl -fsS -X PATCH -H 'Content-Type: application/json' \
+              --data-binary "$want" "$admin_url" >/dev/null; then
+              log "synced $(jq length <<<"$want") tailnet peer route(s)"
+            else
+              log "could not patch Caddy routes at $admin_url"
+            fi
+          fi
+          sleep 10
+        done
+      '';
+    };
+
+  mkPeerSyncUnit = routeName: routeCfg:
+    let
+      pkg = mkPeerSyncPackage routeName routeCfg;
+    in lib.nameValuePair pkg.name {
+      description = "Sync Caddy '${routeName}' routes to tailnet peers tagged ${peerTag}";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "caddy.service" "tailscaled.service" ];
+      serviceConfig = {
+        User = cfg.syncUser;
+        ExecStart = "${pkg}/bin/${pkg.name}";
+        Restart = "always";
+        RestartSec = 5;
+      };
+    };
+
   # Block until Caddy's admin API is serving, so a sync triggered at Caddy
   # startup does not race the admin endpoint coming up.
   waitForCaddyAdmin = pkgs.writeShellScript "wait-caddy-admin" ''
@@ -772,57 +526,6 @@ let
     done
   '';
 
-  # Two units per Voom route: a oneshot that re-seeds on every Caddy start, and a
-  # watcher that keeps the route list current between those restarts.
-  mkVoomSyncUnits = routeName: routeCfg:
-    let
-      pkg = mkVoomSyncPackage routeName routeCfg;
-      exe = "${pkg}/bin/${pkg.name} --voom ${pkgs.voom}/bin/voom";
-    in [
-      (lib.nameValuePair pkg.name {
-        description = "Re-seed Caddy '${routeName}' routes from Voom forwards";
-        # Caddy reseeds the dynamic route list to empty whenever it starts —
-        # including the config-change restart forced by enableReload = false below —
-        # so re-run the sync on every Caddy start and restart to keep routes in sync
-        # across reboots, manual restarts, and rebuilds.
-        after = [ "caddy.service" ];
-        requires = [ "caddy.service" ];
-        wantedBy = [ "caddy.service" ]; # start with Caddy (e.g. at boot)
-        partOf = [ "caddy.service" ]; # and re-run when Caddy restarts
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          User = cfg.syncUser;
-          ExecStartPre = "${waitForCaddyAdmin}";
-          ExecStart = exe;
-        };
-      })
-      (lib.nameValuePair "${pkg.name}-watch" {
-        description =
-          "Re-sync Caddy '${routeName}' routes on Voom VM and forward changes";
-        after = [ "${pkg.name}.service" ];
-        wantedBy = [ "multi-user.target" ];
-        # Deliberately neither partOf nor requires caddy.service: `voom events`
-        # reads a file-backed log that outlives any Caddy restart, and the oneshot
-        # above already re-seeds on every such restart.
-        #
-        # An event stream that ends exits non-zero, so clear the start rate limit:
-        # without this, a run of restarts makes systemd give up on the watcher
-        # permanently.
-        unitConfig.StartLimitIntervalSec = 0;
-        serviceConfig = {
-          User = cfg.syncUser;
-          ExecStartPre = "${waitForCaddyAdmin}";
-          ExecStart = "${exe} --watch";
-          Restart = "always";
-          RestartSec = 5;
-        };
-      })
-    ];
-
-  # Two units per Docker route: a oneshot that re-seeds on every Caddy start
-  # (Caddy empties the dynamic route list whenever it starts, exactly as for
-  # Voom), and a watcher that keeps the list current between those restarts.
   mkDockerSyncUnits = routeName: routeCfg:
     let
       pkg = mkDockerSyncPackage routeName routeCfg;
@@ -866,10 +569,8 @@ let
       })
     ];
 
-  # Each route's subroute is PATCHed by exactly one syncer, so the route set is
-  # partitioned before any unit or package is generated: without this, a Docker
-  # route would also get a Voom syncer that wipes its routes on every restart.
-  voomRoutes = lib.filterAttrs (_: routeCfg: routeCfg.syncer == "voom") cfg.routes;
+  peerRoutes =
+    lib.filterAttrs (_: routeCfg: routeCfg.syncer == "tailnet") cfg.routes;
 
   dockerRoutes =
     lib.filterAttrs (_: routeCfg: routeCfg.syncer == "docker") cfg.routes;
@@ -909,10 +610,8 @@ in {
       type = lib.types.str;
       example = "alice";
       description = ''
-        User account whose Voom forwards are published. Voom state is per-user,
-        so the auto-sync service that re-seeds Caddy's dynamic route list on every
-        Caddy (re)start runs as this account. In this repo it is set automatically
-        from the host's primary user.
+        Account used by the syncers. The host configuration sets this to the
+        primary user.
       '';
     };
   };
@@ -952,9 +651,8 @@ in {
     services.caddy = {
       enable = true;
       adapter = null;
-      # Restart (not reload) on declarative config changes. A reload reseeds the
-      # dynamic route list to empty without restarting voom-caddy-sync, leaving a
-      # window with no routes; a restart lets partOf re-run the sync afterward.
+      # A reload clears the Docker routes. Only a restart triggers the
+      # oneshot syncer through PartOf.
       enableReload = false;
       environmentFile = cfg.cloudflareEnvironmentFile;
       package =
@@ -983,11 +681,11 @@ in {
       };
     };
 
-    environment.systemPackages = (lib.mapAttrsToList mkVoomSyncPackage voomRoutes)
+    environment.systemPackages = (lib.mapAttrsToList mkPeerSyncPackage peerRoutes)
       ++ (lib.mapAttrsToList mkDockerSyncPackage dockerRoutes);
 
     systemd.services = builtins.listToAttrs
-      ((lib.concatLists (lib.mapAttrsToList mkVoomSyncUnits voomRoutes))
+      ((lib.mapAttrsToList mkPeerSyncUnit peerRoutes)
         ++ (lib.concatLists (lib.mapAttrsToList mkDockerSyncUnits dockerRoutes)));
 
     # The Docker syncers run as syncUser rather than root, so they need group

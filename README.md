@@ -1247,9 +1247,10 @@ running:
 systemctl --user status sunshine
 ```
 
-Use Moonlight on the client. For a physical host, connect to its LAN or
-Tailscale address. For a Voom guest, forward these ports through the host,
-using the same port numbers on both sides:
+In Moonlight, use the physical host's LAN or Tailscale address. For a guest
+that has [joined the tailnet](#join-a-vm-to-the-tailnet), use its MagicDNS
+name. For other Voom guests, forward the ports below through the host using
+the same port numbers on both sides.
 
 | Protocol | Ports                             |
 |----------|-----------------------------------|
@@ -1282,7 +1283,7 @@ another machine. Forwards survive VM restarts.
 The host firewall must allow the streaming ports on the interface used by the
 client. This repo's NixOS host configuration trusts `tailscale0`, so Tailscale
 connections need no additional firewall rules. Enabling Sunshine opens its
-ports in the guest firewall; the guest does not need Tailscale.
+ports in the guest firewall.
 
 Use `tunnel` on the client to reach the administration UI:
 
@@ -1298,10 +1299,10 @@ tunnel <guest-user>@<voom-host> 47990 -- -p <guest-ssh-port>
 ```
 
 Open `https://localhost:47990`, accept the self-signed certificate, and create
-administrator credentials. Add the physical host's address or the Voom host's
-Tailscale address in Moonlight. Enter Moonlight's pairing PIN in Sunshine, then
-select **Desktop**. For the default headless display, set Moonlight to 4K/60 Hz
-with H.264 or HEVC.
+administrator credentials. Add the streaming address in Moonlight. For a
+forwarded connection, use the Voom host's address. Enter Moonlight's pairing
+PIN in Sunshine, then select **Desktop**. For the default headless display,
+set Moonlight to 4K/60 Hz with H.264 or HEVC.
 
 Edit `services.sunshine.settings` and `services.sunshine.applications.apps`
 in the [desktop module](./modules/nixos/desktop.nix) to change settings or
@@ -1577,36 +1578,41 @@ normal use the guest architecture matches the host architecture: use
 or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
 `raw` image.
 
-##### Join a Linux VM to the Tailnet
+##### Join a VM to the Tailnet
 
-To let VMs join the tailnet, add this module to the `extraModules` of the VM
-targets and of the `qcow` and `raw` image outputs in your system configuration
-repository's `flake.nix`, then update the running VMs with `voom-update`:
+In your system configuration repository's `flake.nix`, add the following
+module to `extraModules` for the Linux VM targets and the `qcow` and `raw` image
+outputs. Update running Linux guests with `voom-update`.
 
 ``` nix
-{ services.tailscale.enable = true; }
+{ services.tailnetCaddyGuest.enable = true; }
 ```
 
-Leave it out of the `docker` and `lxc` image outputs, which have no
-`/dev/net/tun`. The
-setting applies to every VM built from those targets. Each VM then runs
-`tailscaled`, but it stays logged out until you join that VM yourself, so VMs
-that never join stay off the tailnet. To join one, run this in the guest:
+Leave the module out of the `docker` and `lxc` outputs, which lack
+`/dev/net/tun`. For MacOS guests, add it to the Darwin VM target's
+`extraModules` and run `voom-update --darwin`.
+
+To add a VM to the tailnet, run this inside the guest.
 
 ``` bash
 sudo tailscale up --advertise-tags=tag:voom-vm --accept-dns=false
 ```
 
-Open the printed URL and approve the device. The node takes the guest's
-hostname, which Voom sets from the VM name. The login requires you to be an
-owner of `tag:voom-vm`. The node is owned by the tag rather than your user, so
-its key does not expire. Its state lives in `/var/lib/tailscale` and survives
-restarts. `--accept-dns=false` keeps the guest's resolver unchanged.
+Open the URL printed by `tailscale up` and sign in as an owner of
+`tag:voom-vm`. Key expiry is disabled by default for tagged nodes. The login
+survives guest restarts, and `--accept-dns=false` preserves the guest's DNS
+settings.
 
-A joined VM has its own tailnet identity. Voom's block on tailnet addresses does
-not apply to traffic through that identity, so the tailnet policy controls what
-the VM can reach. Grant `tag:voom-vm` no access to other nodes, including other
-VMs:
+Tailscale uses the guest's hostname, which Voom sets from the VM name on
+Linux. Check `tailscale status` for the name to use when
+[publishing web apps](#publishing-vm-web-apps-over-tailscale).
+
+A joined guest uses its own identity for Tailscale traffic. The tailnet
+policy applies even to destinations on the [Voom allowlist](#voom-guests).
+
+The example policy lets member-owned devices reach the VMs and lets the VMs
+reach only TCP port 443 on the NixOS host. If an existing grant such as
+`autogroup:member` to `*` already covers your devices, omit the first grant.
 
 ``` jsonc
 "tagOwners": {
@@ -1614,16 +1620,39 @@ VMs:
 },
 "grants": [
   { "src": ["autogroup:member"], "dst": ["tag:voom-vm"], "ip": ["*"] },
+  { "src": ["tag:voom-vm"], "dst": ["<host-tailscale-ip>"], "ip": ["tcp:443"] },
 ],
 "tests": [
-  { "src": "tag:voom-vm", "deny": ["tag:voom-vm:443"] },
+  {
+    "src": "tag:voom-vm",
+    "accept": ["<host-tailscale-ip>:443"],
+    "deny": ["tag:voom-vm:7780", "<host-tailscale-ip>:22"],
+  },
 ],
 ```
 
-The guest firewall is off, so every guest listener bound to all interfaces is
-reachable from the nodes the policy allows.
+The guest firewall is off by default on Linux and MacOS. Nodes allowed by
+the policy can connect directly to services bound to all interfaces. They
+can also reach published web apps through Caddy on the NixOS host.
+See [How Requests Reach a VM](#how-requests-reach-a-vm) for the addresses
+to use.
+
+For services such as databases, connect directly to the VM's MagicDNS name
+and service port, for example `<vm>:5432`. If the service listens only on
+loopback, run the following in the guest to make it reachable over Tailscale.
+
+``` bash
+sudo tailscale serve --bg --tcp=5432 tcp://127.0.0.1:5432
+```
+
+The forward persists across restarts. Run `sudo tailscale serve --tcp=5432 off`
+to remove it, or `tailscale serve status` to list forwards.
 
 To remove a VM from the tailnet, run `sudo tailscale logout` in the guest.
+If you rejoin it, restart the proxy so it picks up the current Tailscale IP.
+
+- Linux: `sudo systemctl restart tailnet-caddy-guest`
+- MacOS: `sudo launchctl kickstart -k system/org.nixos.tailnet-caddy-guest`
 
 ##### NVIDIA GPU in a VM
 
@@ -3173,21 +3202,17 @@ successful public Git request alone does not verify credential injection.
 
 #### Publishing VM Web Apps Over Tailscale
 
-The NixOS host can optionally publish Voom HTTP(S) forwards as HTTPS-only
-Tailscale subdomains, through Caddy. For example:
+Caddy on the NixOS host serves HTTPS for web apps in VMs tagged
+`tag:voom-vm`, even when the VMs run on other hosts.
+See [Join a VM to the Tailnet](#join-a-vm-to-the-tailnet).
 
 ``` text
 https://<vm>-<guest-port>.voom.example.com
 ```
 
-To set this up, create a DNS-only wildcard record in Cloudflare for your Voom
-publishing domain pointing at the Voom host's Tailscale IP. Do not enable
-Cloudflare proxying; the record should resolve directly to the host's Tailscale
-address. (This example uses _example.com_; substitute with a real domain that you
-control and manage DNS for via Cloudflare.)
-
-For a base domain of `voom.example.com`, create this record in the
-`example.com` zone:
+In Cloudflare, point a DNS-only wildcard record at the NixOS host's Tailscale
+IP. This example uses `voom.example.com` in the `example.com` zone. Substitute
+a domain whose DNS you manage in Cloudflare.
 
 ``` text
 Type: A
@@ -3197,11 +3222,9 @@ Proxy status: DNS only
 TTL: Auto
 ```
 
-Create a Cloudflare token scoped to the relevant domain with `Zone:Zone:Read`
-and `Zone:DNS:Edit` permissions, and store the token on the filesystem. The
-example below uses `/etc/caddy/cloudflare.env`; avoid `/run` (tmpfs, cleared on
-every reboot) unless a secrets manager is wired up to recreate the file on
-boot.
+Create a Cloudflare token for the zone with `Zone:Zone:Read` and
+`Zone:DNS:Edit` permissions. Store it in `/etc/caddy/cloudflare.env`. If you
+store it under `/run`, have your secrets manager recreate the file at boot.
 
 ``` bash
 sudo install -D -m 0600 -o root -g root /dev/null /etc/caddy/cloudflare.env
@@ -3214,8 +3237,8 @@ Use the following format for the `cloudflare.env` file:
 CLOUDFLARE_API_TOKEN=...
 ```
 
-Then enable declarative Caddy publishing in your system configuration
-repository's `host-info.nix`:
+Enable Caddy publishing in your system configuration repository's
+`host-info.nix`.
 
 ``` nix
 {
@@ -3239,44 +3262,85 @@ repository's `host-info.nix`:
 }
 ```
 
-The Caddy config is responsible for the wildcard TLS policy, private listener,
-and fallback 404. The sync script (`voom-caddy-sync`) replaces the dynamic
-route list under the `voom_routes` JSON `@id`. To manually run the sync script:
+The Caddy admin API exposes the list for `routes.<name>` as `<name>_routes`.
+The default `syncer = "tailnet"` adds routes to peers tagged `tag:voom-vm`.
+Use `syncer = "docker"` for [Docker apps](#publishing-docker-apps-over-tailscale)
+or `syncer = "none"` to manage the list manually.
+
+##### How Requests Reach a VM
+
+In `<vm>-<guest-port>.voom.example.com`, `<vm>` is the first label of the
+guest's MagicDNS name. The NixOS host terminates TLS with its wildcard
+certificate and forwards the request over Tailscale to the guest proxy on
+port 7780. The guest proxy sends it to the app on `<guest-port>`.
+
+The tailnet policy must allow the NixOS host to reach `tag:voom-vm` on TCP
+port 7780. The first example grant in [Join a VM to the
+Tailnet](#join-a-vm-to-the-tailnet) covers a member-owned host.
+
+`tailnet-caddy-peer-sync-voom.service` polls `tailscale status` every 10
+seconds. It builds `voom_routes` with an allowlist and a route for each
+`tag:voom-vm` peer with a Tailscale IPv4 address, including offline peers.
+After Caddy restarts, the next successful sync restores the list.
+
+Caddy allows requests to published VM apps from the host's Tailscale IPs
+and the Tailscale IPs of peers without `tag:voom-vm`. Caddy returns `403`
+for other source IPs.
+
+The allowlist reflects the last successful sync. Until the next update,
+a newly joined peer gets `403`, and an allowed peer that gains
+`tag:voom-vm` keeps its access. If a sync fails, Caddy keeps the routes
+and allowlist it already has.
+
+Preview the routes and allowlist on the host.
 
 ``` bash
-voom-caddy-sync --dry-run
-voom-caddy-sync
+tailnet-caddy-peer-sync-voom --dry-run
 ```
 
-Nix generates one sync command per `nixosTailnetCaddy.routes.<name>` entry,
-named after that route's `syncer` (see [Publishing Docker Apps Over
-Tailscale](#publishing-docker-apps-over-tailscale) for the other kind). Route
-IDs are derived as `<name>_routes`, so `routes.voom` owns `voom_routes`.
+In the guest, `tailnet-caddy-guest-sync` checks TCP listeners every two
+seconds using `/run/voom/ports.json` on Linux and `lsof` on MacOS. It skips
+ports 22 and 7780, `tailscaled` listeners, and loopback listeners in the
+guest's ephemeral port range. This keeps loopback apps that let the OS pick
+an ephemeral port off the published domain. To publish a loopback web app,
+bind it to a fixed port outside that range.
 
-This is implemented with two systemd units:
+The syncer probes the remaining listeners over HTTPS, then tries HTTP if
+HTTPS fails. It probes wildcard listeners at `127.0.0.1`, which cannot
+reach an IPv6-only wildcard listener. Any HTTP response, including `401`,
+`403`, and `404`, is enough for the syncer to add a route to the guest proxy.
+For HTTPS apps, the guest proxy skips upstream certificate verification.
 
-- `voom-caddy-sync.service` is a oneshot unit bound to Caddy. The dynamic route
-  list lives only in Caddy's running config, so anything that (re)loads the
-  declarative config, such as a reboot, `systemctl restart caddy`, or a
-  `nixos-rebuild` that changes Caddy's config, empties the state; the oneshot
-  re-runs the sync on every such event, so routes self-heal across restarts.
-- `voom-caddy-sync-watch.service` follows `voom events` and re-syncs when a VM
-  starts or stops and when an automatic forward is installed or removed.
+The table assumes the tailnet policy allows the connection and the guest
+has no extra port forwards. For direct access, connect over IPv4 or IPv6
+according to what the app listens on.
 
-Voom events are wake-up hints rather than a state replica, so every event
-triggers a full re-sync, with bursts (e.g. a booting VM installing one forward
-per port) coalesced into a single sync.
+| Listener | Port status | Through Caddy<br>`https://<vm>-<guest-port>.voom.example.com` | Direct to the VM<br>`<vm>:<guest-port>` |
+| --- | --- | --- | --- |
+| All interfaces (`0.0.0.0`, `::`) | Published | Yes | Yes |
+| All interfaces | Unpublished | No | Yes |
+| Loopback (`127.0.0.1`, `::1`) | Published | Yes | No |
+| Loopback | Unpublished | No | No |
 
-The default HTTP probe publishes any forward that returns an HTTP response,
-including non-2xx statuses such as `401`/`403`/`404` (auth-gated apps, or apps
-with no root route). A forward is only skipped if it does not answer within
-`--timeout` (default 1 second) or does not speak HTTP at all. Bump `--timeout`
-for slow-starting apps, or pass `--all-tcp` to publish every installed non-SSH
-TCP forward without probing.
+If both probes fail, the syncer retries after delays of 10, 20, and 40
+seconds. To trigger a fresh probe after the last retry, restart the syncer
+in the guest.
+
+- Linux: `sudo systemctl restart tailnet-caddy-guest-sync`
+- MacOS: `sudo launchctl kickstart -k system/org.nixos.tailnet-caddy-guest-sync`
+
+Alternatively, restart the app process. If it gets a new PID, the syncer
+probes the listener again.
+
+Preview the routes in the guest.
+
+``` bash
+tailnet-caddy-guest-sync --dry-run
+```
 
 ##### Operating and Troubleshooting
 
-Caddy logs to the systemd journal:
+On the NixOS host, Caddy logs to the systemd journal:
 
 ``` bash
 systemctl status caddy.service
@@ -3284,78 +3348,84 @@ journalctl -u caddy.service -b      # this boot
 journalctl -u caddy.service -f      # follow live
 ```
 
-On first start (and after editing the route domain) Caddy obtains the wildcard
-certificate via a Cloudflare DNS-01 challenge; watch the journal for
-`certificate obtained successfully`. If the service fails to start with an
-`API token '' appears invalid` error, inspect the environment file:
+On first start or after a domain change, Caddy obtains a wildcard certificate
+using a Cloudflare DNS-01 challenge. Look for
+`certificate obtained successfully` in the journal. If Caddy reports
+`API token '' appears invalid`, inspect the environment file.
 
 ``` bash
 sudo cat -A /etc/caddy/cloudflare.env
 ```
 
-This file must contain exactly `CLOUDFLARE_API_TOKEN=<token>`. Note that
-systemd's `EnvironmentFile` does not strip quotes (`CLOUDFLARE_API_TOKEN="..."`
-passes the quotes through to Caddy), so write the token bare. `cat -A` surfaces
-stray quotes, trailing whitespace, or `^M` (CRLF) line endings. After fixing
-the file, run:
-
+Use a plain `CLOUDFLARE_API_TOKEN=<token>` line. Check for typos, extra
+whitespace, or a `^M` at the end of the line. Restart Caddy after editing the
+file.
 
 ``` bash
 sudo systemctl restart caddy.service
 ```
 
-Confirm the seeded route target exists before syncing. This command should
-return an empty list (`[]`), until the first successful sync:
+On the NixOS host, inspect the routes loaded in Caddy. Before the syncer adds
+any routes, the list is empty (`[]`).
 
 ``` bash
 curl -s localhost:2019/id/voom_routes/routes | jq
 ```
 
-To sync and reach a published app from a machine on the tailnet:
+Test a published app from a machine on the tailnet.
 
 ``` bash
-voom-caddy-sync --dry-run    # preview the routes without patching Caddy
-voom-caddy-sync
 curl -v https://<vm>-<guest-port>.voom.example.com/
 ```
 
-A `no voom route` 404 served with a *valid* certificate means the request
-matched the wildcard, but the per-app route is not defined. Re-run the sync
-(also check both units), and inspect the synced routes:
+A `no voom route` 404 means Caddy matched the wildcard domain but has no
+route for the requested hostname. Check the VM name and confirm it has
+`tag:voom-vm`.
+
+A `source not allowed` 403 means the request's source IP is missing from
+Caddy's allowlist. If the client should have access, check whether it
+appears in the host's `tailscale status` and whether the syncer logged
+an error.
+
+For either response, run these checks on the NixOS host.
 
 ``` bash
-systemctl status voom-caddy-sync.service
-journalctl -u voom-caddy-sync-watch.service -f
-curl -s localhost:2019/id/voom_routes/routes | jq 'length'
+systemctl status tailnet-caddy-peer-sync-voom.service
+journalctl -u tailnet-caddy-peer-sync-voom.service -f
+tailscale status
 ```
 
-If a published host is unreachable from another tailnet machine while working
-locally, the problem is likely client-side routing. Because the published names
-resolve to a Tailscale IP (`100.64.0.0/10`), a VPN or other overlay on the
-client that claims that CGNAT range can hijack the route. (`tailscale ping`
-bypasses the OS routing table, but `curl` will likely fail fast with
-`connection refused`.) Confirm with `route -n get <ip>` (MacOS) or `ip route
-get <ip>` (Linux); if it's a client-side routing issue, disconnect from VPN or
-exclude `100.64.0.0/10` from its routes.
+A `no published port` 404 means the guest proxy has no route for the requested
+port. Check that the app is listening and answers HTTP or HTTPS. For guest
+logs, use `journalctl -u tailnet-caddy-guest-sync.service` on Linux or read
+`/var/log/tailnet-caddy-guest.log` on MacOS.
+
+If the host returns a `502`, check that the VM and its proxy are running and
+that the tailnet policy allows the host to reach port 7780. In the guest,
+check the proxy with `systemctl status tailnet-caddy-guest` on Linux or
+`sudo launchctl print system/org.nixos.tailnet-caddy-guest` on MacOS.
+
+If a published app works on the host but fails on a tailnet client, check
+how the client routes the host's Tailscale IP. Run `route -n get <ip>` on
+MacOS or `ip route get <ip>` on Linux. If another VPN claims the route,
+disconnect it or exclude `100.64.0.0/10` from its routes.
 
 #### Publishing Docker Apps Over Tailscale
 
-The same Caddy instance can publish local Docker containers as HTTPS-only
-Tailscale subdomains, driven entirely by container labels:
+Caddy can also serve HTTPS for local Docker containers with a `caddy.host`
+label.
 
 ``` text
 https://<caddy.host>.homelab.example.com
 ```
 
-This reuses the Cloudflare token and environment file described in [Publishing
-VM Web Apps Over Tailscale](#publishing-vm-web-apps-over-tailscale), with a
-single token covering both routes, provided that both domains live in the same
-zone. This requires a second DNS-only wildcard record; for example, for a base
-domain of `homelab.example.com`:
+Reuse the Cloudflare token if both domains are in the same zone. Add a
+DNS-only wildcard record for the Docker domain. For `homelab.example.com`,
+add this record to the `example.com` zone.
 
 ``` text
 Type: A
-Name: *.lab
+Name: *.homelab
 Content: <tailscale-ip>
 Proxy status: DNS only
 TTL: Auto
@@ -3381,12 +3451,8 @@ repository's `host-info.nix`:
 }
 ```
 
-`syncer = "voom"` (the default) publishes Voom forwards, `syncer = "docker"`
-publishes Docker containers, and `syncer = "none"` generates no syncer (leaving
-the route empty/available for ad-hoc `PATCH`es).
-
-The Docker/ Compose stack does not need to be aware of the published domain.
-Compose files can live anywhere, with containers opting in with labels:
+Set `caddy.host` on each service you want to publish. Caddy appends the
+configured domain to the label value.
 
 ``` yaml
 services:
@@ -3446,14 +3512,9 @@ which containers collided and which upstream won, then publishes one of them.
 The winner is chosen by ordering on the dial address, so it does not change
 from sync to sync.
 
-This is implemented with two systemd units:
-
-- `docker-caddy-sync-<name>.service` is a oneshot bound to Caddy, re-seeding
-  the routes whenever Caddy starts or restarts (as with Voom, the dynamic route
-  list does not survive a restart).
-- `docker-caddy-sync-<name>-watch.service` follows `docker events` and re-syncs
-  on container start and stop, exactly as the Voom watcher follows `voom
-  events`.
+`docker-caddy-sync-<name>.service` loads the routes each time Caddy starts.
+`docker-caddy-sync-<name>-watch.service` updates them when containers start or
+stop.
 
 ##### Operating and Troubleshooting
 
