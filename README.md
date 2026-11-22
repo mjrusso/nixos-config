@@ -1577,6 +1577,54 @@ normal use the guest architecture matches the host architecture: use
 or `vm-aarch64-linux-raw` for an Apple Silicon Darwin host running a vfkit
 `raw` image.
 
+##### Join a Linux VM to the Tailnet
+
+To let VMs join the tailnet, add this module to the `extraModules` of the VM
+targets and of the `qcow` and `raw` image outputs in your system configuration
+repository's `flake.nix`, then update the running VMs with `voom-update`:
+
+``` nix
+{ services.tailscale.enable = true; }
+```
+
+Leave it out of the `docker` and `lxc` image outputs, which have no
+`/dev/net/tun`. The
+setting applies to every VM built from those targets. Each VM then runs
+`tailscaled`, but it stays logged out until you join that VM yourself, so VMs
+that never join stay off the tailnet. To join one, run this in the guest:
+
+``` bash
+sudo tailscale up --advertise-tags=tag:voom-vm --accept-dns=false
+```
+
+Open the printed URL and approve the device. The node takes the guest's
+hostname, which Voom sets from the VM name. The login requires you to be an
+owner of `tag:voom-vm`. The node is owned by the tag rather than your user, so
+its key does not expire. Its state lives in `/var/lib/tailscale` and survives
+restarts. `--accept-dns=false` keeps the guest's resolver unchanged.
+
+A joined VM has its own tailnet identity. Voom's block on tailnet addresses does
+not apply to traffic through that identity, so the tailnet policy controls what
+the VM can reach. Grant `tag:voom-vm` no access to other nodes, including other
+VMs:
+
+``` jsonc
+"tagOwners": {
+  "tag:voom-vm": ["autogroup:admin"],
+},
+"grants": [
+  { "src": ["autogroup:member"], "dst": ["tag:voom-vm"], "ip": ["*"] },
+],
+"tests": [
+  { "src": "tag:voom-vm", "deny": ["tag:voom-vm:443"] },
+],
+```
+
+The guest firewall is off, so every guest listener bound to all interfaces is
+reachable from the nodes the policy allows.
+
+To remove a VM from the tailnet, run `sudo tailscale logout` in the guest.
+
 ##### NVIDIA GPU in a VM
 
 A VM can have exclusive use of a host NVIDIA GPU, for example for CUDA
