@@ -103,7 +103,7 @@ in
           --argjson first "$ephemeral_first" \
           --argjson last "$ephemeral_last" '
             map(select(
-              .process != "tailscaled"
+              (.process | IN("tailscaled", ".tailscaled-wrapped", ".tailscaled-wra") | not)
               and (.port | IN($skip[]) | not)
               and ((.addr | test("^(127\\.|::1$)")) and .port >= $first and .port <= $last | not)
             ))
