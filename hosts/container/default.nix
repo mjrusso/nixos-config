@@ -33,15 +33,14 @@ let
                   return s
                 }
                 function emit(local, proc, addr, port, pid, name, n) {
-                  if (local ~ /^\[/) {
-                    n = split(local, parts, "]:")
-                    addr = substr(parts[1], 2)
-                    port = parts[2]
-                  } else {
-                    n = split(local, parts, ":")
-                    port = parts[n]
-                    addr = substr(local, 1, length(local) - length(port) - 1)
-                  }
+                  n = split(local, parts, ":")
+                  port = parts[n]
+                  if (port !~ /^[0-9]+$/) return
+                  addr = substr(local, 1, length(local) - length(port) - 1)
+                  # ss appends an interface to scoped addresses, such as
+                  # 100.64.0.1%tailscale0 or [fd7a::1]%tailscale0.
+                  sub(/%[^%]*$/, "", addr)
+                  gsub(/^\[|\]$/, "", addr)
                   if (addr == "") addr = "*"
 
                   pid = ""
