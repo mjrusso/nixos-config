@@ -25,6 +25,9 @@ let
       listen = "unix/${adminSocket}";
       config.persist = false;
     };
+    # The syncer polls the admin API, which logs every request. This also drops
+    # Caddy's log of rejected updates, so the syncer logs the error response.
+    logging.logs.default.exclude = [ "admin.api" ];
     apps.http.servers.tailnet = {
       listen = [ "{env.TAILNET_IP}:${toString port}" ];
       automatic_https.disable = true;
@@ -165,15 +168,17 @@ in
         if [[ -S "$socket" ]]; then
           if ! build_routes; then
             log "could not list listeners"
-          elif ! have="$(curl -fsS --unix-socket "$socket" "$admin_url" | jq -cS .)"; then
-            log "could not read Caddy routes"
+          elif ! response="$(curl -sS --fail-with-body --unix-socket "$socket" "$admin_url")"; then
+            log "could not read Caddy routes: $response"
+          elif ! have="$(jq -cS . <<<"$response")"; then
+            log "could not parse Caddy routes"
           elif [[ "$want" != "$have" ]]; then
-            if curl -fsS --unix-socket "$socket" -X PATCH \
+            if response="$(curl -sS --fail-with-body --unix-socket "$socket" -X PATCH \
               -H 'Content-Type: application/json' \
-              --data-binary "$want" "$admin_url" >/dev/null; then
+              --data-binary "$want" "$admin_url")"; then
               log "published $(jq length <<<"$want") port(s)"
             else
-              log "could not patch Caddy routes"
+              log "could not patch Caddy routes: $response"
             fi
           fi
         fi

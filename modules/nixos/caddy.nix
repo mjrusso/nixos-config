@@ -238,6 +238,7 @@ let
           local claimed
           local containers
           local routes
+          local response
           local status
           local count
 
@@ -374,10 +375,13 @@ let
               ;;
           esac
 
-          curl -fsS -X PATCH \
+          if ! response="$(curl -sS --fail-with-body -X PATCH \
             -H 'Content-Type: application/json' \
             --data-binary "$routes" \
-            "$admin_url/id/$route_id/routes" >/dev/null
+            "$admin_url/id/$route_id/routes")"; then
+            log "could not patch Caddy route target @id=$route_id: $response"
+            return 1
+          fi
 
           count="$(jq 'length' <<<"$routes")"
           log "synced $count Caddy route(s) from Docker labels"
@@ -482,14 +486,17 @@ let
         while :; do
           if ! want="$(peer_routes)"; then
             log "could not read tailscale status"
-          elif ! have="$(curl -fsS "$admin_url" | jq -cS .)"; then
-            log "could not read Caddy routes at $admin_url"
+          elif ! response="$(curl -sS --fail-with-body "$admin_url")"; then
+            log "could not read Caddy routes at $admin_url: $response"
+          elif ! have="$(jq -cS . <<<"$response")"; then
+            log "could not parse Caddy routes at $admin_url"
           elif [[ "$want" != "$have" ]]; then
-            if curl -fsS -X PATCH -H 'Content-Type: application/json' \
-              --data-binary "$want" "$admin_url" >/dev/null; then
+            if response="$(curl -sS --fail-with-body -X PATCH \
+              -H 'Content-Type: application/json' \
+              --data-binary "$want" "$admin_url")"; then
               log "synced $(jq length <<<"$want") tailnet peer route(s)"
             else
-              log "could not patch Caddy routes at $admin_url"
+              log "could not patch Caddy routes at $admin_url: $response"
             fi
           fi
           sleep 10
@@ -669,6 +676,10 @@ in {
         };
       settings = {
         admin.listen = "localhost:2019";
+        # The peer syncers poll the admin API, which logs every request. This
+        # also drops Caddy's log of rejected updates, so the syncers log
+        # Caddy's error response instead.
+        logging.logs.default.exclude = [ "admin.api" ];
         apps = {
           tls.automation.policies = map mkTlsPolicy (lib.attrValues cfg.routes);
           http.servers.tailnet = {
