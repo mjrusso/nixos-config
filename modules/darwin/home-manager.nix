@@ -43,7 +43,10 @@ in {
                      public.shell-script public.python-script public.json \
                      public.yaml public.xml net.daringfireball.markdown \
                      .md .toml; do
-              run ${pkgs.duti}/bin/duti -s com.coteditor.CotEditor "$t" all
+              if ! run ${pkgs.duti}/bin/duti -s com.coteditor.CotEditor "$t" all; then
+                warnEcho "Could not set CotEditor as the default editor. It needs a desktop login."
+                break
+              fi
             done
           fi
         '';

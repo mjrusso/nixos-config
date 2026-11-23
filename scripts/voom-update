@@ -243,6 +243,10 @@ for name in "${NAMES[@]}"; do
     continue
   fi
   echo "==> $name"
+  if [ "$kind" = darwin ] && [ "$DRY_RUN" -eq 0 ] &&
+     [ "$(voom ssh "$name" -- stat -f %Su /dev/console 2>/dev/null)" = root ]; then
+    echo "    warning: no one is logged in to $name's desktop; setting default apps and saving Git credentials may fail" >&2
+  fi
 
   failed_phases=()
   if [ "$DO_NIXOS" -eq 1 ] && [ "$kind" = nixos ]; then
