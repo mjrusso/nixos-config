@@ -235,6 +235,11 @@ with pkgs; [
 
   (llmAgent "claude" "claude-code" llmAgentPolicy.claudeArguments)
   (llmAgent "codex" "codex" llmAgentPolicy.codexArguments)
+  (pkgs.writeShellScriptBin "terminal-browser" ''
+    export DO_NOT_TRACK=1
+    export TERMINAL_BROWSER_NO_TELEMETRY=1
+    exec nix run "${llmAgentsFlake}#terminal-browser" -- "$@"
+  '')
 
   nixos-rebuild
 
