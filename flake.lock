@@ -333,11 +333,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1795519077,
-        "narHash": "sha256-MZ2ljE/i4xiHrtROcg+/1w5VNt9/UN10tjJ/CL9ndgk=",
+        "lastModified": 1795520145,
+        "narHash": "sha256-TmZDTrBTct49MgK5IgCSvQ5noWHYfTUN1vm0IfnKjjE=",
         "owner": "mjrusso",
         "repo": "voom",
-        "rev": "f1771a6da318d1e1c1b78c2859260c40cbaad506",
+        "rev": "cbf1ec0db50d1b5a0512db7a7d78e56a23cf9b6a",
         "type": "github"
       },
       "original": {
