@@ -433,9 +433,7 @@ let
         }
 
         # Keep offline peers so Caddy returns 502 for an unreachable guest.
-        # The policy lets tagged peers reach this host on port 443, so the first
-        # route refuses every source except this host and untagged peers. That
-        # includes a guest that joined since the last poll.
+        # The tailnet policy allows tagged guests to connect to port 443.
         peer_routes() {
           tailscale status --json | jq -cS \
             --arg tag ${lib.escapeShellArg peerTag} \
@@ -444,37 +442,43 @@ let
               def tagged: (.Tags // []) | index($tag) != null;
               [ (.Peer // {})[] ] as $peers
               | ([ (.Self.TailscaleIPs // [])[], ($peers[] | select(tagged | not) | .TailscaleIPs[]) ]
-                  | sort) as $allowed
-              | [ {
-                  match: [ { not: [ { remote_ip: { ranges: $allowed } } ] } ],
+                  | sort) as $allowedIPs
+              | {
                   handle: [ {
                     handler: "static_response",
                     status_code: 403,
                     body: "source not allowed\n"
                   } ]
-                } ]
-              + ([
-                  $peers[]
-                  | select(tagged)
-                  | (.DNSName | split(".")[0]) as $name
+                } as $deny
+              | ([
+                  $peers[] | select(tagged)
                   | (.TailscaleIPs | map(select(test("^[0-9.]+$"))) | first) as $ip
                   | select($ip != null)
-                  | {
+                  | { name: (.DNSName | split(".")[0]), ip: $ip, sources: .TailscaleIPs }
+                ] | sort_by(.name) | map({
                       match: [ {
                         vars_regexp: {
                           "{http.request.host}": {
-                            pattern: ("^" + $name + "-[0-9]+\\." + $domain + "$")
+                            pattern: ("^" + .name + "-[0-9]+\\." + $domain + "$")
                           }
                         }
                       } ],
                       handle: [ {
-                        handler: "reverse_proxy",
-                        stream_close_delay: "1h",
-                        upstreams: [ { dial: ($ip + ":" + $port) } ]
+                        handler: "subroute",
+                        routes: [
+                          {
+                            match: [ { remote_ip: { ranges: ($allowedIPs + .sources) } } ],
+                            handle: [ {
+                              handler: "reverse_proxy",
+                              stream_close_delay: "1h",
+                              upstreams: [ { dial: (.ip + ":" + $port) } ]
+                            } ]
+                          },
+                          $deny
+                        ]
                       } ]
-                    }
-                ]
-                | sort_by(.match[0].vars_regexp[].pattern))'
+                }))
+              + [ $deny + { match: [ { not: [ { remote_ip: { ranges: $allowedIPs } } ] } ] } ]'
         }
 
         if [[ "$dry_run" -eq 1 ]]; then

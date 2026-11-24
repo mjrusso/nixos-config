@@ -3280,13 +3280,14 @@ port 7780. The first example grant in [Join a VM to the
 Tailnet](#join-a-vm-to-the-tailnet) covers a member-owned host.
 
 `tailnet-caddy-peer-sync-voom.service` polls `tailscale status` every 10
-seconds. It builds `voom_routes` with an allowlist and a route for each
+seconds. It builds `voom_routes` with access rules and a route for each
 `tag:voom-vm` peer with a Tailscale IPv4 address, including offline peers.
 After Caddy restarts, the next successful sync restores the list.
 
 Caddy allows requests to published VM apps from the host's Tailscale IPs
-and the Tailscale IPs of peers without `tag:voom-vm`. Caddy returns `403`
-for other source IPs.
+and the Tailscale IPs of peers without `tag:voom-vm`. Each tagged VM can
+reach all of its own published HTTPS URLs. Caddy matches the VM's Tailscale
+source IP and hostname together and returns `403` for requests between VMs.
 
 The allowlist reflects the last successful sync. Until the next update,
 a newly joined peer gets `403`, and an allowed peer that gains
