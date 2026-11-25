@@ -16,6 +16,37 @@ let
     pkgs.writeShellScriptBin binary ''
       exec nix run "${llmAgentsFlake}#${attribute}" -- ${escapedArguments} "$@"
     '';
+
+  ladybirdLauncher = pkgs.writeShellScriptBin "ladybird" ''
+    if [[ ''${1-} == --split ]]; then
+      case "''${2-}" in
+        left|right|above|below) direction=$2 ;;
+        *)
+          echo "Usage: ladybird --split {left|right|above|below} [URL]" >&2
+          exit 2
+          ;;
+      esac
+      shift 2
+      if [[ -z ''${REX_SESSION-} || -z ''${REX_BLOCK-} ]]; then
+        echo "ladybird --split requires a Rex pane" >&2
+        exit 2
+      fi
+      exec "''${REX_BIN_DIR:+$REX_BIN_DIR/}rex" split -s "$REX_SESSION" -b "$REX_BLOCK" \
+        --split "$direction" --label Ladybird -c "$PWD" -- "$0" "$@"
+    fi
+
+    browser=${pkgs.lib.getExe pkgs.ladybird}
+    if [[ -t 0 && -t 1 ]]; then
+      for arg in "$@"; do
+        case "$arg" in
+          --help|--version|--headless|--headless=*) exec "$browser" "$@" ;;
+          --) break ;;
+        esac
+      done
+      exec "$browser" --headless=terminal "$@"
+    fi
+    exec "$browser" "$@"
+  '';
 in
 with pkgs; [
   # General packages for development and system management
@@ -128,6 +159,22 @@ with pkgs; [
   tree
   tmux
   agent-browser
+  (pkgs.symlinkJoin {
+    name = "ladybird-with-launcher";
+    paths = [ pkgs.ladybird ];
+    postBuild =
+      pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+        unlink "$out/bin/Ladybird"
+      ''
+      + ''
+        for executable in js wasm .js-wrapped .wasm-wrapped; do
+          if [[ -L "$out/bin/$executable" ]]; then
+            unlink "$out/bin/$executable"
+          fi
+        done
+        ln -s "${ladybirdLauncher}/bin/ladybird" "$out/bin/ladybird"
+      '';
+  })
   zoxide
   unrar
   unzip
