@@ -97,7 +97,36 @@ rex.action{
   end,
 }
 
+rex.action{
+  name = "open_ladybird",
+  title = "Open Ladybird…",
+  args = { url = "string?" },
+  run = function(ctx, args)
+    local url = args.url or rex.ui.input{
+      title = "Open in Ladybird",
+      placeholder = "https://example.org",
+      confirm = "Open",
+    }
+    if url == nil or url:match("^%s*$") then return end
+
+    local split, err = rex.session.new_split{
+      anchor_id = ctx.block_id,
+      direction = "horizontal",
+      side = "after",
+      focus = true,
+      layout = rex.layout.block{
+        flavor = "com.superlogical.terminal.shell",
+        label = "Ladybird",
+        options = { command = { "ladybird", "--", url }, cwd = program_cwd(ctx.block_id) },
+      },
+    }
+    if err ~= nil then error(err, 0) end
+    return split
+  end,
+}
+
 -- `e` and `et` are fish functions.
 bind("e", "popup", { command = { "fish", "-c", "e" }, w = 0.9, h = 0.9 })
 bind("t", "popup", { command = { "fish" }, w = 0.85, h = 0.75 })
 bind("x", "edit_scrollback")
+bind("b", "open_ladybird")
