@@ -16,6 +16,7 @@ end
 bind("ctrl+,", "pane.send_key", { key = "ctrl+," })
 
 -- Sessions
+rex.bind("cmd+n", "session.new.on_host")
 bind("shift+c", "session.new")
 bind("shift+w", "session.rename")
 bind("shift+4", "session.rename")
