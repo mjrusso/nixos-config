@@ -3,7 +3,6 @@
 let
   user = userInfo.user;
   homeDir = "/Users/${user}";
-  sharedFiles = import ../shared/files.nix { inherit user config pkgs homeDir; };
   additionalFiles = import ./files.nix { inherit user config pkgs homeDir; };
 
 in {
@@ -30,7 +29,10 @@ in {
           EDITOR = "ec";
           LIMA_WORKDIR = "/home/${user}.linux";
         };
-        file = lib.mkMerge [ sharedFiles additionalFiles ];
+        file = lib.mkMerge [
+          (import ../shared/files.nix { inherit user config pkgs homeDir; })
+          additionalFiles
+        ];
         stateVersion = "25.11";
 
         # Open text files in CotEditor instead of Xcode (or whatever app

@@ -12,6 +12,8 @@ let
 
   mergeArgs = base: extra: extra // base;
 
+  sharedHomeModules = [ ../modules/shared/serve-preview.nix ];
+
   mkHomeManagerSettings =
     {
       userInfo,
@@ -21,7 +23,7 @@ let
     {
       useGlobalPkgs = true;
       useUserPackages = true;
-      sharedModules = extraHomeModules;
+      sharedModules = sharedHomeModules ++ extraHomeModules;
       extraSpecialArgs = mergeArgs { inherit userInfo; } extraSpecialArgs;
     };
 
@@ -165,7 +167,7 @@ in
         {
           home-manager = {
             useGlobalPkgs = true;
-            sharedModules = extraHomeModules;
+            sharedModules = sharedHomeModules ++ extraHomeModules;
             extraSpecialArgs = mergeArgs { inherit userInfo; } extraSpecialArgs;
           };
         }
@@ -226,7 +228,7 @@ in
         // (mergeArgs {
           inherit userInfo;
         } extraSpecialArgs);
-      modules = [ ../hosts/linux ] ++ extraHomeModules ++ extraModules;
+      modules = [ ../hosts/linux ] ++ sharedHomeModules ++ extraHomeModules ++ extraModules;
     };
 
   mkWslConfiguration =

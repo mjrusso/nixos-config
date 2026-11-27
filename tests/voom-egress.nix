@@ -57,6 +57,7 @@ let
       home-manager = {
         useGlobalPkgs = true;
         useUserPackages = true;
+        sharedModules = [ ../modules/shared/serve-preview.nix ];
         extraSpecialArgs = { inherit userInfo; };
         users.operator = import ../modules/container/home-manager.nix;
       };
